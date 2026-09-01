@@ -149,7 +149,9 @@ function prepare() {
     );
   }
   if (decision.shouldRepair && existingJob && !operatorOverride) {
-    if (!issueImplementationJobNeedsRefresh(previousAudit, reportMarkdown)) {
+    const blockerRecheckDue =
+      previousAudit?.frontmatter.decision === "not_eligible" && intakeAuditRetryDue(previousAudit);
+    if (!blockerRecheckDue && !issueImplementationJobNeedsRefresh(previousAudit, reportMarkdown)) {
       recoverExistingJob = intakeAuditAwaitsWorkerDispatch(previousAudit);
       if (!recoverExistingJob && workerDispatched) {
         try {
