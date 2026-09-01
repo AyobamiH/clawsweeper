@@ -16,6 +16,8 @@ import {
 } from "../dist/clawsweeper.js";
 import { tmpPrefix, withMockGh, workPlanCandidateReport } from "./helpers.ts";
 
+const WORKFLOW_REPO = "openclaw/clawsweeper";
+
 function failedReviewReport(overrides = {}) {
   return `${workPlanCandidateReport({
     repository: "openclaw/openclaw",
@@ -94,7 +96,7 @@ if (path.endsWith("/issues/${issue.number}")) {
   console.log(${JSON.stringify(JSON.stringify(issue))});
   process.exit(0);
 }
-if (path === "repos/openclaw/clawsweeper") {
+if (path === "repos/${WORKFLOW_REPO}") {
   console.log("main");
   process.exit(0);
 }
@@ -121,6 +123,8 @@ function failedIssueRetryArgs(
     String(fixture.number),
     "--workflow-ref",
     "main",
+    "--workflow-repo",
+    WORKFLOW_REPO,
     "--report-path",
     fixture.reportPath,
     ...extraArgs,
@@ -158,7 +162,7 @@ async function runFailedIssueRetryAtDispatchDeadline(
     if (endpoint?.startsWith(`repos/openclaw/openclaw/issues/${fixture.number}/comments`)) {
       return JSON.stringify(args.includes("--slurp") ? [[]] : []);
     }
-    assert.equal(endpoint, "repos/openclaw/clawsweeper");
+    assert.equal(endpoint, `repos/${WORKFLOW_REPO}`);
     return "main";
   });
   const dispatch = t.mock.method(
@@ -166,7 +170,7 @@ async function runFailedIssueRetryAtDispatchDeadline(
     "spawnSync",
     (command: string, args: string[], options: { timeout?: number }): SpawnSyncReturns<string> => {
       assert.equal(command, "gh");
-      assert.ok(args.includes("repos/openclaw/clawsweeper/dispatches"));
+      assert.ok(args.includes(`repos/${WORKFLOW_REPO}/dispatches`));
       assert.ok(args.includes("POST"));
       assert.ok(
         args.includes(`client_payload[expected_source_revision]=${fixture.sourceRevision}`),
@@ -623,7 +627,7 @@ if (path.endsWith("/issues/4343")) {
   console.log(${JSON.stringify(JSON.stringify(issue))});
   process.exit(0);
 }
-if (path === "repos/openclaw/clawsweeper") {
+if (path === "repos/${WORKFLOW_REPO}") {
   console.log("main");
   process.exit(0);
 }
@@ -647,6 +651,8 @@ process.exit(1);
         "4343",
         "--workflow-ref",
         "test-branch",
+        "--workflow-repo",
+        WORKFLOW_REPO,
         "--report-path",
         reportPath,
       ]);
@@ -672,6 +678,8 @@ process.exit(1);
         "4343",
         "--workflow-ref",
         "main",
+        "--workflow-repo",
+        WORKFLOW_REPO,
         "--report-path",
         reportPath,
       ]);
@@ -687,7 +695,7 @@ process.exit(1);
     assert.equal(report[0]?.revisionKind, "item_source_revision");
     assert.equal(report[0]?.revision, sourceRevision);
     const dispatch = JSON.parse(readFileSync(dispatchPath, "utf8")) as string[];
-    assert.ok(dispatch.includes("repos/openclaw/clawsweeper/dispatches"));
+    assert.ok(dispatch.includes(`repos/${WORKFLOW_REPO}/dispatches`));
     assert.ok(dispatch.includes("event_type=clawsweeper_target_sweep"));
     assert.ok(dispatch.includes(`client_payload[expected_source_revision]=${sourceRevision}`));
     assert.ok(dispatch.includes("client_payload[source_revision_requeue_count]=0"));
@@ -859,7 +867,7 @@ if (issueMatch && issues[issueMatch[1]]) {
   console.log(JSON.stringify(issues[issueMatch[1]]));
   process.exit(0);
 }
-if (path === "repos/openclaw/clawsweeper") {
+if (path === "repos/${WORKFLOW_REPO}") {
   console.log("main");
   process.exit(0);
 }
@@ -886,6 +894,8 @@ process.exit(1);
         "1",
         "--workflow-ref",
         "main",
+        "--workflow-repo",
+        WORKFLOW_REPO,
         "--report-path",
         first.reportPath,
       ]);
@@ -1117,6 +1127,8 @@ process.exit(1);
         "2",
         "--cooldown-minutes",
         "45",
+        "--workflow-repo",
+        WORKFLOW_REPO,
         "--report-path",
         reportPath,
       ]);
