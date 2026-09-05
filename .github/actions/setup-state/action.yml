@@ -37,10 +37,14 @@ inputs:
     description: Check out jobs/results/notifications/report state from git.
     required: false
     default: "true"
+  state-repository:
+    description: Repository containing remaining git-backed operational state.
+    required: false
+    default: AyobamiH/clawsweeper-state
   coordinator-url:
     description: Durable FIFO coordinator used before a git-backed state mutation.
     required: false
-    default: https://clawsweeper.openclaw.ai
+    default: ""
   coordinator-class:
     description: Durable state-writer scheduling class
     required: false
@@ -48,7 +52,7 @@ inputs:
   records-url:
     description: Canonical Worker base URL.
     required: false
-    default: https://clawsweeper.openclaw.ai
+    default: ""
   records-repo-slugs:
     description: Optional comma/newline-separated record repository slugs.
     required: false
@@ -72,7 +76,7 @@ runs:
       if: ${{ inputs.hydrate-git-state == 'true' && inputs.sparse-checkout == '' }}
       uses: actions/checkout@v7
       with:
-        repository: openclaw/clawsweeper-state
+        repository: ${{ inputs.state-repository }}
         ref: state
         path: ${{ inputs.state-path }}
         token: ${{ inputs.token }}
@@ -91,7 +95,7 @@ runs:
       if: ${{ inputs.hydrate-git-state == 'true' && inputs.sparse-checkout != '' }}
       uses: actions/checkout@v7
       with:
-        repository: openclaw/clawsweeper-state
+        repository: ${{ inputs.state-repository }}
         ref: state
         path: ${{ inputs.state-path }}
         token: ${{ inputs.token }}

@@ -61,8 +61,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.repo_slug }}
           records-item-number: ${{ steps.target.outputs.item }}
@@ -113,7 +113,7 @@ jobs:
         env:
           CLAWSWEEPER_CANONICAL_RECORD_BASELINE_DIR: ${{ steps.baseline.outputs.path }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           REPO_SLUG: ${{ steps.target.outputs.repo_slug }}
           ITEM_NUMBER: ${{ steps.target.outputs.item }}
         run: |

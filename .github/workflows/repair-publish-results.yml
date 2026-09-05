@@ -24,7 +24,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
 
 concurrency:
   group: clawsweeper-repair-publish-results
@@ -109,8 +109,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           coordinator-class: publication_batch
           hydrate-state-blobs: "false"
@@ -268,7 +268,7 @@ jobs:
           CLAWSWEEPER_OPENCLAW_HOOK_TOKEN: ${{ secrets.CLAWSWEEPER_OPENCLAW_HOOK_TOKEN }}
           CLAWSWEEPER_OPENCLAW_AGENT_ID: ${{ vars.CLAWSWEEPER_OPENCLAW_AGENT_ID || 'clawsweeper' }}
           CLAWSWEEPER_DISCORD_TARGET: ${{ vars.CLAWSWEEPER_DISCORD_TARGET }}
-          CLAWSWEEPER_STATUS_INGEST_URL: https://clawsweeper.openclaw.ai/api/events
+          CLAWSWEEPER_STATUS_INGEST_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}/api/events
           CLAWSWEEPER_STATUS_INGEST_TOKEN: ${{ secrets.CLAWSWEEPER_STATUS_INGEST_TOKEN }}
         run: |
           set -euo pipefail

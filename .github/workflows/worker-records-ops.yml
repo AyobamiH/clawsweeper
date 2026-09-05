@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  CLAWSWEEPER_RECORDS_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+  CLAWSWEEPER_RECORDS_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
 
 jobs:
   snapshot:

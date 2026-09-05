@@ -227,7 +227,7 @@ env:
   CLAWSWEEPER_AUTHOR_PR_BUDGET: ${{ vars.CLAWSWEEPER_AUTHOR_PR_BUDGET || '15' }}
   CLAWSWEEPER_AUTHOR_PR_BUDGET_MAX_CLOSES_PER_RUN: ${{ vars.CLAWSWEEPER_AUTHOR_PR_BUDGET_MAX_CLOSES_PER_RUN || '5' }}
   CLAWSWEEPER_IDEA_REVIVAL_REACTIONS: ${{ vars.CLAWSWEEPER_IDEA_REVIVAL_REACTIONS || '5' }}
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_MODEL: internal
   CLAWSWEEPER_RUNNER: ${{ vars.CLAWSWEEPER_RUNNER || 'codex' }}
   CLAWSWEEPER_OPENCLAW_MODEL: ${{ secrets.CLAWSWEEPER_OPENCLAW_MODEL }}
@@ -262,7 +262,7 @@ jobs:
       - name: Enqueue legacy event through the durable control plane
         env:
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -458,7 +458,7 @@ jobs:
           ITEM_KEY: ${{ github.event.client_payload.queue_claim.item_key || github.event.client_payload.item_key }}
           QUEUE_LEASE_ID: ${{ github.event.client_payload.queue_lease_id }}
           QUEUE_LEASE_REVISION: ${{ github.event.client_payload.queue_claim.lease_revision || github.event.client_payload.lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -1031,7 +1031,7 @@ jobs:
           EXACT_REVIEW_LEASE_REVISION: ${{ steps.claim-exact-review-queue.outputs.lease_revision }}
           EXACT_REVIEW_CLAIM_GENERATION: ${{ steps.claim-exact-review-queue.outputs.claim_generation }}
           EXACT_REVIEW_SOURCE_HEAD_SHA: ${{ fromJSON(steps.claim-exact-review-queue.outputs.decision).sourceHeadSha || '' }}
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN"
@@ -1142,7 +1142,7 @@ jobs:
           EXACT_REVIEW_LEASE_REVISION: ${{ steps.claim-exact-review-queue.outputs.lease_revision }}
           EXACT_REVIEW_CLAIM_GENERATION: ${{ steps.claim-exact-review-queue.outputs.claim_generation }}
           EXACT_REVIEW_SOURCE_HEAD_SHA: ${{ fromJSON(steps.claim-exact-review-queue.outputs.decision).sourceHeadSha || '' }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           REVIEW_LEASE_OWNER: ${{ steps.reserve-exact-review-lease.outputs.owner }}
           REVIEW_LEASE_COMMENT_ID: ${{ steps.reserve-exact-review-lease.outputs.comment_id }}
           SOURCE_ACTION: ${{ fromJSON(steps.claim-exact-review-queue.outputs.decision).sourceAction || '' }}
@@ -1398,8 +1398,8 @@ jobs:
         if: ${{ steps.claim-exact-review-queue.outputs.claimed == 'true' && steps.create-exact-review-bundle.outcome == 'success' && steps.live-item.outputs.proceed == 'true' && (vars.EXACT_REVIEW_DIRECT_PUBLICATION_ENABLED || '1') == '1' }}
         id: direct-setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           records-item-number: ${{ steps.target.outputs.item_number }}
@@ -1432,7 +1432,7 @@ jobs:
         continue-on-error: true
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           CLAWSWEEPER_PUBLIC_GH_TOKEN: ${{ steps.target.outputs.target_repo == 'openclaw/openclaw' && github.token || '' }}
           REPO_TOKEN: ${{ github.token }}
@@ -1456,7 +1456,7 @@ jobs:
           EXACT_REVIEW_DIRECT_MUTATION_OUTPUT: .artifacts/direct-publication-outcome.json
           EXACT_REVIEW_DIRECT_REVISION: ${{ steps.claim-exact-review-queue.outputs.lease_revision }}
           EXACT_REVIEW_DIRECT_SOURCE_ACTION: ${{ fromJSON(steps.claim-exact-review-queue.outputs.decision).sourceAction }}
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: pnpm run --silent repair:exact-review-direct-publication
 
@@ -1475,7 +1475,7 @@ jobs:
           CLAIM_DECISION: ${{ steps.claim-exact-review-queue.outputs.decision }}
           DIRECT_PUBLICATION_SUPERSEDED: ${{ steps.direct-exact-review-publication.outputs.superseded }}
           DIRECT_OUTCOME: .artifacts/direct-publication-outcome.json
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES: ${{ vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}
           CLAWSWEEPER_COMMENT_MAX_COMMENTS: ${{ vars.CLAWSWEEPER_COMMENT_MAX_COMMENTS || '1000' }}
@@ -1618,7 +1618,7 @@ jobs:
           LIVE_TERMINAL_MISSING: ${{ steps.live-item.outputs.terminal_missing }}
           LIVE_TERMINAL_NOOP: ${{ steps.review-exact-event-item.outputs.terminal_during_review == 'true' && 'true' || steps.live-item.outputs.terminal_noop }}
           PROTOCOL_VERSION: ${{ steps.claim-exact-review-queue.outputs.protocol_version }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -1818,7 +1818,7 @@ jobs:
           PROTOCOL_VERSION: ${{ steps.claim-exact-review-queue.outputs.protocol_version }}
           QUEUE_LEASE_ID: ${{ steps.claim-exact-review-queue.outputs.lease_id }}
           QUEUE_LEASE_REVISION: ${{ steps.claim-exact-review-queue.outputs.lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           REQUEUE_LATEST: ${{ steps.exact-review-generation-result.outputs.requeue_latest }}
           RETRY_KIND: ${{ steps.exact-review-generation-result.outputs.retry_kind }}
           RETRY_AT: ${{ steps.exact-review-generation-result.outputs.retry_at }}
@@ -1943,7 +1943,7 @@ jobs:
         if: ${{ always() && steps.claim-exact-review-queue.outputs.claimed == 'true' && steps.direct-github-egress-observer.outcome == 'success' }}
         continue-on-error: true
         env:
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: pnpm run --silent repair:github-egress-telemetry submit
 
@@ -2017,7 +2017,7 @@ jobs:
           ITEM_KEY: ${{ github.event.client_payload.queue_claim.item_key }}
           QUEUE_LEASE_ID: ${{ github.event.client_payload.queue_lease_id }}
           QUEUE_LEASE_REVISION: ${{ github.event.client_payload.queue_claim.lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -2213,7 +2213,7 @@ jobs:
           CLAIM_DECISION: ${{ steps.publication-context.outputs.decision }}
           DIRECT_LIFECYCLE_PLAN: ${{ steps.publication-context.outputs.direct_lifecycle_plan }}
           DIRECT_LIFECYCLE_RECEIPT_OUTCOME: ${{ steps.publication-context.outputs.direct_lifecycle_receipt_outcome }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES: ${{ vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}
           CLAWSWEEPER_COMMENT_MAX_COMMENTS: ${{ vars.CLAWSWEEPER_COMMENT_MAX_COMMENTS || '1000' }}
@@ -2506,8 +2506,8 @@ jobs:
         if: ${{ steps.publication-context.outputs.claimed == 'true' && steps.publication-context.outputs.direct_lifecycle_recovery != 'true' && steps.fold-exact-live-proof.outcome == 'success' && steps.legacy-exact-artifact.outputs.legacy_tupleless != 'true' }}
         id: setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.publication-context.outputs.target_slug }}
           records-item-number: ${{ steps.publication-context.outputs.item_number }}
@@ -2532,7 +2532,7 @@ jobs:
           LIVE_TERMINAL_NOOP: ${{ steps.publication-context.outputs.live_terminal_noop }}
           LIVE_TERMINAL_MISSING: ${{ steps.publication-context.outputs.live_terminal_missing }}
           LIVE_GUARDED_OPEN: ${{ steps.publication-context.outputs.live_guarded_open }}
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           EXACT_REVIEW_LEASE_ID: ${{ steps.publication-context.outputs.publisher_lease_id }}
           EXACT_REVIEW_ITEM_KEY: ${{ steps.publication-context.outputs.publisher_item_key }}
           EXACT_REVIEW_LEASE_REVISION: ${{ steps.publication-context.outputs.publisher_lease_revision }}
@@ -2667,7 +2667,7 @@ jobs:
           ITEM_NUMBER: ${{ steps.publication-context.outputs.item_number }}
           FENCE_KEY: ${{ steps.publication-context.outputs.publisher_item_key }}
           REVISION: ${{ steps.publication-context.outputs.publisher_lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -2703,7 +2703,7 @@ jobs:
           ITEM_NUMBER: ${{ steps.publication-context.outputs.item_number }}
           FENCE_KEY: ${{ steps.publication-context.outputs.publisher_item_key }}
           REVISION: ${{ steps.publication-context.outputs.publisher_lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES: ${{ vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}
           CLAWSWEEPER_COMMENT_MAX_COMMENTS: ${{ vars.CLAWSWEEPER_COMMENT_MAX_COMMENTS || '1000' }}
@@ -2745,7 +2745,7 @@ jobs:
           ITEM_NUMBER: ${{ steps.publication-context.outputs.item_number }}
           FENCE_KEY: ${{ steps.publication-context.outputs.publisher_item_key }}
           REVISION: ${{ steps.publication-context.outputs.publisher_lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -2777,7 +2777,7 @@ jobs:
           ITEM_NUMBER: ${{ steps.publication-context.outputs.item_number }}
           FENCE_KEY: ${{ steps.publication-context.outputs.publisher_item_key }}
           REVISION: ${{ steps.publication-context.outputs.publisher_lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -2822,7 +2822,7 @@ jobs:
           CLAIM_DECISION: ${{ steps.publication-context.outputs.decision }}
           PRODUCER_RUN_ATTEMPT: ${{ steps.publication-context.outputs.generation_attempt }}
           PRODUCER_RUN_ID: ${{ steps.publication-context.outputs.producer_run_id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -3112,7 +3112,7 @@ jobs:
           DIRECT_LIFECYCLE_REQUEUE: ${{ steps.exact-review-publication-result.outputs.direct_requeue }}
           LEGACY_TUPLELESS: ${{ steps.legacy-exact-artifact.outputs.legacy_tupleless }}
           QUEUE_LEASE_ID: ${{ steps.publication-context.outputs.publisher_lease_id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -3225,7 +3225,7 @@ jobs:
         if: ${{ always() && steps.publication-context.outputs.claimed == 'true' && steps.publication-context.outputs.direct_lifecycle_recovery != 'true' && steps.artifact-github-egress-observer.outcome == 'success' }}
         continue-on-error: true
         env:
-          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: pnpm run --silent repair:github-egress-telemetry submit
 
@@ -3248,7 +3248,7 @@ jobs:
           ITEM_KEY: ${{ github.event.client_payload.queue_claim.item_key }}
           QUEUE_LEASE_ID: ${{ github.event.client_payload.queue_lease_id }}
           QUEUE_LEASE_REVISION: ${{ github.event.client_payload.queue_claim.lease_revision }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -3391,7 +3391,7 @@ jobs:
           CLAIM_GENERATION: ${{ steps.finalization-context.outputs.claim_generation }}
           STATUS_MARKER: ${{ steps.finalization-context.outputs.status_marker }}
           STATUS_COMMENT_ID: ${{ steps.finalization-context.outputs.status_comment_id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -3436,7 +3436,7 @@ jobs:
           FENCE_KEY: ${{ steps.finalization-context.outputs.lifecycle_fence_key }}
           REVISION: ${{ steps.finalization-context.outputs.lifecycle_revision }}
           ATTEMPT_ID: ${{ steps.terminal-acknowledgement.outputs.attempt_id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -3488,7 +3488,7 @@ jobs:
           COMPLETION_COMMENT_ID: ${{ steps.update-final-command-status.outputs.completion_comment_id }}
           COMPLETION_COMPLETED_AT: ${{ steps.update-final-command-status.outputs.completion_completed_at }}
           STATUS_STATE: ${{ steps.finalization-context.outputs.status_state }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -3542,7 +3542,7 @@ jobs:
           STATUS_COMMENT_ID: ${{ steps.finalization-context.outputs.status_comment_id }}
           ATTEMPT_ID: ${{ steps.terminal-acknowledgement.outputs.attempt_id }}
           MISSING_STATUS_COMMENT: ${{ steps.update-final-command-status.outputs.missing_status_comment }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -3584,7 +3584,7 @@ jobs:
           QUEUE_LEASE_ID: ${{ github.event.client_payload.queue_lease_id }}
           LEASE_REVISION: ${{ steps.finalization-context.outputs.lease_revision }}
           CLAIM_GENERATION: ${{ steps.finalization-context.outputs.claim_generation }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -3635,8 +3635,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           hydrate-git-state: "false"
           hydrate-state-blobs: "false"
@@ -3645,33 +3645,23 @@ jobs:
         with:
           build-script: build:repair
 
-      - name: Create OpenClaw inventory token
-        id: openclaw-token
+      - name: Create AyobamiH inventory token
+        id: ayobamih-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
-
-      - name: Create steipete inventory token
-        id: steipete-token
-        continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: steipete
+          owner: AyobamiH
 
       - name: Dispatch selected targets
         env:
           GH_TOKEN: ${{ github.token }}
           CLAWSWEEPER_DISPATCH_TOKEN: ${{ github.token }}
-          CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: ${{ steps.openclaw-token.outputs.token }}
-          CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: ${{ steps.steipete-token.outputs.token || '__public__' }}
+          CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: ${{ steps.ayobamih-token.outputs.token }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           FANOUT_MODE: ${{ github.event.schedule == '41/10 * * * *' && 'normal-review' || (github.event.schedule == '37 */6 * * *' && 'audit' || 'hot-intake') }}
           FANOUT_LIMIT: ${{ github.event.schedule == '41/10 * * * *' && '12' || (github.event.schedule == '37 */6 * * *' && '12' || '20') }}
-          REVIEW_COVERAGE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          REVIEW_COVERAGE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           pnpm run target-fanout -- \
@@ -3693,10 +3683,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CLAWSWEEPER_DISPATCH_TOKEN: ${{ github.token }}
-          CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: ${{ steps.openclaw-token.outputs.token }}
-          CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: ${{ steps.steipete-token.outputs.token || '__public__' }}
+          CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: ${{ steps.ayobamih-token.outputs.token }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          REVIEW_COVERAGE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          REVIEW_COVERAGE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: pnpm run target-fanout -- coverage --window-days 7 --publish-url "$REVIEW_COVERAGE_URL" >> "$GITHUB_STEP_SUMMARY"
 
   plan:
@@ -3811,8 +3800,8 @@ jobs:
 
       - uses: ./clawsweeper/.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           records-item-number: ${{ steps.requested-items.outputs.item_numbers }}
@@ -3827,7 +3816,7 @@ jobs:
         working-directory: clawsweeper
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           target_slug="${{ steps.target.outputs.target_repo }}"
           target_slug="${target_slug//\//-}"
@@ -3844,7 +3833,7 @@ jobs:
       - id: mode
         env:
           GH_TOKEN: ${{ github.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_QUEUE_PRESSURE_SOFT_PENDING: ${{ vars.CLAWSWEEPER_QUEUE_PRESSURE_SOFT_PENDING || '' }}
           CLAWSWEEPER_QUEUE_PRESSURE_HARD_PENDING: ${{ vars.CLAWSWEEPER_QUEUE_PRESSURE_HARD_PENDING || '' }}
           CLAWSWEEPER_QUEUE_PRESSURE_SOFT_AGE_MS: ${{ vars.CLAWSWEEPER_QUEUE_PRESSURE_SOFT_AGE_MS || '' }}
@@ -4144,7 +4133,7 @@ jobs:
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ steps.target-read-token.outputs.token || github.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           lane="normal_backfill"
@@ -4209,7 +4198,7 @@ jobs:
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           target_slug="$TARGET_REPO"
@@ -4650,8 +4639,8 @@ jobs:
         id: setup-publish-state
         if: ${{ steps.reviewed-items.outputs.item_numbers != '' }}
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ needs.plan.outputs.target_slug }}
           records-item-number: ${{ steps.reviewed-items.outputs.item_numbers }}
@@ -4716,7 +4705,7 @@ jobs:
         continue-on-error: true
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           if [ ! -s .artifacts/action-ledger-paths.txt ]; then
             echo "No immutable review action events to publish."
@@ -4776,7 +4765,7 @@ jobs:
         if: ${{ always() && steps.apply-review-artifacts.outputs.artifacts_applied == 'true' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root="$CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT"
@@ -4807,7 +4796,7 @@ jobs:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
           ITEM_NUMBERS: ${{ steps.reviewed-items.outputs.item_numbers }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ needs.plan.outputs.target_repo }}
         run: |
           target_slug="$TARGET_REPO"
@@ -4918,7 +4907,7 @@ jobs:
             --target-repo "$TARGET_REPO" \
             --artifact-dir artifacts \
             --report-dir "records/$target_slug/items" \
-            --report-repo openclaw/clawsweeper-state)"
+            --report-repo AyobamiH/clawsweeper-state)"
           echo "$candidate_output"
           CANDIDATE_OUTPUT="$candidate_output" MAX_DISPATCH="$MAX_DISPATCH" node <<'NODE' > /tmp/viable-implementation-candidates.tsv
           const output = JSON.parse(process.env.CANDIDATE_OUTPUT || "{}");
@@ -4939,7 +4928,7 @@ jobs:
               -f target_repo="$TARGET_REPO" \
               -f item_number="$item_number" \
               -f candidate_kind=viable \
-              -f report_repo=openclaw/clawsweeper-state \
+              -f report_repo=AyobamiH/clawsweeper-state \
               -f report_path="$report_path" \
               -f report_url="$report_url"
           done < /tmp/viable-implementation-candidates.tsv
@@ -4952,7 +4941,7 @@ jobs:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           CLAWSWEEPER_PUBLIC_GH_TOKEN: ${{ needs.plan.outputs.target_repo == 'openclaw/openclaw' && github.token || '' }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ needs.plan.outputs.target_repo }}
         run: |
           set -euo pipefail
@@ -5031,7 +5020,7 @@ jobs:
         if: ${{ always() && steps.sync-selected-review-comments.outcome != 'skipped' && steps.finalize-selected-review-comment-action-ledger.outcome == 'success' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           if [ ! -d "$CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT/ledger" ]; then
@@ -5133,7 +5122,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ADDITIONAL_PROMPT: ${{ github.event.inputs.additional_prompt || '' }}
           MATRIX_JSON: ${{ needs.plan.outputs.matrix }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
@@ -5284,8 +5273,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: openclaw-openclaw
           hydrate-state-blobs: "false"
@@ -5364,7 +5353,7 @@ jobs:
         if: ${{ always() }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root="$CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT"
@@ -5479,8 +5468,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           hydrate-state-blobs: "false"
           token: ${{ steps.state-token.outputs.token }}
@@ -5526,7 +5515,7 @@ jobs:
         env:
           CLAWSWEEPER_CANONICAL_RECORD_BASELINE_DIR: .artifacts/audit-canonical-baseline
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           target_slug="$TARGET_REPO"
@@ -5549,7 +5538,7 @@ jobs:
           GH_TOKEN: ${{ steps.state-token.outputs.token }}
         run: |
           gh workflow run dashboard.yml \
-            --repo openclaw/clawsweeper-state \
+            --repo AyobamiH/clawsweeper-state \
             --ref main || echo "Best-effort dashboard refresh dispatch failed; scheduled state dashboard will retry."
 
   apply-proof:
@@ -5614,8 +5603,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           hydrate-state-blobs: "false"
@@ -5855,7 +5844,7 @@ jobs:
         if: ${{ needs.apply-proof.outputs.action_ledger_artifact_name != '' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root=".clawsweeper-repair/action-ledger-proof"
@@ -5947,7 +5936,7 @@ jobs:
         env:
           APPLY_OUTCOME: in_progress
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           set -euo pipefail
@@ -5977,8 +5966,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           hydrate-state-blobs: "false"
@@ -6008,7 +5997,7 @@ jobs:
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ steps.target.outputs.target_repo == 'openclaw/openclaw' && github.token || steps.target-write-token.outputs.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           set -euo pipefail
@@ -6025,7 +6014,7 @@ jobs:
           GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           CLAWSWEEPER_PUBLIC_GH_TOKEN: ${{ steps.target.outputs.target_repo == 'openclaw/openclaw' && github.token || '' }}
           CLAWSWEEPER_APPLY_TOKEN_MINTED_AT_MS: ${{ steps.target-write-token.outputs.minted-at-ms }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           set -euo pipefail
@@ -6420,7 +6409,7 @@ jobs:
         continue-on-error: true
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           if [ "${APPLY_NOOP:-false}" = "true" ]; then
             echo "No proposed closes were ready; no final apply status to retry."
@@ -6438,7 +6427,7 @@ jobs:
         if: ${{ always() }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root="$CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT"
@@ -6722,7 +6711,7 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         env:
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           APPLY_OUTCOME: ${{ (needs.apply-proof.result == 'failure' || needs.apply-existing.result == 'failure') && 'failure' || needs.apply-existing.result == 'cancelled' && 'cancelled' || needs.apply-existing.result == 'success' && 'success' || 'skipped' }}
           ACTION_LEDGER_OUTCOME: ${{ (needs.publish-apply-proof-action-ledger.result == 'failure' || needs.apply-existing.outputs.action_ledger_outcome == 'failure') && 'failure' || needs.apply-existing.outputs.action_ledger_outcome || 'not_started' }}

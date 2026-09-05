@@ -37,8 +37,8 @@ jobs:
     timeout-minutes: 15
     environment: exact-review-operator
     env:
-      EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-      CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+      EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+      CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
     steps:
       - name: Establish reconciliation deadline
         run: |

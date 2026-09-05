@@ -34,14 +34,14 @@ jobs:
         id: state-token
         uses: ./.github/actions/create-state-token
         with:
-          client-id: Iv23liOECG0slfuhz093
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           coordinator-class: cluster_intake
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: openclaw-openclaw
           hydrate-state-blobs: "false"

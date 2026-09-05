@@ -11,7 +11,7 @@ on:
 permissions: {}
 
 env:
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
 
 concurrency:
   # This workflow owns both run telemetry and exact-lease repair. Keep terminal
@@ -51,7 +51,7 @@ jobs:
         if: ${{ github.event.workflow_run.event == 'repository_dispatch' && startsWith(github.event.workflow_run.display_title, 'Review event item ') }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
@@ -97,7 +97,7 @@ jobs:
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: node scripts/review-run-observer.mjs --event-file "$GITHUB_EVENT_PATH"
 
   sweep:
@@ -115,7 +115,7 @@ jobs:
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           node --input-type=module <<'NODE'
           import { createHmac } from "node:crypto";
@@ -232,8 +232,8 @@ jobs:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
           TARGET_WRITE_TOKEN: ${{ steps.target-write-token.outputs.token }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          REVIEW_PLACEHOLDER_CURSOR_STORE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          REVIEW_PLACEHOLDER_CURSOR_STORE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           REVIEW_PLACEHOLDER_LOOKBACK_HOURS: ${{ vars.REVIEW_PLACEHOLDER_LOOKBACK_HOURS || '48' }}
           REVIEW_PLACEHOLDER_MAX_CHECKS: ${{ vars.REVIEW_PLACEHOLDER_MAX_CHECKS || '20' }}
           REVIEW_PLACEHOLDER_MAX_RECOVERIES: ${{ vars.REVIEW_PLACEHOLDER_MAX_RECOVERIES || '5' }}
@@ -246,6 +246,6 @@ jobs:
         continue-on-error: true
         env:
           CLAWSWEEPER_STATE_REPO_TOKEN: ${{ steps.state-token.outputs.token }}
-          STATE_REPOSITORY: openclaw/clawsweeper-state
+          STATE_REPOSITORY: AyobamiH/clawsweeper-state
           STATE_REPO_SIZE_WARN_GB: ${{ vars.STATE_REPO_SIZE_WARN_GB || '5' }}
         run: node dist/repair/state-repo-size.js

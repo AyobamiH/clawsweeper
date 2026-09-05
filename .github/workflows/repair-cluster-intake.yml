@@ -49,7 +49,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
   CLAWSWEEPER_MODEL: internal
   CLAWSWEEPER_GIT_USER_NAME: ${{ vars.CLAWSWEEPER_GIT_USER_NAME || 'clawsweeper[bot]' }}
@@ -165,8 +165,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.slug }}
           # Intake reads jobs and results only; ledger/assets hydration is unrelated and unbounded.

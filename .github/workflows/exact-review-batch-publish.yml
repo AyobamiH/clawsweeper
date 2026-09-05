@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+      EXACT_REVIEW_QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
       CLAWSWEEPER_AUTO_CLOSE_REASONS: ${{ vars.CLAWSWEEPER_AUTO_CLOSE_REASONS || 'all' }}
       CLAWSWEEPER_UNCONFIRMED_PRODUCT_DIRECTION_CLOSE_ENABLED: ${{ vars.CLAWSWEEPER_UNCONFIRMED_PRODUCT_DIRECTION_CLOSE_ENABLED || 'false' }}
       CLAWSWEEPER_UNSPONSORED_FEATURE_CLOSE_ENABLED: ${{ vars.CLAWSWEEPER_UNSPONSORED_FEATURE_CLOSE_ENABLED || 'false' }}
@@ -49,7 +49,7 @@ jobs:
       # Scan the full queue window so owner filtering can still fill the 32-item lease cap.
       EXACT_REVIEW_BATCH_MAX_ITEMS: "50"
       EXACT_REVIEW_BATCH_PREPARE_CONCURRENCY: "1"
-      CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+      CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
       CLAWSWEEPER_APP_PRIVATE_KEY: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
     steps:
       - name: Capture runner start timestamp
@@ -108,8 +108,8 @@ jobs:
       - uses: ./.github/actions/setup-state
         if: ${{ steps.batch.outputs.claimed == 'true' && steps.batch.outputs.item_count != '0' }}
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.batch.outputs.records_repo_slugs }}
           hydrate-git-state: "false"

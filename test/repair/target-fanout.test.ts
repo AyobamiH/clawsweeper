@@ -329,6 +329,36 @@ test("target fanout filters eligible repositories conservatively", () => {
   ]);
 });
 
+test("target fanout honors an explicit repository allowlist", () => {
+  const repositories: ListedRepository[] = [
+    repo("AyobamiH/openclaw-operator"),
+    repo("AyobamiH/openclaw-ops", { visibility: "PRIVATE" }),
+    repo("AyobamiH/other-public"),
+  ];
+
+  assert.deepEqual(
+    filterEligibleRepositories(repositories, {
+      ...config,
+      owners: ["ayobamih"],
+      allowRepositories: ["ayobamih/openclaw-operator", "ayobamih/openclaw-ops"],
+      denyRepositories: ["ayobamih/clawsweeper-state"],
+      includePrivate: true,
+    }),
+    [
+      {
+        targetRepo: "ayobamih/openclaw-operator",
+        defaultBranch: "main",
+        visibility: "PUBLIC",
+      },
+      {
+        targetRepo: "ayobamih/openclaw-ops",
+        defaultBranch: "main",
+        visibility: "PRIVATE",
+      },
+    ],
+  );
+});
+
 test("target fanout skips owners without minted inventory tokens in Actions", () => {
   const dir = mkdtempSync(join(tmpdir(), "clawsweeper-fanout-"));
   const logPath = join(dir, "gh.log");
@@ -341,7 +371,7 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({args, ghToken: process.env.GH_TOKEN || ""}) + "\\n");
 if (args[0] === "repo" && args[1] === "list") {
   process.stdout.write(JSON.stringify([
-    {nameWithOwner:"openclaw/B",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}
+    {nameWithOwner:"AyobamiH/openclaw-operator",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}
   ]));
   process.exit(0);
 }
@@ -376,22 +406,21 @@ process.exit(2);
         GH_TOKEN: "workflow-token",
         CLAWSWEEPER_DISPATCH_TOKEN: "dispatch-token",
         CLAWSWEEPER_WEBHOOK_SECRET: "cursor-secret",
-        CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: "inventory-openclaw",
-        CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: "",
+        CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: "inventory-ayobamih",
       },
     },
   );
 
   const summary = JSON.parse(output) as { dispatched: string[]; total: number };
   assert.equal(summary.total, 1);
-  assert.deepEqual(summary.dispatched, ["openclaw/b"]);
+  assert.deepEqual(summary.dispatched, ["ayobamih/openclaw-operator"]);
   const calls = readFileSync(logPath, "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { args: string[]; ghToken: string });
   assert.deepEqual(
     calls.filter((call) => call.args[0] === "repo").map((call) => call.ghToken),
-    ["inventory-openclaw"],
+    ["inventory-ayobamih"],
   );
 });
 
@@ -406,11 +435,10 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({args, ghToken: process.env.GH_TOKEN || ""}) + "\\n");
 if (args[0] === "repo" && args[1] === "list") {
-  const owner = args[2];
-  const data = owner === "openclaw"
-    ? [{nameWithOwner:"openclaw/B",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}]
-    : [{nameWithOwner:"steipete/A",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}];
-  process.stdout.write(JSON.stringify(data));
+  process.stdout.write(JSON.stringify([
+    {nameWithOwner:"AyobamiH/openclaw-operator",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}},
+    {nameWithOwner:"AyobamiH/openclaw-ops",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"master"}}
+  ]));
   process.exit(0);
 }
 if (args[0] === "api" && args[1] === "graphql") {
@@ -445,22 +473,21 @@ process.exit(2);
         GITHUB_ACTIONS: "true",
         ...mockGhBinEnv(ghPath),
         CLAWSWEEPER_DISPATCH_TOKEN: "dispatch-token",
-        CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: "inventory-openclaw",
-        CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: "__public__",
+        CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: "__public__",
       },
     },
   );
 
   const summary = JSON.parse(output) as { dispatched: string[]; total: number };
   assert.equal(summary.total, 2);
-  assert.deepEqual(summary.dispatched, ["openclaw/b", "steipete/a"]);
+  assert.deepEqual(summary.dispatched, ["ayobamih/openclaw-operator", "ayobamih/openclaw-ops"]);
   const calls = readFileSync(logPath, "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { args: string[]; ghToken: string });
   assert.deepEqual(
     calls.filter((call) => call.args[0] === "repo").map((call) => call.ghToken),
-    ["inventory-openclaw", "dispatch-token"],
+    ["dispatch-token"],
   );
 });
 
@@ -581,16 +608,11 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({args, ghToken: process.env.GH_TOKEN || ""}) + "\\n");
 if (args[0] === "repo" && args[1] === "list") {
-  const owner = args[2];
-  const data = owner === "openclaw"
-    ? [
-        {nameWithOwner:"openclaw/B",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}},
-        {nameWithOwner:"openclaw/clawsweeper-state",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}
-      ]
-    : [
-        {nameWithOwner:"steipete/A",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"master"}}
-      ];
-  process.stdout.write(JSON.stringify(data));
+  process.stdout.write(JSON.stringify([
+    {nameWithOwner:"AyobamiH/openclaw-operator",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}},
+    {nameWithOwner:"AyobamiH/openclaw-ops",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PRIVATE",defaultBranchRef:{name:"master"}},
+    {nameWithOwner:"AyobamiH/clawsweeper-state",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PRIVATE",defaultBranchRef:{name:"state"}}
+  ]));
   process.exit(0);
 }
 if (args[0] === "api" && args[1] === "graphql") {
@@ -630,8 +652,7 @@ process.exit(2);
         GH_TOKEN: "workflow-token",
         CLAWSWEEPER_DISPATCH_TOKEN: "dispatch-token",
         CLAWSWEEPER_WEBHOOK_SECRET: "cursor-secret",
-        CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: "inventory-openclaw",
-        CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: "inventory-steipete",
+        CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: "inventory-ayobamih",
       },
     },
   );
@@ -643,11 +664,14 @@ process.exit(2);
     review_candidate_capacity: number;
     candidate_batches: Record<string, number>;
   };
-  assert.deepEqual(summary.dispatched, ["steipete/a", "openclaw/b"]);
+  assert.deepEqual(summary.dispatched, ["ayobamih/openclaw-ops", "ayobamih/openclaw-operator"]);
   assert.equal(summary.next_cursor, 0);
   assert.equal(summary.cursor_persisted, false);
   assert.equal(summary.review_candidate_capacity, 100);
-  assert.deepEqual(summary.candidate_batches, { "steipete/a": 1, "openclaw/b": 1 });
+  assert.deepEqual(summary.candidate_batches, {
+    "ayobamih/openclaw-operator": 1,
+    "ayobamih/openclaw-ops": 1,
+  });
 
   const calls = readFileSync(logPath, "utf8")
     .trim()
@@ -655,7 +679,7 @@ process.exit(2);
     .map((line) => JSON.parse(line) as { args: string[]; ghToken: string });
   assert.deepEqual(
     calls.filter((call) => call.args[0] === "repo").map((call) => call.ghToken),
-    ["inventory-openclaw", "inventory-steipete"],
+    ["inventory-ayobamih"],
   );
   assert.deepEqual(
     calls
@@ -668,8 +692,8 @@ process.exit(2);
       .filter((call) => call.args[0] === "api" && call.args[1]?.endsWith("/dispatches"))
       .map((call) => call.args.join(" ")),
     [
-      "api repos/openclaw/clawsweeper/dispatches -f event_type=clawsweeper_target_sweep -f client_payload[target_repo]=steipete/a -f client_payload[target_branch]=master -f client_payload[hot_intake]=false -f client_payload[batch_size]=1 -f client_payload[shard_count]=1",
-      "api repos/openclaw/clawsweeper/dispatches -f event_type=clawsweeper_target_sweep -f client_payload[target_repo]=openclaw/b -f client_payload[target_branch]=main -f client_payload[hot_intake]=false -f client_payload[batch_size]=1 -f client_payload[shard_count]=1",
+      "api repos/openclaw/clawsweeper/dispatches -f event_type=clawsweeper_target_sweep -f client_payload[target_repo]=ayobamih/openclaw-ops -f client_payload[target_branch]=master -f client_payload[hot_intake]=false -f client_payload[batch_size]=1 -f client_payload[shard_count]=1",
+      "api repos/openclaw/clawsweeper/dispatches -f event_type=clawsweeper_target_sweep -f client_payload[target_repo]=ayobamih/openclaw-operator -f client_payload[target_branch]=main -f client_payload[hot_intake]=false -f client_payload[batch_size]=1 -f client_payload[shard_count]=1",
     ],
   );
 });
@@ -686,8 +710,8 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + "\\n");
 if (args[0] === "repo" && args[1] === "list") {
   process.stdout.write(JSON.stringify([
-    {nameWithOwner:"openclaw/A",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}},
-    {nameWithOwner:"openclaw/B",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}}
+    {nameWithOwner:"AyobamiH/openclaw-operator",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PUBLIC",defaultBranchRef:{name:"main"}},
+    {nameWithOwner:"AyobamiH/openclaw-ops",isArchived:false,isDisabled:false,isFork:false,hasIssuesEnabled:true,visibility:"PRIVATE",defaultBranchRef:{name:"master"}}
   ]));
   process.exit(0);
 }
@@ -716,7 +740,7 @@ process.exit(2);
       "unavailable",
       "--dry-run",
       "--owners",
-      "openclaw",
+      "ayobamih",
     ],
     {
       cwd: process.cwd(),
@@ -724,7 +748,7 @@ process.exit(2);
       env: {
         ...process.env,
         ...mockGhBinEnv(ghPath),
-        CLAWSWEEPER_INVENTORY_TOKEN_OPENCLAW: "inventory-openclaw",
+        CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: "inventory-ayobamih",
       },
     },
   );
@@ -733,7 +757,7 @@ process.exit(2);
     dispatched: string[];
     cursor_persisted: boolean;
   };
-  assert.deepEqual(summary.dispatched, ["openclaw/a"]);
+  assert.deepEqual(summary.dispatched, ["ayobamih/openclaw-operator"]);
   assert.equal(summary.cursor_persisted, false);
   const calls = readFileSync(logPath, "utf8")
     .trim()

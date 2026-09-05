@@ -21,6 +21,7 @@ export type FanoutMode = "hot-intake" | "normal-review" | "audit";
 
 export interface InventoryConfig {
   owners: readonly string[];
+  allowRepositories?: readonly string[];
   denyRepositories: readonly string[];
   includePrivate: boolean;
   includeArchived: boolean;
@@ -290,7 +291,7 @@ export function readInventoryConfig(
   const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
   const config = record(parsed, "target repository config");
   const inventory = record(config.target_inventory, "target_inventory");
-  return {
+  const result: InventoryConfig = {
     owners: stringArray(inventory.owners, "target_inventory.owners").map((owner) =>
       owner.toLowerCase(),
     ),
@@ -303,6 +304,13 @@ export function readInventoryConfig(
     includeForks: booleanValue(inventory.include_forks, false),
     requireIssues: booleanValue(inventory.require_issues, true),
   };
+  if (inventory.allow_repositories !== undefined) {
+    result.allowRepositories = stringArray(
+      inventory.allow_repositories,
+      "target_inventory.allow_repositories",
+    ).map((repo) => repo.toLowerCase());
+  }
+  return result;
 }
 
 export async function loadEligibleRepositories(
@@ -322,8 +330,15 @@ export function filterEligibleRepositories(
   config: InventoryConfig,
 ): SelectedRepository[] {
   const denied = new Set(config.denyRepositories.map((repo) => repo.toLowerCase()));
+  const allowed =
+    config.allowRepositories === undefined
+      ? undefined
+      : new Set(config.allowRepositories.map((repo) => repo.toLowerCase()));
   return repositories
     .filter((repository) => !repository.isDisabled)
+    .filter(
+      (repository) => allowed === undefined || allowed.has(repository.nameWithOwner.toLowerCase()),
+    )
     .filter((repository) => config.includeArchived || !repository.isArchived)
     .filter((repository) => config.includeForks || !repository.isFork)
     .filter((repository) => config.includePrivate || repository.visibility === "PUBLIC")

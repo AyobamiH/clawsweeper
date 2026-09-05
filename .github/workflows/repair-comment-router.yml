@@ -76,7 +76,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_UNSPONSORED_FEATURE_CLOSE_ENABLED: ${{ vars.CLAWSWEEPER_UNSPONSORED_FEATURE_CLOSE_ENABLED || 'false' }}
   CLAWSWEEPER_AUTHOR_PR_BUDGET_CLOSE_ENABLED: ${{ vars.CLAWSWEEPER_AUTHOR_PR_BUDGET_CLOSE_ENABLED || 'false' }}
 
@@ -176,8 +176,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           records-item-number: ${{ steps.target.outputs.records_item_number || '' }}
@@ -207,7 +207,7 @@ jobs:
           CLAWSWEEPER_ACTION_LEDGER_INVOCATION: initial
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_TARGET_INSTALLATION_ID: ${{ steps.app_token.outputs.installation-id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}"
@@ -317,7 +317,7 @@ jobs:
         if: always()
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           if jq -e '.short_circuited == true' results/comment-router-latest.json >/dev/null 2>&1; then
             echo "Exact terminal comment version already recorded; skipping state publication."
@@ -372,7 +372,7 @@ jobs:
           CLAWSWEEPER_ACTION_LEDGER_INVOCATION: retry
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_TARGET_INSTALLATION_ID: ${{ steps.app_token.outputs.installation-id }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}"
@@ -480,7 +480,7 @@ jobs:
         if: ${{ always() && steps.waiting-repair-dispatches.outputs.count != '' && steps.waiting-repair-dispatches.outputs.count != '0' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           # The initial publish copies every published path back into the state
           # checkout, making it the baseline for retry-only job mutations.
@@ -537,7 +537,7 @@ jobs:
         if: ${{ always() && steps.setup-pnpm.outcome == 'success' && steps.finalize-command-action-ledger.outputs.publish == 'true' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root="${CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT:?setup-action-ledger output root is required}"

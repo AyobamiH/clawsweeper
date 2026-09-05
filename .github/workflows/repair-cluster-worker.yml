@@ -87,7 +87,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CLAWSWEEPER_APP_CLIENT_ID: Iv23liOECG0slfuhz093
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_MODEL: internal
   CLAWSWEEPER_RUNNER: ${{ vars.CLAWSWEEPER_RUNNER || 'codex' }}
   CLAWSWEEPER_OPENCLAW_MODEL: ${{ secrets.CLAWSWEEPER_OPENCLAW_MODEL }}
@@ -238,8 +238,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug || '' }}
           records-item-number: ${{ steps.target.outputs.records_item_number || '' }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -526,8 +526,8 @@ jobs:
 
       - uses: ./.github/actions/setup-state
         with:
-          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
-          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug || '' }}
           records-item-number: ${{ steps.target.outputs.records_item_number || '' }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -868,7 +868,7 @@ jobs:
         if: ${{ always() && steps.execute-setup-pnpm.outcome == 'success' && steps.repair-requeue-ledger.outcome == 'success' && steps.repair_requeue.outputs.count != '' && steps.repair_requeue.outputs.count != '0' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}
+          QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
           source_root="${CLAWSWEEPER_ACTION_LEDGER_OUTPUT_ROOT:?setup-action-ledger output root is required}"

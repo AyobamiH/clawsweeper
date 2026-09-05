@@ -1,6 +1,5 @@
-name = "clawsweeper-status"
+name = "ayobamih-clawsweeper-status"
 main = "worker.ts"
-account_id = "91b59577e757131d68d55a471fe32aca"
 compatibility_date = "2026-05-11"
 workers_dev = true
 
@@ -12,7 +11,7 @@ directory = "./public"
 
 [[r2_buckets]]
 binding = "STATE_SNAPSHOTS"
-bucket_name = "clawsweeper-state-snapshots"
+bucket_name = "ayobamih-clawsweeper-state-snapshots"
 
 [[durable_objects.bindings]]
 name = "STATUS_STORE"
@@ -30,21 +29,17 @@ new_sqlite_classes = ["StatusStore"]
 tag = "v2"
 new_sqlite_classes = ["ExactReviewQueue"]
 
-[[routes]]
-pattern = "clawsweeper.openclaw.ai"
-custom_domain = true
-
 [vars]
-CLAWSWEEPER_REPO = "openclaw/clawsweeper"
-CLAWSWEEPER_APP_CLIENT_ID = "Iv23liOECG0slfuhz093"
+CLAWSWEEPER_REPO = "AyobamiH/clawsweeper"
+CLAWSWEEPER_APP_CLIENT_ID = "Iv23li7FTsSTorJDMkdQ"
 CLAWSWEEPER_CRABFLEET_URL = "https://crabfleet.openclaw.ai"
-TARGET_REPOS = "openclaw/openclaw,openclaw/clawhub,openclaw/clawsweeper,openclaw/fs-safe"
+TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops"
 # Explicit public-only allowlist for canonical repository + issue/PR references
-# rendered in OpenClaw Bay. Repositories must be verified public before addition.
-PUBLIC_BAY_REPOS = "openclaw/openclaw,openclaw/clawhub,openclaw/clawsweeper,openclaw/fs-safe"
-APPLY_TARGET_REPOS = "openclaw/openclaw"
-APPLY_OPTIONAL_TARGET_REPOS = "openclaw/clawhub"
-CLAWSWEEPER_ENABLE_CLAWHUB = "1"
+# rendered in the dashboard. Repositories must be verified public before addition.
+PUBLIC_BAY_REPOS = "AyobamiH/openclaw-operator"
+APPLY_TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops"
+APPLY_OPTIONAL_TARGET_REPOS = ""
+CLAWSWEEPER_ENABLE_CLAWHUB = "0"
 WORKER_BUDGET = "128"
 EXACT_REVIEW_ACTIONS_BUDGET = "194"
 WORKER_DETAIL_RUN_LIMIT = "128"
@@ -78,7 +73,7 @@ EXACT_REVIEW_TARGET_RATE_PER_HOUR = "300"
 EXACT_REVIEW_TARGET_BURST = "30"
 EXACT_REVIEW_PUBLICATION_BATCHING_ENABLED = "1"
 EXACT_REVIEW_DIRECT_PUBLICATION_ENABLED = "1"
-EXACT_REVIEW_STATE_REPO = "openclaw/clawsweeper-state"
+EXACT_REVIEW_STATE_REPO = "AyobamiH/clawsweeper-state"
 EXACT_REVIEW_STATE_REF = "state"
 EXACT_REVIEW_PUBLICATION_BATCH_SIZE = "8"
 EXACT_REVIEW_PUBLICATION_BATCH_MAX_CONCURRENT = "8"
