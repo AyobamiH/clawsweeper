@@ -51,6 +51,9 @@ jobs:
           printf 'CLAWSWEEPER_DEPLOY_SHA = "%s"\n' "$GITHUB_SHA" >> dashboard/wrangler.deploy.toml
           echo "config=dashboard/wrangler.deploy.toml" >> "$GITHUB_OUTPUT"
 
+      - name: Bootstrap Worker
+        run: npx wrangler@4.107.0 deploy --config "${{ steps.dashboard-config.outputs.config }}"
+
       - name: Sync Worker secrets
         run: |
           set -euo pipefail
@@ -87,8 +90,9 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy Worker
+      - name: Deploy Worker after secret sync
         run: npx wrangler@4.107.0 deploy --config "${{ steps.dashboard-config.outputs.config }}"
 
       - name: Smoke test live dashboard
+        if: ${{ env.CLAWSWEEPER_STATUS_URL != '' }}
         run: pnpm run dashboard:smoke -- "$CLAWSWEEPER_STATUS_URL"
