@@ -3633,11 +3633,32 @@ jobs:
           filter: blob:none
           fetch-depth: 0
 
+      - name: Resolve inventory record slugs
+        id: inventory-record-slugs
+        run: |
+          set -euo pipefail
+          records_repo_slugs="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("config/target-repositories.json", "utf8"));
+            const repositories = Array.isArray(config?.target_inventory?.allow_repositories) && config.target_inventory.allow_repositories.length
+              ? config.target_inventory.allow_repositories
+              : (Array.isArray(config?.repositories) ? config.repositories.map((entry) => entry.target_repo) : []);
+            const slugs = [...new Set(repositories
+              .map((repo) => String(repo || "").trim())
+              .filter((repo) => /^[^/\s]+\/[^/\s]+$/.test(repo))
+              .map((repo) => repo.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")))]
+              .sort();
+            if (!slugs.length) throw new Error("No configured target repository slugs found for fan-out hydration");
+            process.stdout.write(slugs.join(","));
+          ')"
+          echo "records_repo_slugs=$records_repo_slugs" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/setup-state
         with:
           coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+          records-repo-slugs: ${{ steps.inventory-record-slugs.outputs.records_repo_slugs }}
           hydrate-git-state: "false"
           hydrate-state-blobs: "false"
 
