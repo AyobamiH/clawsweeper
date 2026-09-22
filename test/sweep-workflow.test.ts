@@ -253,7 +253,7 @@ test("Codex source setup normalizes OpenClaw casing and stays out of the OpenCla
   const normalize = action.runs.steps.find((step) => step.id === "target");
   const cache = action.runs.steps.find((step) => step.uses === "actions/cache@v6");
   assert.ok(normalize);
-  assert.match(cache?.if ?? "", /steps\.target\.outputs\.repository == 'AyobamiH\/openclaw-operator'/u);
+  assert.match(cache?.if ?? "", /steps\.target\.outputs\.repository == 'openclaw\/openclaw'/u);
   assert.match(cache?.if ?? "", /env\.CLAWSWEEPER_RUNNER != 'openclaw'/u);
   const setup = action.runs.steps.at(-1);
   assert.match(setup?.if ?? "", /env\.CLAWSWEEPER_RUNNER != 'openclaw'/u);
