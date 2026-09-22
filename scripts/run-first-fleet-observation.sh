@@ -75,6 +75,40 @@ contains_id() {
   return 1
 }
 
+safe_sweep_dispatch_minute() {
+  local minute
+  minute="$(date -u +%M)"
+  minute="$((10#$minute))"
+  case "$minute" in
+    0|1|2|9|10|11|15|16|17|18|19|25|26|27|28|29|30|31|32|33|34|45|46|47|48|49|55|56|57|58|59)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+wait_for_safe_sweep_dispatch_window() {
+  while ! safe_sweep_dispatch_minute; do
+    echo "Waiting for a cron-safe sweep dispatch window..."
+    sleep 5
+  done
+}
+
+wait_for_run_to_start() {
+  local run_id="$1"
+  local status=''
+  for _ in $(seq 1 30); do
+    status="$(retry_gh run view "$run_id" --repo "$repo" --json status --jq '.status // ""')"
+    if [ "$status" != 'queued' ] && [ -n "$status" ]; then
+      printf '%s' "$status"
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s' "$status"
+  return 1
+}
+
 restore_environment() {
   if [ "$restored" = true ]; then
     return 0
@@ -162,6 +196,9 @@ for index in "${!targets[@]}"; do
 
   echo "Dispatching: $label"
 
+  # Keep the sweep workflow enabled only inside a minute window that is at
+  # least ~60 seconds away from any configured sweep cron tick.
+  wait_for_safe_sweep_dispatch_window
   retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/enable" >/dev/null
 
   before_id="$(retry_gh run list --repo "$repo" --workflow "$workflow" --event workflow_dispatch --limit 1 \
@@ -193,9 +230,8 @@ for index in "${!targets[@]}"; do
     sleep 2
   done
 
-  retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
-
   if [ -z "$run_id" ]; then
+    retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
     if [ "$dispatch_rc" -ne 0 ]; then
       echo "FAIL: dispatch failed for $label and no new run was observed." >&2
     else
@@ -206,6 +242,18 @@ for index in "${!targets[@]}"; do
 
   run_ids+=("$run_id")
   echo "  accepted run: $run_id"
+
+  # A workflow_dispatch receipt is not proof that GitHub has admitted a job.
+  # Keep sweep.yml enabled until this exact run leaves queued, then close the
+  # workflow window immediately. Abort rather than holding the workflow open
+  # across a cron boundary.
+  if ! start_status="$(wait_for_run_to_start "$run_id")"; then
+    retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
+    echo "FAIL: $run_id stayed queued for more than 60 seconds; sweep.yml was disabled again." >&2
+    exit 1
+  fi
+  retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
+  echo "  run admitted: $run_id ($start_status)"
 done
 
 # sweep.yml is now disabled again. Cancel any run created during the short
