@@ -15,14 +15,14 @@
           "mostly_implemented_on_main"
         ]
       },
-      "package_manager": "pnpm",
+      "package_manager": "npm",
       "validation_commands": [],
       "changed_gate": null,
       "live_test": {
         "enabled": true,
         "surface_default": "terminal",
         "setup": [
-          "pnpm install --frozen-lockfile"
+          "npm ci"
         ],
         "ready_timeout_seconds": 240,
         "max_recording_seconds": 90
@@ -51,14 +51,14 @@
           "mostly_implemented_on_main"
         ]
       },
-      "package_manager": "pnpm",
+      "package_manager": "npm",
       "validation_commands": [],
       "changed_gate": null,
       "live_test": {
         "enabled": true,
         "surface_default": "terminal",
         "setup": [
-          "pnpm install --frozen-lockfile"
+          "npm ci"
         ],
         "ready_timeout_seconds": 240,
         "max_recording_seconds": 90
@@ -92,15 +92,47 @@
           "mostly_implemented_on_main"
         ]
       },
-      "package_manager": "pnpm",
+      "package_manager": "npm",
       "validation_commands": [],
       "changed_gate": null,
       "live_test": {
-        "enabled": true,
+        "enabled": false,
         "surface_default": "terminal",
-        "setup": [
-          "pnpm install --frozen-lockfile"
+        "setup": [],
+        "ready_timeout_seconds": 240,
+        "max_recording_seconds": 90
+      },
+      "automation": {
+        "hot_intake": true,
+        "normal_review": true,
+        "audit": true,
+        "apply": false,
+        "failed_review_retry": false,
+        "idea_archive_revival": false,
+        "comment_sync": false
+      }
+    },
+    {
+      "owner": "OneClickPostFactory",
+      "deny_repositories": [],
+      "allow_repo_name_pattern": "^[A-Za-z0-9_.-]+$",
+      "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there.",
+      "apply_close_rules": {
+        "issue": [
+          "implemented_on_main"
         ],
+        "pull_request": [
+          "implemented_on_main",
+          "mostly_implemented_on_main"
+        ]
+      },
+      "package_manager": "npm",
+      "validation_commands": [],
+      "changed_gate": null,
+      "live_test": {
+        "enabled": false,
+        "surface_default": "terminal",
+        "setup": [],
         "ready_timeout_seconds": 240,
         "max_recording_seconds": 90
       },
@@ -118,11 +150,33 @@
   "core_target_overrides": {},
   "target_inventory": {
     "owners": [
-      "AyobamiH"
+      "AyobamiH",
+      "OneClickPostFactory"
     ],
     "allow_repositories": [
       "AyobamiH/openclaw-operator",
-      "AyobamiH/openclaw-ops"
+      "AyobamiH/openclaw-ops",
+      "AyobamiH/proof-and-state",
+      "AyobamiH/proof-and-state-website",
+      "AyobamiH/donestate",
+      "AyobamiH/opstruth-chatgpt-plugin",
+      "AyobamiH/opstruth",
+      "AyobamiH/agentproof",
+      "AyobamiH/post-once",
+      "AyobamiH/oneclickpostfactory",
+      "OneClickPostFactory/social-agents",
+      "AyobamiH/wagging-web-wins",
+      "AyobamiH/agent-shop-products",
+      "AyobamiH/public-decision-intelligence",
+      "AyobamiH/capability-intelligence",
+      "AyobamiH/relay-live-business-engagement-connector",
+      "AyobamiH/oneclick-chatgpt-plugin",
+      "AyobamiH/founders-oneclickwebsitedesignfactory",
+      "AyobamiH/global-bill-forge",
+      "AyobamiH/coding-agent-skills",
+      "AyobamiH/ng-agro-connect",
+      "AyobamiH/poststeward",
+      "AyobamiH/tax-lien-intelligence-platform"
     ],
     "deny_repositories": [
       "AyobamiH/clawsweeper-state",
