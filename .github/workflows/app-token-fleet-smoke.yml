@@ -1,0 +1,118 @@
+name: ClawSweeper App fleet token smoke
+
+run-name: Verify ClawSweeper App token across active fleet
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+
+jobs:
+  inventory:
+    name: Resolve active fleet
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      repositories: ${{ steps.inventory.outputs.repositories }}
+      count: ${{ steps.inventory.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read active target inventory
+        id: inventory
+        run: |
+          set -euo pipefail
+          repos="$(jq -c '.target_inventory.allow_repositories' config/target-repositories.json)"
+          count="$(jq -r '.target_inventory.allow_repositories | length' config/target-repositories.json)"
+          test "$count" -gt 0
+          if jq -e '.target_inventory.allow_repositories[] | select(startswith("AyobamiH/") | not)' config/target-repositories.json >/dev/null; then
+            echo "Fleet smoke is restricted to the current AyobamiH rollout." >&2
+            exit 1
+          fi
+          echo "repositories=$repos" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Active fleet targets: $count"
+
+  verify:
+    name: Verify ${{ matrix.target }}
+    needs: inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        target: ${{ fromJSON(needs.inventory.outputs.repositories) }}
+    steps:
+      - name: Resolve target repository
+        id: target
+        env:
+          TARGET_REPO: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_REPO" in
+            AyobamiH/*) ;;
+            *) echo "Unexpected fleet target: $TARGET_REPO" >&2; exit 1 ;;
+          esac
+          owner="${TARGET_REPO%%/*}"
+          name="${TARGET_REPO#*/}"
+          {
+            echo "repo=$TARGET_REPO"
+            echo "owner=$owner"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint full ClawSweeper operator token
+        id: target-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-actions: write
+          permission-checks: read
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-statuses: read
+
+      - name: Verify token can read target
+        env:
+          GH_TOKEN: ${{ steps.target-token.outputs.token }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          actual="$(gh api "repos/$TARGET_REPO" --jq '.full_name')"
+          if [ "${actual,,}" != "${TARGET_REPO,,}" ]; then
+            echo "Installation token resolved unexpected repository: $actual" >&2
+            exit 1
+          fi
+          echo "PASS fleet target: $actual"
+          echo "- PASS: `$actual` — full operator-capable token minted and read verified; no target mutation performed." >> "$GITHUB_STEP_SUMMARY"
+
+  fleet-result:
+    name: Fleet smoke result
+    if: ${{ always() }}
+    needs: [inventory, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every fleet target to pass
+        env:
+          INVENTORY_RESULT: ${{ needs.inventory.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          TARGET_COUNT: ${{ needs.inventory.outputs.count }}
+        run: |
+          set -euo pipefail
+          echo "Inventory result: $INVENTORY_RESULT"
+          echo "Fleet verification result: $VERIFY_RESULT"
+          echo "Target count: $TARGET_COUNT"
+          test "$INVENTORY_RESULT" = success
+          test "$VERIFY_RESULT" = success
+          echo "PASS fleet: all $TARGET_COUNT active ClawSweeper targets minted the full operator-capable token and completed read verification; no target mutation was performed."
