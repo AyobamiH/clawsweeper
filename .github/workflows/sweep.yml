@@ -5433,17 +5433,7 @@ jobs:
       - name: Resolve target repository
         id: target
         run: |
-          target_repo="${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || '' }}"
-          if [ -z "$target_repo" ]; then
-            case "${{ github.event.schedule || '' }}" in
-              "12 */6 * * *")
-                target_repo="AyobamiH/openclaw-ops"
-                ;;
-              *)
-                target_repo="AyobamiH/openclaw-operator"
-                ;;
-            esac
-          fi
+          target_repo="${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}"
           if ! printf '%s' "$target_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
             echo "Invalid target repository: $target_repo" >&2
             exit 1
