@@ -79,12 +79,12 @@ restore_environment() {
   if [ "$restored" = true ]; then
     return 0
   fi
-  restored=true
   set +e
 
   if [ "$repo_actions_enabled" = true ]; then
-    retry_gh api --method PUT "repos/$repo/actions/permissions" -F enabled=false >/dev/null 2>&1 || true
-    repo_actions_enabled=false
+    if retry_gh api --method PUT "repos/$repo/actions/permissions" -F enabled=false >/dev/null 2>&1; then
+      repo_actions_enabled=false
+    fi
   fi
 
   # Restore workflow activation only after repository Actions is disabled.
@@ -95,6 +95,10 @@ restore_environment() {
 
   if [ -n "$workflow_initial_state" ] && [ "$workflow_initial_state" != 'active' ]; then
     retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null 2>&1 || true
+  fi
+
+  if [ "$repo_actions_enabled" = false ]; then
+    restored=true
   fi
 }
 trap restore_environment EXIT
@@ -259,14 +263,29 @@ final_enabled="$(retry_gh api "repos/$repo/actions/permissions" --jq '.enabled')
 queued="$(retry_gh api "repos/$repo/actions/runs?status=queued&per_page=1" --jq '.total_count')"
 running="$(retry_gh api "repos/$repo/actions/runs?status=in_progress&per_page=1" --jq '.total_count')"
 
+missing_restored_workflows=0
+for id in "${original_active_ids[@]}"; do
+  state="$(retry_gh api "repos/$repo/actions/workflows/$id" --jq '.state')"
+  if [ "$state" != 'active' ]; then
+    missing_restored_workflows=$((missing_restored_workflows + 1))
+    echo "RESTORE FAIL: workflow $id is $state; expected active." >&2
+  fi
+done
+
 echo
 echo "Observation cycle complete."
 echo "Actions enabled: $final_enabled"
 echo "Queued runs: $queued"
 echo "In-progress runs: $running"
+echo "Workflow restore failures: $missing_restored_workflows"
 
 if [ "$final_enabled" != 'false' ]; then
   echo 'FAIL: repository Actions was not returned to disabled state.' >&2
+  exit 1
+fi
+
+if [ "$missing_restored_workflows" -gt 0 ]; then
+  echo 'FAIL: one or more previously active workflows were not restored.' >&2
   exit 1
 fi
 
