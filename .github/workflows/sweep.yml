@@ -5431,26 +5431,29 @@ jobs:
       - name: Resolve target repository
         id: target
         run: |
-          target_repo="${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || '' }}"
+          target_repo="${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || '' }}"
           if [ -z "$target_repo" ]; then
             case "${{ github.event.schedule || '' }}" in
               "12 */6 * * *")
-                target_repo="openclaw/clawhub"
-                ;;
-              "17 */6 * * *")
-                target_repo="openclaw/clawsweeper"
+                target_repo="AyobamiH/openclaw-ops"
                 ;;
               *)
-                target_repo="openclaw/openclaw"
+                target_repo="AyobamiH/openclaw-operator"
                 ;;
             esac
           fi
+          if ! printf '%s' "$target_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+            echo "Invalid target repository: $target_repo" >&2
+            exit 1
+          fi
           target_owner="${target_repo%%/*}"
           target_name="${target_repo#*/}"
+          target_slug="$(printf '%s' "$target_repo" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g')"
           {
             echo "target_repo=$target_repo"
             echo "target_repo_owner=$target_owner"
             echo "target_repo_name=$target_name"
+            echo "target_slug=$target_slug"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create target read token
@@ -5469,15 +5472,15 @@ jobs:
       - name: Select target read token
         id: target-token
         env:
-          PRIMARY_TOKEN: ${{ github.token }}
-          APP_FALLBACK_TOKEN: ${{ steps.target-read-token.outputs.token }}
+          APP_TOKEN: ${{ steps.target-read-token.outputs.token }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$PRIMARY_TOKEN" ]; then
-            echo "Using workflow token for public audit reads."
-            echo "token=$PRIMARY_TOKEN" >> "$GITHUB_OUTPUT"
+          if [ -n "$APP_TOKEN" ]; then
+            echo "Using ClawSweeper App token for target audit reads."
+            echo "token=$APP_TOKEN" >> "$GITHUB_OUTPUT"
           else
-            echo "Using ClawSweeper App token fallback for audit reads."
-            echo "token=$APP_FALLBACK_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "Using workflow token fallback for public audit reads."
+            echo "token=$WORKFLOW_TOKEN" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create state token
@@ -5492,6 +5495,7 @@ jobs:
           coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+          records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           hydrate-state-blobs: "false"
           token: ${{ steps.state-token.outputs.token }}
 
@@ -5597,12 +5601,9 @@ jobs:
       - name: Resolve proof target repository
         id: target
         run: |
-          target_repo="${{ github.event.inputs.target_repo || '' }}"
+          target_repo="${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || '' }}"
           if [ -z "$target_repo" ]; then
-            case "${{ github.event.schedule || '' }}" in
-              "8,23,38,53 * * * *") target_repo="openclaw/clawhub" ;;
-              *) target_repo="openclaw/openclaw" ;;
-            esac
+            target_repo="AyobamiH/openclaw-operator"
           fi
           if ! printf '%s' "$target_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
             echo "Invalid target repository: $target_repo" >&2
@@ -5622,6 +5623,15 @@ jobs:
           echo "name=apply-coverage-proofs-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
           echo "action_ledger_name=action-ledger-apply-proof-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 
+      - name: Create read-only state token
+        id: proof-state-token
+        uses: ./.github/actions/create-state-token
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          contents-permission: read
+          actions-permission: read
+
       - uses: ./.github/actions/setup-state
         with:
           coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
@@ -5629,7 +5639,7 @@ jobs:
           records-secret: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           records-repo-slugs: ${{ steps.target.outputs.target_slug }}
           hydrate-state-blobs: "false"
-          token: ${{ github.token }}
+          token: ${{ steps.proof-state-token.outputs.token }}
           persist-credentials: "false"
 
       - uses: ./.github/actions/setup-pnpm
