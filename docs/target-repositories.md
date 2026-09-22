@@ -42,11 +42,39 @@ OpenClaw fallback's close rules, empty validation commands, and absent changed
 gate; selecting target-native setup does not broaden apply policy or inherit
 the core OpenClaw policy.
 
-Dashboard targets are configured separately with `TARGET_REPOS` in
-`dashboard/wrangler.toml`. Scheduled target selection comes from
-`target_inventory`, and apply-enabled targets use the dashboard's
-`APPLY_TARGET_REPOS` and `APPLY_OPTIONAL_TARGET_REPOS`. A runtime profile alone
-does not enable any of those surfaces.
+Scheduled repository work is controlled by `config/target-repositories.json`.
+`target_inventory` decides which repositories are members of the managed fleet,
+while each repository/profile's optional `automation` object decides which lanes
+may run for that repository. The scheduler does not need a repository name baked
+into workflow YAML.
+
+## Automation Lanes
+
+Supported `automation` keys are:
+
+- `hot_intake` — low-latency review intake
+- `normal_review` — scheduled review/backfill
+- `audit` — state/repository audit
+- `apply` — guarded close/comment application
+- `comment_sync` — durable review-comment synchronization
+- `failed_review_retry` — bounded retry of failed reviews
+- `idea_archive_revival` — reopen eligible archived ideas
+
+The code defaults review/audit lanes on and mutation lanes off. An owner-level
+`generic_fallbacks[].automation` can narrow those defaults; an explicit
+`repositories[].automation` entry overrides that owner policy for one repo.
+This means adding a repository to the inventory can safely give it review/audit
+coverage without silently granting write behaviour.
+
+The current self-hosted policy explicitly enables apply, comment sync, and
+failed-review retry for `AyobamiH/openclaw-operator` and
+`AyobamiH/openclaw-ops`. Idea-archive revival is enabled only for
+`AyobamiH/openclaw-operator`.
+
+Configuration is necessary but not sufficient authority: the ClawSweeper
+GitHub App must also be installed on every target repository. Config answers
+"may ClawSweeper manage this repo?"; the App installation answers "may GitHub
+allow it to do so?"
 
 `PUBLIC_BAY_REPOS` is a separate public-output allowlist for the minimal
 repository/item reference cards shown by OpenClaw Bay and Overview. Add a
@@ -63,7 +91,7 @@ without a TypeScript change. It is intentionally narrow:
 - owner must be listed in `generic_fallbacks`
 - repo name must match `allow_repo_name_pattern`
 - denied repositories are rejected
-- scheduled fanout is public-only unless a private state publication path exists
+- scheduled fanout follows `target_inventory.include_private` and the inventory/App credential's actual repository access
 - auto-close policy comes from that owner fallback
 - `live_test`, when present, is retained for compatibility with historical
   live-proof records and tooling; automatic review-time live proof is retired
@@ -79,21 +107,22 @@ workflow and GitHub App installation.
 ## Add One Repository
 
 1. Install the ClawSweeper GitHub App on the target repository.
-2. Add or merge the target dispatcher from
-   [`docs/target-dispatcher.md`](target-dispatcher.md).
-3. Ensure the target repo can read the org or repo
-   `CLAWSWEEPER_APP_PRIVATE_KEY` secret.
-4. Open, edit, or comment on a target issue/PR and confirm a dispatcher run
-   appears in the target repo.
-5. Confirm the receiver run appears in
-   `https://github.com/openclaw/clawsweeper/actions`.
-6. Confirm the target item gets one durable ClawSweeper review comment.
+2. Add the repository to `target_inventory.allow_repositories` (and its owner
+   to `target_inventory.owners` when onboarding a new owner).
+3. Add an explicit `repositories[]` profile when it needs repository-specific
+   toolchain, prompt, close rules, or mutation lanes. Otherwise the matching
+   owner `generic_fallbacks[]` profile applies.
+4. Leave `apply`, `comment_sync`, `failed_review_retry`, and
+   `idea_archive_revival` off until that repository is deliberately approved
+   for those mutations.
+5. For low-latency issue/PR events, add the target dispatcher described in
+   [`docs/target-dispatcher.md`](target-dispatcher.md). Scheduled fleet work
+   does not require a repository-specific cron.
+6. Verify the fanout plan reports the repository and its real default branch
+   before enabling live schedules.
 
-Add a `config/target-repositories.json` entry when a repository needs explicit
-review guidance, toolchain configuration, or close rules. Dashboard and
-scheduled-queue membership are separate changes; update their owning
-configuration only when that rollout is intended. Keep close rules narrow
-unless the repository has a documented reason for broader policy.
+After those steps, future scheduled work is selected from configuration; no new
+repository-specific schedule branch should be added to `sweep.yml`.
 
 ## Add Many Repositories
 
