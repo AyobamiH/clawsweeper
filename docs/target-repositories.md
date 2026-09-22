@@ -76,6 +76,13 @@ GitHub App must also be installed on every target repository. Config answers
 "may ClawSweeper manage this repo?"; the App installation answers "may GitHub
 allow it to do so?"
 
+ClawHub has two separate meanings in the upstream design. The `clawhub` review
+close reason is a handoff from OpenClaw core to the public skill/plugin registry;
+that policy remains part of the review engine. Separately, the
+`openclaw/clawhub` source repository can itself be a ClawSweeper target when
+the operator has installed the App there and explicitly enrolled it. Fleet
+configuration must not conflate those two roles.
+
 `PUBLIC_BAY_REPOS` is a separate public-output allowlist for the minimal
 repository/item reference cards shown by OpenClaw Bay and Overview. Add a
 repository only after confirming that it is public and intended to be visible
