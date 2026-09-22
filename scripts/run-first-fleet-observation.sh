@@ -142,6 +142,15 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+secret_names="$(retry_gh secret list --repo "$repo" --json name --jq '.[].name')"
+for required_secret in OPENAI_API_KEY CLAWSWEEPER_MODEL; do
+  if ! grep -Fxq "$required_secret" <<<"$secret_names"; then
+    echo "ABORT: required Codex review secret $required_secret is not configured." >&2
+    echo "Run scripts/configure-codex-review-runtime.sh before starting observations." >&2
+    exit 1
+  fi
+done
+
 initial_enabled="$(retry_gh api "repos/$repo/actions/permissions" --jq '.enabled')"
 if [ "$initial_enabled" != 'false' ]; then
   echo "ABORT: repository Actions is not currently disabled ($initial_enabled)." >&2
@@ -296,12 +305,15 @@ for index in "${!run_ids[@]}"; do
 
   conclusion="$(retry_gh run view "$run_id" --repo "$repo" --json conclusion --jq '.conclusion // ""')"
   url="$(retry_gh run view "$run_id" --repo "$repo" --json url --jq '.url')"
+  review_total="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select(.name | startswith("Review shard "))] | length')"
+  review_bad="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select((.name | startswith("Review shard ")) and (.conclusion != "success"))] | length')"
 
-  if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ]; then
+  if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ] || [ "$review_total" = '0' ] || [ "$review_bad" != '0' ]; then
     failures=$((failures + 1))
-    printf 'OBSERVATION FAIL: %s | %s | %s\n' "$label" "$conclusion" "$url"
+    printf 'OBSERVATION FAIL: %s | workflow=%s | review_shards=%s | failed_review_shards=%s | %s\n' \
+      "$label" "$conclusion" "$review_total" "$review_bad" "$url"
   else
-    printf 'OBSERVATION PASS: %s | %s\n' "$label" "$url"
+    printf 'OBSERVATION PASS: %s | review_shards=%s/%s | %s\n' "$label" "$review_total" "$review_total" "$url"
   fi
 done
 
