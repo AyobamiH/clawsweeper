@@ -1,0 +1,84 @@
+name: ClawSweeper App token smoke
+
+run-name: Verify ClawSweeper App token for ${{ inputs.target_repo }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "Repository whose ClawSweeper App installation token should be verified"
+        required: true
+        default: "AyobamiH/openclaw-operator"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+
+jobs:
+  mint-target-token:
+    name: Mint and verify target token
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve target repository
+        id: target
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_REPO" in
+            */*) ;;
+            *) echo "Target must be owner/repository." >&2; exit 1 ;;
+          esac
+          owner="${TARGET_REPO%%/*}"
+          name="${TARGET_REPO#*/}"
+          if ! printf '%s' "$owner" | grep -Eq '^[A-Za-z0-9_.-]+$' ||
+             ! printf '%s' "$name" | grep -Eq '^[A-Za-z0-9_.-]+$'; then
+            echo "Invalid target repository: $TARGET_REPO" >&2
+            exit 1
+          fi
+          {
+            echo "repo=$TARGET_REPO"
+            echo "owner=$owner"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint ClawSweeper target write token
+        id: target-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-checks: read
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-statuses: read
+
+      - name: Verify token can read target
+        env:
+          GH_TOKEN: ${{ steps.target-token.outputs.token }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          actual="$(gh api "repos/$TARGET_REPO" --jq '.full_name')"
+          if [ "${actual,,}" != "${TARGET_REPO,,}" ]; then
+            echo "Installation token resolved unexpected repository: $actual" >&2
+            exit 1
+          fi
+          {
+            echo "### PASS — ClawSweeper App installation token"
+            echo
+            echo "- Target: `$actual`"
+            echo "- Token mint: succeeded"
+            echo "- Requested permissions: checks read; contents/issues/pull requests write; statuses read"
+            echo "- Read verification: succeeded"
+            echo "- No target mutation was performed"
+          } >> "$GITHUB_STEP_SUMMARY"
