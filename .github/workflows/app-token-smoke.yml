@@ -73,6 +73,7 @@ jobs:
             echo "Installation token resolved unexpected repository: $actual" >&2
             exit 1
           fi
+          echo "PASS: ClawSweeper App minted the apply-capable installation token and read $actual; no target mutation was performed."
           {
             echo "### PASS — ClawSweeper App installation token"
             echo
