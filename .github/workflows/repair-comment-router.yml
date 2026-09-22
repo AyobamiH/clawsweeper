@@ -23,7 +23,7 @@ on:
       target_repo:
         description: "Repository to scan for ClawSweeper commands"
         required: true
-        default: openclaw/openclaw
+        default: AyobamiH/openclaw-operator
         type: string
       target_branch:
         description: "Optional target repository branch for exact review dispatches"
@@ -83,7 +83,7 @@ env:
 concurrency:
   # GitHub retains only one pending run per concurrency group. Exact-item verdict
   # handoffs need their own group so unrelated router traffic cannot replace them.
-  group: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.comment_id && format('repair-comment-router-{0}-comment-{1}', github.event.client_payload.target_repo || 'openclaw/openclaw', github.event.client_payload.comment_id) || github.event_name == 'workflow_dispatch' && github.event.inputs.item_numbers != '' && format('repair-comment-router-{0}-items-{1}', github.event.inputs.target_repo || 'openclaw/openclaw', github.event.inputs.item_numbers) || format('repair-comment-router-{0}', github.event.inputs.target_repo || github.event.client_payload.target_repo || 'openclaw/openclaw') }}
+  group: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.comment_id && format('repair-comment-router-{0}-comment-{1}', github.event.client_payload.target_repo || 'AyobamiH/openclaw-operator', github.event.client_payload.comment_id) || github.event_name == 'workflow_dispatch' && github.event.inputs.item_numbers != '' && format('repair-comment-router-{0}-items-{1}', github.event.inputs.target_repo || 'AyobamiH/openclaw-operator', github.event.inputs.item_numbers) || format('repair-comment-router-{0}', github.event.inputs.target_repo || github.event.client_payload.target_repo || 'AyobamiH/openclaw-operator') }}
   cancel-in-progress: false
 
 jobs:
@@ -119,11 +119,11 @@ jobs:
       - name: Resolve target repository
         id: target
         env:
-          TARGET_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || github.event_name == 'repository_dispatch' && github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}
+          TARGET_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || github.event_name == 'repository_dispatch' && github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}
           ITEM_NUMBERS: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.item_number || github.event_name == 'workflow_dispatch' && inputs.item_numbers || '' }}
         run: |
           set -euo pipefail
-          target_repo="${TARGET_REPO:-openclaw/openclaw}"
+          target_repo="${TARGET_REPO:-AyobamiH/openclaw-operator}"
           if ! printf '%s' "$target_repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
             echo "Invalid target_repo: $target_repo" >&2
             exit 1
@@ -156,16 +156,15 @@ jobs:
           permission-pull-requests: write
           permission-statuses: read
 
-      - name: Create central dispatch token
+      - name: Select central dispatch token
         id: dispatch-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
-          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
-          repositories: clawsweeper
-          permission-actions: write
-          permission-contents: write
+        env:
+          DISPATCH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "$DISPATCH_TOKEN"
+          echo "::add-mask::$DISPATCH_TOKEN"
+          echo "token=$DISPATCH_TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Create state token
         id: state-token
@@ -175,6 +174,7 @@ jobs:
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
 
       - uses: ./.github/actions/setup-state
+        id: setup-state
         with:
           coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
@@ -210,7 +210,7 @@ jobs:
           QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
-          target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}"
+          target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}"
           target_branch="${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || '' }}"
           lookback_minutes="${{ github.event_name == 'workflow_dispatch' && inputs.lookback_minutes || vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}"
           since="${{ github.event_name == 'workflow_dispatch' && inputs.since || '' }}"
@@ -222,7 +222,7 @@ jobs:
           force_reprocess="${{ github.event_name == 'workflow_dispatch' && inputs.force_reprocess || 'false' }}"
           attempt_id="${{ github.event_name == 'workflow_dispatch' && inputs.attempt_id || '' }}"
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            target_repo="${{ github.event.client_payload.target_repo || 'openclaw/openclaw' }}"
+            target_repo="${{ github.event.client_payload.target_repo || 'AyobamiH/openclaw-operator' }}"
             target_branch="${{ github.event.client_payload.target_branch || '' }}"
             lookback_minutes="${{ github.event.client_payload.lookback_minutes || vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}"
             since=""
@@ -314,7 +314,7 @@ jobs:
           pnpm run repair:comment-router -- "${args[@]}"
 
       - name: Commit comment router ledger
-        if: always()
+        if: ${{ always() && steps.setup-state.outcome == 'success' && steps.setup-pnpm.outcome == 'success' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
@@ -375,7 +375,7 @@ jobs:
           QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
         run: |
           set -euo pipefail
-          target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}"
+          target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}"
           target_branch="${{ github.event_name == 'workflow_dispatch' && inputs.target_branch || '' }}"
           lookback_minutes="${{ github.event_name == 'workflow_dispatch' && inputs.lookback_minutes || vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}"
           since="${{ github.event_name == 'workflow_dispatch' && inputs.since || '' }}"
@@ -387,7 +387,7 @@ jobs:
           force_reprocess="${{ github.event_name == 'workflow_dispatch' && inputs.force_reprocess || 'false' }}"
           attempt_id="${{ github.event_name == 'workflow_dispatch' && inputs.attempt_id || '' }}"
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            target_repo="${{ github.event.client_payload.target_repo || 'openclaw/openclaw' }}"
+            target_repo="${{ github.event.client_payload.target_repo || 'AyobamiH/openclaw-operator' }}"
             target_branch="${{ github.event.client_payload.target_branch || '' }}"
             lookback_minutes="${{ github.event.client_payload.lookback_minutes || vars.CLAWSWEEPER_COMMENT_LOOKBACK_MINUTES || '180' }}"
             since=""
