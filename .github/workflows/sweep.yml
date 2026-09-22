@@ -7,6 +7,7 @@ run-name: >-
         github.event.schedule == '41/10 * * * *' ||
         github.event.schedule == '37 */6 * * *' ||
         github.event.schedule == '8,23,38,53 * * * *' ||
+        github.event.schedule == '6,21,36,51 * * * *' ||
         github.event.schedule == '13 * * * *')) &&
       'Fan out ClawSweeper targets' ||
     (github.event_name == 'repository_dispatch' &&
