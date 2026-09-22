@@ -150,8 +150,7 @@
   "core_target_overrides": {},
   "target_inventory": {
     "owners": [
-      "AyobamiH",
-      "OneClickPostFactory"
+      "AyobamiH"
     ],
     "allow_repositories": [
       "AyobamiH/openclaw-operator",
@@ -164,7 +163,6 @@
       "AyobamiH/agentproof",
       "AyobamiH/post-once",
       "AyobamiH/oneclickpostfactory",
-      "OneClickPostFactory/social-agents",
       "AyobamiH/wagging-web-wins",
       "AyobamiH/agent-shop-products",
       "AyobamiH/public-decision-intelligence",
