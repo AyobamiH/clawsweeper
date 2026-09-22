@@ -39,7 +39,7 @@ restored=false
 
 retry_gh() {
   local attempt=1
-  local max_attempts="\${CLAWSWEEPER_GH_RETRY_ATTEMPTS:-5}"
+  local max_attempts="${CLAWSWEEPER_GH_RETRY_ATTEMPTS:-5}"
   local delay=2
   local output rc
   while true; do
@@ -55,7 +55,7 @@ retry_gh() {
       printf '%s\n' "$output" >&2
       return "$rc"
     fi
-    echo "GitHub CLI call failed (attempt $attempt/$max_attempts); retrying in \${delay}s: gh $*" >&2
+    echo "GitHub CLI call failed (attempt $attempt/$max_attempts); retrying in ${delay}s: gh $*" >&2
     printf '%s\n' "$output" >&2
     sleep "$delay"
     attempt=$((attempt + 1))
@@ -89,7 +89,7 @@ restore_environment() {
 
   # Restore workflow activation only after repository Actions is disabled.
   local id
-  for id in "\${original_active_ids[@]}"; do
+  for id in "${original_active_ids[@]}"; do
     retry_gh api --method PUT "repos/$repo/actions/workflows/$id/enable" >/dev/null 2>&1 || true
   done
 
@@ -123,7 +123,7 @@ workflow_initial_state="$(retry_gh api "repos/$repo/actions/workflows/$workflow"
 workflow_rows="$(retry_gh api --paginate "repos/$repo/actions/workflows?per_page=100" \
   --jq '.workflows[] | select(.state == "active") | [.id, .path] | @tsv')"
 while IFS=$'\t' read -r id path; do
-  [ -n "\${id:-}" ] || continue
+  [ -n "${id:-}" ] || continue
   original_active_ids+=("$id")
   original_active_paths+=("$path")
 done <<< "$workflow_rows"
@@ -137,7 +137,7 @@ done < <(retry_gh run list --repo "$repo" --workflow "$workflow" --limit 100 \
 
 # Keep every workflow disabled except for the seconds in which sweep.yml
 # receives one of the explicitly selected manual review dispatches.
-for id in "\${original_active_ids[@]}"; do
+for id in "${original_active_ids[@]}"; do
   retry_gh api --method PUT "repos/$repo/actions/workflows/$id/disable" >/dev/null
 done
 
@@ -150,11 +150,11 @@ echo 'Review publication may update normal ClawSweeper review comments/evidence.
 echo 'No apply-after-review, close, repair, comment-router, cluster-repair, or issue-build workflow is enabled.'
 echo
 
-for index in "\${!targets[@]}"; do
-  label="\${labels[$index]}"
-  target="\${targets[$index]}"
-  item_set="\${items[$index]}"
-  shard_count="\${shards[$index]}"
+for index in "${!targets[@]}"; do
+  label="${labels[$index]}"
+  target="${targets[$index]}"
+  item_set="${items[$index]}"
+  shard_count="${shards[$index]}"
 
   echo "Dispatching: $label"
 
@@ -182,7 +182,7 @@ for index in "\${!targets[@]}"; do
   for _ in $(seq 1 30); do
     latest_id="$(retry_gh run list --repo "$repo" --workflow "$workflow" --event workflow_dispatch --limit 1 \
       --json databaseId --jq '.[0].databaseId // 0')"
-    if [ "$latest_id" != '0' ] && [ "$latest_id" != "$before_id" ] && ! contains_id "$latest_id" "\${run_ids[@]}"; then
+    if [ "$latest_id" != '0' ] && [ "$latest_id" != "$before_id" ] && ! contains_id "$latest_id" "${run_ids[@]}"; then
       run_id="$latest_id"
       break
     fi
@@ -208,8 +208,8 @@ done
 # enable windows that was not one of our exact workflow_dispatch runs.
 unexpected=0
 while IFS=$'\t' read -r id event status title url; do
-  [ -n "\${id:-}" ] || continue
-  if contains_id "$id" "\${baseline_ids[@]}" || contains_id "$id" "\${run_ids[@]}"; then
+  [ -n "${id:-}" ] || continue
+  if contains_id "$id" "${baseline_ids[@]}" || contains_id "$id" "${run_ids[@]}"; then
     continue
   fi
   unexpected=$((unexpected + 1))
@@ -228,13 +228,13 @@ if [ "$unexpected" -gt 0 ]; then
 fi
 
 echo
-echo "All \${#run_ids[@]} observation reviews are dispatched. Waiting for completion..."
+echo "All ${#run_ids[@]} observation reviews are dispatched. Waiting for completion..."
 echo
 
 failures=0
-for index in "\${!run_ids[@]}"; do
-  run_id="\${run_ids[$index]}"
-  label="\${labels[$index]}"
+for index in "${!run_ids[@]}"; do
+  run_id="${run_ids[$index]}"
+  label="${labels[$index]}"
 
   set +e
   gh run watch "$run_id" --repo "$repo" --exit-status
