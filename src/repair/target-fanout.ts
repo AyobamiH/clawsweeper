@@ -21,6 +21,7 @@ export type DurableFanoutMode = "hot-intake" | "normal-review" | "audit";
 export type FanoutMode =
   | DurableFanoutMode
   | "apply"
+  | "comment-sync"
   | "failed-review-retry"
   | "idea-archive-revival";
 
@@ -121,6 +122,7 @@ const DEFAULT_AUTOMATION: Readonly<Record<FanoutMode, boolean>> = {
   "normal-review": true,
   audit: true,
   apply: false,
+  "comment-sync": false,
   "failed-review-retry": false,
   "idea-archive-revival": false,
 };
@@ -130,6 +132,7 @@ const AUTOMATION_MODE_BY_KEY: Readonly<Record<string, FanoutMode>> = {
   normal_review: "normal-review",
   audit: "audit",
   apply: "apply",
+  comment_sync: "comment-sync",
   failed_review_retry: "failed-review-retry",
   idea_archive_revival: "idea-archive-revival",
 };
@@ -711,6 +714,21 @@ export function workflowDispatchArgs(
     ];
   }
 
+  if (options.mode === "comment-sync") {
+    return [
+      "api",
+      `repos/${options.dispatchRepo}/dispatches`,
+      "-f",
+      "event_type=clawsweeper_apply_target",
+      "-f",
+      `client_payload[target_repo]=${repository.targetRepo}`,
+      "-f",
+      `client_payload[target_branch]=${repository.defaultBranch || "main"}`,
+      "-f",
+      "client_payload[apply_sync_comments_only]=true",
+    ];
+  }
+
   const eventType =
     options.mode === "apply"
       ? "clawsweeper_apply_target"
@@ -813,6 +831,7 @@ function fanoutMode(value: string): FanoutMode {
     value === "normal-review" ||
     value === "audit" ||
     value === "apply" ||
+    value === "comment-sync" ||
     value === "failed-review-retry" ||
     value === "idea-archive-revival"
   ) {
