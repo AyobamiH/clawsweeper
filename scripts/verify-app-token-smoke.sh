@@ -99,12 +99,12 @@ if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ]; then
   exit 1
 fi
 
-if ! grep -Fq 'PASS: ClawSweeper App minted the apply-capable installation token' "$log_file"; then
+if ! grep -Fq 'PASS: ClawSweeper App minted the full operator-capable installation token' "$log_file"; then
   cat "$log_file"
   echo "FAIL: run succeeded but the token verification PASS marker was not found: $run_url" >&2
   exit 1
 fi
 
-grep -F 'PASS: ClawSweeper App minted the apply-capable installation token' "$log_file" | tail -1
+grep -F 'PASS: ClawSweeper App minted the full operator-capable installation token' "$log_file" | tail -1
 printf 'SUCCESS: %s\n' "$run_url"
 printf 'Actions enabled: %s\n' "$(gh api "repos/$repo/actions/permissions" --jq '.enabled')"
