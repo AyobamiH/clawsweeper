@@ -5937,18 +5937,15 @@ jobs:
           PROOF_TARGET_REPO: ${{ needs.apply-proof.outputs.target_repo }}
         run: |
           target_repo="${{ github.event_name == 'repository_dispatch' && github.event.client_payload.target_repo || github.event.inputs.target_repo || '' }}"
-          if [ -z "$target_repo" ]; then
-            case "${{ github.event.schedule || '' }}" in
-              "8,23,38,53 * * * *")
-                target_repo="openclaw/clawhub"
-                ;;
-              *)
-                target_repo="openclaw/openclaw"
-                ;;
-            esac
+          if [ -z "$PROOF_TARGET_REPO" ]; then
+            echo "Proof target is missing; refusing to resolve a mutation target independently." >&2
+            exit 1
           fi
-          if [ -z "$PROOF_TARGET_REPO" ] || [ "$target_repo" != "$PROOF_TARGET_REPO" ]; then
-            echo "Resolved mutation target '$target_repo' differs from proof target '${PROOF_TARGET_REPO:-missing}'." >&2
+          if [ -z "$target_repo" ]; then
+            target_repo="$PROOF_TARGET_REPO"
+          fi
+          if [ "$target_repo" != "$PROOF_TARGET_REPO" ]; then
+            echo "Resolved mutation target '$target_repo' differs from proof target '$PROOF_TARGET_REPO'." >&2
             exit 1
           fi
           target_owner="${target_repo%%/*}"
