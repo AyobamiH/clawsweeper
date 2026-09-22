@@ -47,8 +47,20 @@ jobs:
             echo "name=$name"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Mint ClawSweeper target write token
-        id: target-token
+      - name: Probe Actions write
+        id: actions-write
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-actions: write
+
+      - name: Probe Checks read
+        id: checks-read
+        continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
@@ -56,12 +68,118 @@ jobs:
           owner: ${{ steps.target.outputs.owner }}
           repositories: ${{ steps.target.outputs.name }}
           permission-checks: read
+
+      - name: Probe Contents write
+        id: contents-write
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-contents: write
+
+      - name: Probe Issues write
+        id: issues-write
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-issues: write
+
+      - name: Probe Pull requests write
+        id: pull-requests-write
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-pull-requests: write
+
+      - name: Probe Commit statuses read
+        id: statuses-read
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-statuses: read
+
+      - name: Summarize permission probes
+        id: probes
+        if: ${{ always() }}
+        env:
+          ACTIONS_WRITE: ${{ steps.actions-write.outcome }}
+          CHECKS_READ: ${{ steps.checks-read.outcome }}
+          CONTENTS_WRITE: ${{ steps.contents-write.outcome }}
+          ISSUES_WRITE: ${{ steps.issues-write.outcome }}
+          PULL_REQUESTS_WRITE: ${{ steps.pull-requests-write.outcome }}
+          STATUSES_READ: ${{ steps.statuses-read.outcome }}
+        run: |
+          set -euo pipefail
+          failed=0
+          check() {
+            local label="$1"
+            local outcome="$2"
+            if [ "$outcome" = "success" ]; then
+              echo "PASS permission: $label"
+            else
+              echo "MISSING permission: $label"
+              failed=1
+            fi
+          }
+          check "Actions: write" "$ACTIONS_WRITE"
+          check "Checks: read" "$CHECKS_READ"
+          check "Contents: write" "$CONTENTS_WRITE"
+          check "Issues: write" "$ISSUES_WRITE"
+          check "Pull requests: write" "$PULL_REQUESTS_WRITE"
+          check "Commit statuses: read" "$STATUSES_READ"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ClawSweeper GitHub App permission probes"
+            echo
+            echo "| Permission | Probe |"
+            echo "| --- | --- |"
+            [ "$ACTIONS_WRITE" = success ] && a=PASS || a=MISSING
+            [ "$CHECKS_READ" = success ] && b=PASS || b=MISSING
+            [ "$CONTENTS_WRITE" = success ] && c=PASS || c=MISSING
+            [ "$ISSUES_WRITE" = success ] && d=PASS || d=MISSING
+            [ "$PULL_REQUESTS_WRITE" = success ] && e=PASS || e=MISSING
+            [ "$STATUSES_READ" = success ] && f=PASS || f=MISSING
+            echo "| Actions: write | $a |"
+            echo "| Checks: read | $b |"
+            echo "| Contents: write | $c |"
+            echo "| Issues: write | $d |"
+            echo "| Pull requests: write | $e |"
+            echo "| Commit statuses: read | $f |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint complete ClawSweeper target token
+        id: target-token
+        if: ${{ steps.probes.outputs.failed == '0' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-actions: write
+          permission-checks: read
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
           permission-statuses: read
 
-      - name: Verify token can read target
+      - name: Verify complete token can read target
+        if: ${{ steps.probes.outputs.failed == '0' }}
         env:
           GH_TOKEN: ${{ steps.target-token.outputs.token }}
           TARGET_REPO: ${{ steps.target.outputs.repo }}
@@ -73,13 +191,19 @@ jobs:
             echo "Installation token resolved unexpected repository: $actual" >&2
             exit 1
           fi
-          echo "PASS: ClawSweeper App minted the apply-capable installation token and read $actual; no target mutation was performed."
+          echo "PASS: ClawSweeper App minted the full operator-capable installation token and read $actual; no target mutation was performed."
           {
-            echo "### PASS — ClawSweeper App installation token"
+            echo
+            echo "### PASS — complete ClawSweeper App installation token"
             echo
             echo "- Target: `$actual`"
-            echo "- Token mint: succeeded"
-            echo "- Requested permissions: checks read; contents/issues/pull requests write; statuses read"
+            echo "- Full operator permission bundle: succeeded"
             echo "- Read verification: succeeded"
             echo "- No target mutation was performed"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail when required App permissions are missing
+        if: ${{ always() && steps.probes.outputs.failed != '0' }}
+        run: |
+          echo "FAIL: one or more required ClawSweeper GitHub App permissions are not granted to this installation." >&2
+          exit 1
