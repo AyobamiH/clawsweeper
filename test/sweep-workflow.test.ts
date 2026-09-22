@@ -2771,24 +2771,27 @@ test("comment-only apply preparation never scans the full target repository", ()
   const dispatch = (syncCommentsOnly: string, itemNumbers = "") => ({
     event_name: "workflow_dispatch",
     event: {
-      schedule: "",
       inputs: { apply_sync_comments_only: syncCommentsOnly, apply_item_numbers: itemNumbers },
+      client_payload: {},
     },
   });
-  const schedule = (cron: string) => ({
-    event_name: "schedule",
-    event: { schedule: cron, inputs: {} },
+  const repositoryDispatch = (syncCommentsOnly: boolean | string) => ({
+    event_name: "repository_dispatch",
+    event: {
+      inputs: {},
+      client_payload: { apply_sync_comments_only: syncCommentsOnly },
+    },
   });
 
   assert.equal(shouldReconcile(dispatch("true", "__cursor__")), false);
   assert.equal(shouldReconcile(dispatch("true", "10,20")), false);
   assert.equal(shouldReconcile(dispatch("false", "__cursor__")), false);
-  assert.equal(shouldReconcile(schedule("6,21,36,51 * * * *")), false);
+  assert.equal(shouldReconcile(repositoryDispatch(true)), false);
+  assert.equal(shouldReconcile(repositoryDispatch("true")), false);
   assert.equal(shouldReconcile(dispatch("false")), true);
-  assert.equal(shouldReconcile(schedule("3 * * * *")), true);
-  assert.match(select.run, /github\.event\.schedule \|\| ''/);
-  assert.match(select.run, /6,21,36,51 \* \* \* \*/);
-  assert.match(select.run, /sync_comments_only="true"/);
+  assert.equal(shouldReconcile(repositoryDispatch(false)), true);
+  assert.match(select.run, /github\.event\.client_payload\.apply_sync_comments_only/);
+  assert.doesNotMatch(select.run, /github\.event\.schedule/);
 });
 
 test("comment-only apply reconciliation scopes only selected items", () => {
@@ -3181,9 +3184,10 @@ test("apply workflow bounds checkpoints and requeues with a fresh token", () => 
 
   assert.match(workflow, /format\('Apply default ClawSweeper closures for \{0\}'/);
   assert.match(workflow, /format\('Apply custom ClawSweeper closures for \{0\}'/);
+  assert.match(workflow, /github\.event\.action == 'clawsweeper_apply_target'/);
   assert.match(
     workflow,
-    /github\.event\.schedule == '8,23,38,53 \* \* \* \*'\) && 'openclaw\/clawhub'/,
+    /github\.event\.client_payload\.target_repo \|\| vars\.CLAWSWEEPER_TARGET_REPO/,
   );
   assert.match(inputBlock, /apply_limit:[\s\S]*default: "40"/);
   assert.match(inputBlock, /apply_checkpoint_size:[\s\S]*default: "40"/);
@@ -5721,15 +5725,15 @@ test("exact queue and manual item dispatches reserve their live shard capacity",
   );
   assert.match(
     runName,
-    /format\('Review event items \{0\}#\{1\},\{2\} \[shards=\{3\}\]', github\.event\.inputs\.target_repo \|\| 'openclaw\/openclaw', github\.event\.inputs\.item_number, github\.event\.inputs\.item_numbers, \(github\.event\.inputs\.hot_intake == 'true' && '1' \|\| github\.event\.inputs\.shard_count \|\| '89'\)\)/,
+    /format\('Review event items \{0\}#\{1\},\{2\} \[shards=\{3\}\]', github\.event\.inputs\.target_repo \|\| 'AyobamiH\/openclaw-operator', github\.event\.inputs\.item_number, github\.event\.inputs\.item_numbers, \(github\.event\.inputs\.hot_intake == 'true' && '1' \|\| github\.event\.inputs\.shard_count \|\| '89'\)\)/,
   );
   assert.match(
     runName,
-    /github\.event_name == 'workflow_dispatch' &&\s+github\.event\.inputs\.item_number != '' &&\s+github\.event\.inputs\.item_numbers == ''\) &&\s+format\('Review event item \{0\}#\{1\}', github\.event\.inputs\.target_repo \|\| 'openclaw\/openclaw', github\.event\.inputs\.item_number\)/,
+    /github\.event_name == 'workflow_dispatch' &&\s+github\.event\.inputs\.item_number != '' &&\s+github\.event\.inputs\.item_numbers == ''\) &&\s+format\('Review event item \{0\}#\{1\}', github\.event\.inputs\.target_repo \|\| 'AyobamiH\/openclaw-operator', github\.event\.inputs\.item_number\)/,
   );
   assert.match(
     runName,
-    /format\('Review event items \{0\}#\{1\} \[shards=\{2\}\]', github\.event\.inputs\.target_repo \|\| 'openclaw\/openclaw', github\.event\.inputs\.item_numbers, \(github\.event\.inputs\.hot_intake == 'true' && '1' \|\| github\.event\.inputs\.shard_count \|\| '89'\)\)/,
+    /format\('Review event items \{0\}#\{1\} \[shards=\{2\}\]', github\.event\.inputs\.target_repo \|\| 'AyobamiH\/openclaw-operator', github\.event\.inputs\.item_numbers, \(github\.event\.inputs\.hot_intake == 'true' && '1' \|\| github\.event\.inputs\.shard_count \|\| '89'\)\)/,
   );
   assert.ok(
     runName.indexOf("format('Review event item {0}#{1}'") <
@@ -5788,7 +5792,8 @@ test("sweep workflow coalesces durable issue and PR comment sync batches", () =>
   assert.ok(checkpointCap < workflow.indexOf("          prepare_comment_sync_batch"));
   assert.match(applyHelper, /sync_open_pr_batch:-false.*[\s\S]*?apply_kind="all"/);
   assert.match(workflow, /APPLY_SYNC_OPEN_PR_BATCH/);
-  assert.match(workflow, /github\.event\.schedule == '6,21,36,51 \* \* \* \*'/);
+  assert.match(workflow, /github\.event\.client_payload\.apply_sync_comments_only/);
+  assert.match(workflow, /'comment-sync'/);
   assert.match(
     applyHelper,
     /if \[ "\$\{scheduled_comment_sync:-false\}" = "true" \]; then\s+apply_kind="all"\s+comment_sync_min_age_days=0\s+fi/,
@@ -5807,7 +5812,7 @@ test("sweep workflow coalesces durable issue and PR comment sync batches", () =>
   assert.doesNotMatch(cursorPreselect, /Deferring reconciliation/);
   assert.ok(
     cursorExecution.indexOf(
-      `sync_comments_only="\${{ github.event_name == 'workflow_dispatch' && github.event.inputs.apply_sync_comments_only || 'false' }}"`,
+      `sync_comments_only="\${{ github.event_name == 'repository_dispatch' && github.event.client_payload.apply_sync_comments_only || github.event_name == 'workflow_dispatch' && github.event.inputs.apply_sync_comments_only || 'false' }}"`,
     ) < cursorExecution.indexOf("prepare_apply_reconciliation_args"),
     "comment-only mode must be known before execution reconciliation is prepared",
   );
@@ -6113,7 +6118,7 @@ test("target fanout uses the canonical cursor store without a git publisher", ()
   assert.doesNotMatch(workflow, /Publish fanout cursor/);
 });
 
-test("hot fleet fanout runs every 20 minutes without changing other schedules", () => {
+test("fleet fanout owns all scheduled repository lanes", () => {
   const workflowText = readText(".github/workflows/sweep.yml");
   const workflow = YAML.parse(workflowText) as {
     on: { schedule: Array<{ cron: string }> };
@@ -6124,21 +6129,45 @@ test("hot fleet fanout runs every 20 minutes without changing other schedules", 
     workflowText.indexOf("\n  plan:"),
   );
 
-  assert.ok(schedules.includes("4/20 * * * *"));
-  assert.ok(!schedules.includes("4/5 * * * *"));
-  assert.ok(schedules.includes("*/5 * * * *"));
-  assert.ok(schedules.includes("2/5 * * * *"));
-  assert.ok(schedules.includes("41/10 * * * *"));
-  assert.ok(schedules.includes("37 */6 * * *"));
+  assert.deepEqual(schedules, [
+    "4/20 * * * *",
+    "41/10 * * * *",
+    "37 */6 * * *",
+    "8,23,38,53 * * * *",
+    "6,21,36,51 * * * *",
+    "13 * * * *",
+  ]);
   assert.match(fanoutBlock, /github\.event\.schedule == '4\/20 \* \* \* \*'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '8,23,38,53 \* \* \* \*' && 'apply'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '6,21,36,51 \* \* \* \*' && 'comment-sync'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* \*' && 'failed-review-retry'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit'/);
   assert.match(
     fanoutBlock,
-    /FANOUT_MODE: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review' \|\| \(github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit' \|\| 'hot-intake'\) \}\}/,
+    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '4\/20 \* \* \* \*' && '20' \|\| '12' \}\}/,
   );
   assert.match(
     fanoutBlock,
-    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' && '12' \|\| \(github\.event\.schedule == '37 \*\/6 \* \* \*' && '12' \|\| '20'\) \}\}/,
+    /if: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' \}\}[\s\S]*uses: \.\/\.github\/actions\/setup-state/,
   );
+});
+
+test("idea archive schedule fans out only to configured revival targets", () => {
+  const workflow = YAML.parse(readText(".github/workflows/idea-archive-revival.yml")) as {
+    jobs: Record<string, { if?: string; steps: Array<{ name?: string; run?: string }> }>;
+  };
+  const fanout = workflow.jobs.fanout;
+  const revive = workflow.jobs.revive;
+  assert.ok(fanout);
+  assert.ok(revive);
+  assert.match(fanout.if ?? "", /github\.event_name == 'schedule'/);
+  assert.match(
+    fanout.steps.find((step) => step.name === "Dispatch configured idea-revival targets")?.run ?? "",
+    /--mode idea-archive-revival/,
+  );
+  assert.match(revive.if ?? "", /clawsweeper_idea_archive_revival/);
+  assert.doesNotMatch(revive.if ?? "", /event_name == 'schedule'/);
 });
 
 test("review git info follows checked-out target branch", () => {
@@ -6428,10 +6457,10 @@ test("durable cursor sync coalesces safely without discarding targeted batches",
     evaluate(event(2, "__cursor__"), format),
     "durable background cursors must coalesce",
   );
-  assert.equal(
-    evaluate(event(1, "__cursor__"), format),
+  assert.match(
     evaluate(event(3, "", true), format),
-    "scheduled maintenance must share the durable background cursor",
+    /^clawsweeper-target-fanout-/,
+    "scheduled maintenance must stay in the fleet-fanout concurrency lane",
   );
   for (const targetRepo of ["openclaw/openclaw", "openclaw/clawhub"]) {
     const initial = event(22, "__cursor__");
@@ -6714,6 +6743,8 @@ test("sweep issue and PR event reviews and target fanout avoid storm amplificati
   assert.match(eventBlock, /decision=\$\{JSON\.stringify\(decision\)\}/);
   assert.match(eventBlock, /cancel-in-progress: false/);
   assert.match(legacyIntakeBlock, /legacy-event-queue-intake:/);
+  assert.match(legacyIntakeBlock, /github\.event\.action == 'clawsweeper_item'/);
+  assert.doesNotMatch(legacyIntakeBlock, /github\.event\.action != 'clawsweeper_target_sweep'/);
   assert.match(legacyIntakeBlock, /\/internal\/exact-review\/enqueue/);
   assert.match(legacyIntakeBlock, /\/internal\/exact-review\/source-authority/);
   assert.match(legacyIntakeBlock, /\/internal\/exact-review\/branch-authority/);

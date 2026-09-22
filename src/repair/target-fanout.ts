@@ -17,7 +17,15 @@ import { parseArgs, repoRoot } from "./lib.js";
 
 type JsonRecord = Record<string, unknown>;
 
-export type FanoutMode = "hot-intake" | "normal-review" | "audit";
+export type DurableFanoutMode = "hot-intake" | "normal-review" | "audit";
+export type FanoutMode =
+  | DurableFanoutMode
+  | "apply"
+  | "comment-sync"
+  | "failed-review-retry"
+  | "idea-archive-revival";
+
+export type RepositoryAutomationOverrides = Readonly<Partial<Record<FanoutMode, boolean>>>;
 
 export interface InventoryConfig {
   owners: readonly string[];
@@ -27,6 +35,8 @@ export interface InventoryConfig {
   includeArchived: boolean;
   includeForks: boolean;
   requireIssues: boolean;
+  repositoryAutomation?: ReadonlyMap<string, RepositoryAutomationOverrides>;
+  ownerAutomation?: ReadonlyMap<string, RepositoryAutomationOverrides>;
 }
 
 export interface ListedRepository {
@@ -90,10 +100,10 @@ export interface ReviewFanoutRepository extends ReviewPlanningRepository {
   candidateCapacity: number;
 }
 
-export type FanoutCursorSnapshot = DurableCursorSnapshot<FanoutMode>;
-export type FanoutCursorStoreOptions = DurableCursorStoreOptions<FanoutMode>;
+export type FanoutCursorSnapshot = DurableCursorSnapshot<DurableFanoutMode>;
+export type FanoutCursorStoreOptions = DurableCursorStoreOptions<DurableFanoutMode>;
 
-interface FanoutOptions {
+export interface FanoutOptions {
   mode: FanoutMode;
   limit: number;
   cursorStoreUrl: string;
@@ -106,6 +116,26 @@ interface FanoutOptions {
 
 const PUBLIC_INVENTORY_TOKEN = "__public__";
 export const SCHEDULED_REVIEW_PLAN_BATCH_SIZE = 50;
+
+const DEFAULT_AUTOMATION: Readonly<Record<FanoutMode, boolean>> = {
+  "hot-intake": true,
+  "normal-review": true,
+  audit: true,
+  apply: false,
+  "comment-sync": false,
+  "failed-review-retry": false,
+  "idea-archive-revival": false,
+};
+
+const AUTOMATION_MODE_BY_KEY: Readonly<Record<string, FanoutMode>> = {
+  hot_intake: "hot-intake",
+  normal_review: "normal-review",
+  audit: "audit",
+  apply: "apply",
+  comment_sync: "comment-sync",
+  failed_review_retry: "failed-review-retry",
+  idea_archive_revival: "idea-archive-revival",
+};
 
 export async function runTargetFanout(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
@@ -159,7 +189,8 @@ export async function runTargetFanout(argv: string[]): Promise<void> {
     return;
   }
 
-  let planningRepositories: readonly SelectedRepository[] = repositories;
+  const modeRepositories = filterRepositoriesForMode(repositories, config, mode);
+  let planningRepositories: readonly SelectedRepository[] = modeRepositories;
   let reviewCandidateCapacity: number | null = null;
   if (mode === "normal-review" || mode === "hot-intake") {
     const openCounts = loadRepositoryOpenCounts(repositories);
@@ -187,19 +218,31 @@ export async function runTargetFanout(argv: string[]): Promise<void> {
         ? coverageTrackedCountsFromManifest(coverageManifestPath)
         : undefined;
       planningRepositories = reviewPlanningRepositories({
-        repositories,
+        repositories: modeRepositories,
         openCounts,
         ...(coverageTrackedCounts ? { coverageTrackedCounts } : {}),
       });
     } else {
-      planningRepositories = repositoriesWithOpenItems(repositories, openCounts);
+      planningRepositories = repositoriesWithOpenItems(modeRepositories, openCounts);
     }
   }
-  const cursor = await loadFanoutCursor({
-    baseUrl: options.cursorStoreUrl,
-    webhookSecret: process.env.CLAWSWEEPER_WEBHOOK_SECRET ?? "",
-    mode,
-  });
+  const durableMode = isDurableFanoutMode(mode);
+  const cursor: { nextCursor: number; revision: number; loaded: boolean } = durableMode
+    ? await loadFanoutCursor({
+        baseUrl: options.cursorStoreUrl,
+        webhookSecret: process.env.CLAWSWEEPER_WEBHOOK_SECRET ?? "",
+        mode,
+      })
+    : {
+        nextCursor: statelessFanoutCursor(
+          mode,
+          planningRepositories.length,
+          options.limit,
+          Number(process.env.GITHUB_RUN_NUMBER ?? "0"),
+        ),
+        revision: 0,
+        loaded: false,
+      };
   let selection: SelectionResult;
   if (mode === "normal-review") {
     const fallbackCapacity =
@@ -242,17 +285,18 @@ export async function runTargetFanout(argv: string[]): Promise<void> {
     dispatched.push(repository.targetRepo);
   }
 
-  const cursorPersisted = options.dryRun
-    ? false
-    : await persistFanoutCursorFailOpen(
-        {
-          baseUrl: options.cursorStoreUrl,
-          webhookSecret: process.env.CLAWSWEEPER_WEBHOOK_SECRET ?? "",
-          mode,
-        },
-        selection.cursor,
-        cursor.revision,
-      );
+  const cursorPersisted =
+    options.dryRun || !durableMode
+      ? false
+      : await persistFanoutCursorFailOpen(
+          {
+            baseUrl: options.cursorStoreUrl,
+            webhookSecret: process.env.CLAWSWEEPER_WEBHOOK_SECRET ?? "",
+            mode,
+          },
+          selection.cursor,
+          cursor.revision,
+        );
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -310,6 +354,38 @@ export function readInventoryConfig(
       "target_inventory.allow_repositories",
     ).map((repo) => repo.toLowerCase());
   }
+
+  const repositoryAutomation = new Map<string, RepositoryAutomationOverrides>();
+  const configuredRepositories = Array.isArray(config.repositories) ? config.repositories : [];
+  for (const [index, rawEntry] of configuredRepositories.entries()) {
+    const entry = record(rawEntry, `repositories[${index}]`);
+    const targetRepo = stringValue(entry.target_repo, `repositories[${index}].target_repo`)
+      .trim()
+      .toLowerCase();
+    if (entry.automation !== undefined) {
+      repositoryAutomation.set(
+        targetRepo,
+        automationOverrides(entry.automation, `repositories[${index}].automation`),
+      );
+    }
+  }
+  if (repositoryAutomation.size > 0) result.repositoryAutomation = repositoryAutomation;
+
+  const ownerAutomation = new Map<string, RepositoryAutomationOverrides>();
+  const genericFallbacks = Array.isArray(config.generic_fallbacks) ? config.generic_fallbacks : [];
+  for (const [index, rawEntry] of genericFallbacks.entries()) {
+    const entry = record(rawEntry, `generic_fallbacks[${index}]`);
+    const owner = stringValue(entry.owner, `generic_fallbacks[${index}].owner`)
+      .trim()
+      .toLowerCase();
+    if (entry.automation !== undefined) {
+      ownerAutomation.set(
+        owner,
+        automationOverrides(entry.automation, `generic_fallbacks[${index}].automation`),
+      );
+    }
+  }
+  if (ownerAutomation.size > 0) result.ownerAutomation = ownerAutomation;
   return result;
 }
 
@@ -351,6 +427,36 @@ export function filterEligibleRepositories(
       defaultBranch: repository.defaultBranch,
       visibility: repository.visibility,
     }));
+}
+
+export function automationEnabledForRepository(
+  targetRepo: string,
+  config: InventoryConfig,
+  mode: FanoutMode,
+): boolean {
+  const normalized = targetRepo.trim().toLowerCase();
+  const owner = normalized.split("/")[0] ?? "";
+  let enabled = DEFAULT_AUTOMATION[mode];
+
+  const ownerOverrides = config.ownerAutomation?.get(owner);
+  const ownerValue = ownerOverrides?.[mode];
+  if (typeof ownerValue === "boolean") enabled = ownerValue;
+
+  const repositoryOverrides = config.repositoryAutomation?.get(normalized);
+  const repositoryValue = repositoryOverrides?.[mode];
+  if (typeof repositoryValue === "boolean") enabled = repositoryValue;
+
+  return enabled;
+}
+
+export function filterRepositoriesForMode<RepositoryT extends SelectedRepository>(
+  repositories: readonly RepositoryT[],
+  config: InventoryConfig,
+  mode: FanoutMode,
+): RepositoryT[] {
+  return repositories.filter((repository) =>
+    automationEnabledForRepository(repository.targetRepo, config, mode),
+  );
 }
 
 export function selectRepositories<RepositoryT extends SelectedRepository>(
@@ -568,12 +674,12 @@ function listedRepository(value: unknown, label: string): ListedRepository {
   };
 }
 
-function workflowDispatchArgs(
+export function workflowDispatchArgs(
   repository: SelectedRepository,
   options: FanoutOptions,
   candidateCapacity = SCHEDULED_REVIEW_PLAN_BATCH_SIZE,
 ): string[] {
-  if (options.mode !== "audit") {
+  if (options.mode === "hot-intake" || options.mode === "normal-review") {
     return [
       "api",
       `repos/${options.dispatchRepo}/dispatches`,
@@ -591,19 +697,54 @@ function workflowDispatchArgs(
       "client_payload[shard_count]=1",
     ];
   }
-  const args = [
-    "workflow",
-    "run",
-    options.workflow,
-    "--repo",
-    options.dispatchRepo,
-    "--ref",
-    options.ref,
+
+  if (options.mode === "audit") {
+    return [
+      "workflow",
+      "run",
+      options.workflow,
+      "--repo",
+      options.dispatchRepo,
+      "--ref",
+      options.ref,
+      "-f",
+      `target_repo=${repository.targetRepo}`,
+      "-f",
+      "audit_dashboard=true",
+    ];
+  }
+
+  if (options.mode === "comment-sync") {
+    return [
+      "api",
+      `repos/${options.dispatchRepo}/dispatches`,
+      "-f",
+      "event_type=clawsweeper_apply_target",
+      "-f",
+      `client_payload[target_repo]=${repository.targetRepo}`,
+      "-f",
+      `client_payload[target_branch]=${repository.defaultBranch || "main"}`,
+      "-f",
+      "client_payload[apply_sync_comments_only]=true",
+    ];
+  }
+
+  const eventType =
+    options.mode === "apply"
+      ? "clawsweeper_apply_target"
+      : options.mode === "failed-review-retry"
+        ? "clawsweeper_failed_review_retry"
+        : "clawsweeper_idea_archive_revival";
+  return [
+    "api",
+    `repos/${options.dispatchRepo}/dispatches`,
     "-f",
-    `target_repo=${repository.targetRepo}`,
+    `event_type=${eventType}`,
+    "-f",
+    `client_payload[target_repo]=${repository.targetRepo}`,
+    "-f",
+    `client_payload[target_branch]=${repository.defaultBranch || "main"}`,
   ];
-  args.push("-f", "audit_dashboard=true");
-  return args;
 }
 
 export async function fetchFanoutCursor(
@@ -685,13 +826,37 @@ function dispatchEnv(): NodeJS.ProcessEnv {
 }
 
 function fanoutMode(value: string): FanoutMode {
-  if (value === "hot-intake" || value === "normal-review" || value === "audit") return value;
+  if (
+    value === "hot-intake" ||
+    value === "normal-review" ||
+    value === "audit" ||
+    value === "apply" ||
+    value === "comment-sync" ||
+    value === "failed-review-retry" ||
+    value === "idea-archive-revival"
+  ) {
+    return value;
+  }
   throw new Error(`unsupported fanout mode: ${value}`);
+}
+
+function isDurableFanoutMode(mode: FanoutMode): mode is DurableFanoutMode {
+  return mode === "hot-intake" || mode === "normal-review" || mode === "audit";
+}
+
+export function statelessFanoutCursor(
+  mode: FanoutMode,
+  repositoryCount: number,
+  limit: number,
+  runNumber: number,
+): number {
+  if (isDurableFanoutMode(mode) || repositoryCount <= 0) return 0;
+  const safeRunNumber = Number.isSafeInteger(runNumber) && runNumber >= 0 ? runNumber : 0;
+  return normalizeCursor(safeRunNumber * Math.max(1, limit), repositoryCount);
 }
 
 export function defaultLimit(mode: FanoutMode): string {
   if (mode === "hot-intake") return "20";
-  if (mode === "normal-review") return "12";
   return "12";
 }
 
@@ -896,6 +1061,23 @@ function positiveNumber(value: string, label: string): number {
 
 function normalizeCursor(cursor: number, length: number): number {
   return ((cursor % length) + length) % length;
+}
+
+function automationOverrides(
+  value: unknown,
+  label: string,
+): RepositoryAutomationOverrides {
+  const raw = record(value, label);
+  const result: Partial<Record<FanoutMode, boolean>> = {};
+  for (const [key, rawValue] of Object.entries(raw)) {
+    const mode = AUTOMATION_MODE_BY_KEY[key];
+    if (!mode) throw new Error(`${label} has unsupported automation lane: ${key}`);
+    if (typeof rawValue !== "boolean") {
+      throw new Error(`${label}.${key} must be a boolean`);
+    }
+    result[mode] = rawValue;
+  }
+  return result;
 }
 
 function csvArg(value: unknown): string[] | undefined {

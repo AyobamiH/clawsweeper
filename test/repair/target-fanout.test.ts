@@ -12,17 +12,22 @@ import {
   defaultLimit,
   fetchFanoutCursor,
   filterEligibleRepositories,
+  filterRepositoriesForMode,
   loadFanoutCursor,
   persistFanoutCursorFailOpen,
   planReviewFanout,
   publishReviewCoverageInventory,
   putFanoutCursor,
+  readInventoryConfig,
   renderFleetReviewCoverage,
   reviewCoverageInventorySnapshot,
   reviewPlanningRepositories,
   repositoriesWithOpenItems,
   selectRepositories,
+  statelessFanoutCursor,
   summarizeFleetReviewCoverage,
+  workflowDispatchArgs,
+  type FanoutOptions,
   type InventoryConfig,
   type ListedRepository,
 } from "../../dist/repair/target-fanout.js";
@@ -41,6 +46,193 @@ test("target fanout defaults match the scheduled cursor batch sizes", () => {
   assert.equal(defaultLimit("hot-intake"), "20");
   assert.equal(defaultLimit("normal-review"), "12");
   assert.equal(defaultLimit("audit"), "12");
+  assert.equal(defaultLimit("apply"), "12");
+  assert.equal(defaultLimit("comment-sync"), "12");
+  assert.equal(defaultLimit("failed-review-retry"), "12");
+  assert.equal(defaultLimit("idea-archive-revival"), "12");
+});
+
+test("target automation defaults keep mutation lanes opt-in", () => {
+  const repositories = [
+    { targetRepo: "ayobamih/openclaw-operator", defaultBranch: "main", visibility: "PUBLIC" },
+    { targetRepo: "ayobamih/openclaw-ops", defaultBranch: "master", visibility: "PRIVATE" },
+  ];
+  const laneConfig: InventoryConfig = {
+    ...config,
+    owners: ["ayobamih"],
+    includePrivate: true,
+    ownerAutomation: new Map([
+      [
+        "ayobamih",
+        {
+          "hot-intake": true,
+          "normal-review": true,
+          audit: true,
+          apply: false,
+          "comment-sync": false,
+          "failed-review-retry": false,
+          "idea-archive-revival": false,
+        },
+      ],
+    ]),
+    repositoryAutomation: new Map([
+      [
+        "ayobamih/openclaw-operator",
+        {
+          apply: true,
+          "comment-sync": true,
+          "failed-review-retry": true,
+          "idea-archive-revival": true,
+        },
+      ],
+      [
+        "ayobamih/openclaw-ops",
+        {
+          apply: true,
+          "comment-sync": true,
+          "failed-review-retry": true,
+          "idea-archive-revival": false,
+        },
+      ],
+    ]),
+  };
+
+  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "normal-review"), repositories);
+  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "apply"), repositories);
+  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "comment-sync"), repositories);
+  assert.deepEqual(
+    filterRepositoriesForMode(repositories, laneConfig, "idea-archive-revival"),
+    [repositories[0]],
+  );
+});
+
+test("target automation config is read from explicit and owner profiles", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-target-automation-"));
+  const configPath = join(root, "targets.json");
+  try {
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        repositories: [
+          {
+            target_repo: "AyobamiH/openclaw-operator",
+            automation: {
+              apply: true,
+              comment_sync: true,
+              failed_review_retry: true,
+              idea_archive_revival: true,
+            },
+          },
+        ],
+        generic_fallbacks: [
+          {
+            owner: "AyobamiH",
+            automation: {
+              hot_intake: true,
+              normal_review: true,
+              audit: true,
+              apply: false,
+              comment_sync: false,
+              failed_review_retry: false,
+              idea_archive_revival: false,
+            },
+          },
+        ],
+        target_inventory: {
+          owners: ["AyobamiH"],
+          allow_repositories: ["AyobamiH/openclaw-operator"],
+          deny_repositories: [],
+          include_private: true,
+          include_archived: false,
+          include_forks: false,
+          require_issues: true,
+        },
+      }),
+    );
+    const parsed = readInventoryConfig(configPath);
+    assert.equal(parsed.ownerAutomation?.get("ayobamih")?.["normal-review"], true);
+    assert.equal(parsed.ownerAutomation?.get("ayobamih")?.apply, false);
+    assert.equal(parsed.repositoryAutomation?.get("ayobamih/openclaw-operator")?.apply, true);
+    assert.equal(
+      parsed.repositoryAutomation?.get("ayobamih/openclaw-operator")?.["comment-sync"],
+      true,
+    );
+    assert.equal(
+      parsed.repositoryAutomation?.get("ayobamih/openclaw-operator")?.["idea-archive-revival"],
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("mutation fanout dispatches the selected repo and preserves its default branch", () => {
+  const repository = {
+    targetRepo: "ayobamih/openclaw-ops",
+    defaultBranch: "master",
+    visibility: "PRIVATE",
+  };
+  const options = (mode: FanoutOptions["mode"]): FanoutOptions => ({
+    mode,
+    limit: 12,
+    cursorStoreUrl: "",
+    dispatchRepo: "AyobamiH/clawsweeper",
+    workflow: "sweep.yml",
+    ref: "main",
+    dryRun: false,
+    owners: undefined,
+  });
+
+  assert.deepEqual(workflowDispatchArgs(repository, options("apply")), [
+    "api",
+    "repos/AyobamiH/clawsweeper/dispatches",
+    "-f",
+    "event_type=clawsweeper_apply_target",
+    "-f",
+    "client_payload[target_repo]=ayobamih/openclaw-ops",
+    "-f",
+    "client_payload[target_branch]=master",
+  ]);
+  assert.deepEqual(workflowDispatchArgs(repository, options("comment-sync")), [
+    "api",
+    "repos/AyobamiH/clawsweeper/dispatches",
+    "-f",
+    "event_type=clawsweeper_apply_target",
+    "-f",
+    "client_payload[target_repo]=ayobamih/openclaw-ops",
+    "-f",
+    "client_payload[target_branch]=master",
+    "-f",
+    "client_payload[apply_sync_comments_only]=true",
+  ]);
+  assert.deepEqual(workflowDispatchArgs(repository, options("failed-review-retry")), [
+    "api",
+    "repos/AyobamiH/clawsweeper/dispatches",
+    "-f",
+    "event_type=clawsweeper_failed_review_retry",
+    "-f",
+    "client_payload[target_repo]=ayobamih/openclaw-ops",
+    "-f",
+    "client_payload[target_branch]=master",
+  ]);
+  assert.deepEqual(workflowDispatchArgs(repository, options("idea-archive-revival")), [
+    "api",
+    "repos/AyobamiH/clawsweeper/dispatches",
+    "-f",
+    "event_type=clawsweeper_idea_archive_revival",
+    "-f",
+    "client_payload[target_repo]=ayobamih/openclaw-ops",
+    "-f",
+    "client_payload[target_branch]=master",
+  ]);
+});
+
+test("stateless mutation fanout rotates without needing Worker cursor support", () => {
+  assert.equal(statelessFanoutCursor("apply", 20, 12, 0), 0);
+  assert.equal(statelessFanoutCursor("apply", 20, 12, 1), 12);
+  assert.equal(statelessFanoutCursor("apply", 20, 12, 2), 4);
+  assert.equal(statelessFanoutCursor("comment-sync", 20, 12, 2), 4);
+  assert.equal(statelessFanoutCursor("normal-review", 20, 12, 2), 0);
 });
 
 test("scheduled fanout retains a bounded fallback when queue capacity is unavailable", () => {

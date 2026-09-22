@@ -3,6 +3,8 @@ name: Revive idea archive
 on:
   schedule:
     - cron: "17 */6 * * *"
+  repository_dispatch:
+    types: [clawsweeper_idea_archive_revival]
   workflow_dispatch:
     inputs:
       target_repo:
@@ -15,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: idea-archive-revival-${{ github.event.inputs.target_repo || 'AyobamiH/openclaw-operator' }}
+  group: idea-archive-revival-${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || 'fanout' }}
   cancel-in-progress: false
 
 env:
@@ -23,8 +25,46 @@ env:
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
 
 jobs:
+  fanout:
+    name: Fan out idea archive revival targets
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          filter: blob:none
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          build-script: build:repair
+
+      - name: Create AyobamiH inventory token
+        id: ayobamih-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+
+      - name: Dispatch configured idea-revival targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAWSWEEPER_DISPATCH_TOKEN: ${{ github.token }}
+          CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: ${{ steps.ayobamih-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          pnpm run target-fanout -- \
+            --mode idea-archive-revival \
+            --limit 12 \
+            --repo "$GITHUB_REPOSITORY"
+
   revive:
     name: Revive sponsored or popular ideas
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'repository_dispatch' && github.event.action == 'clawsweeper_idea_archive_revival') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,7 +77,7 @@ jobs:
       - name: Resolve target repository
         id: target
         env:
-          TARGET_REPO: ${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo || github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator' }}
         run: |
           set -euo pipefail
           case "$TARGET_REPO" in
