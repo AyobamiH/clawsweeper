@@ -3181,9 +3181,10 @@ test("apply workflow bounds checkpoints and requeues with a fresh token", () => 
 
   assert.match(workflow, /format\('Apply default ClawSweeper closures for \{0\}'/);
   assert.match(workflow, /format\('Apply custom ClawSweeper closures for \{0\}'/);
+  assert.match(workflow, /github\.event\.action == 'clawsweeper_apply_target'/);
   assert.match(
     workflow,
-    /github\.event\.schedule == '8,23,38,53 \* \* \* \*'\) && 'openclaw\/clawhub'/,
+    /github\.event\.client_payload\.target_repo \|\| vars\.CLAWSWEEPER_TARGET_REPO/,
   );
   assert.match(inputBlock, /apply_limit:[\s\S]*default: "40"/);
   assert.match(inputBlock, /apply_checkpoint_size:[\s\S]*default: "40"/);
@@ -6113,7 +6114,7 @@ test("target fanout uses the canonical cursor store without a git publisher", ()
   assert.doesNotMatch(workflow, /Publish fanout cursor/);
 });
 
-test("hot fleet fanout runs every 20 minutes without changing other schedules", () => {
+test("fleet fanout owns scheduled review, apply, and retry lanes", () => {
   const workflowText = readText(".github/workflows/sweep.yml");
   const workflow = YAML.parse(workflowText) as {
     on: { schedule: Array<{ cron: string }> };
@@ -6126,18 +6127,23 @@ test("hot fleet fanout runs every 20 minutes without changing other schedules", 
 
   assert.ok(schedules.includes("4/20 * * * *"));
   assert.ok(!schedules.includes("4/5 * * * *"));
-  assert.ok(schedules.includes("*/5 * * * *"));
-  assert.ok(schedules.includes("2/5 * * * *"));
+  assert.ok(!schedules.includes("2/5 * * * *"));
   assert.ok(schedules.includes("41/10 * * * *"));
   assert.ok(schedules.includes("37 */6 * * *"));
+  assert.ok(schedules.includes("8,23,38,53 * * * *"));
+  assert.ok(schedules.includes("13 * * * *"));
   assert.match(fanoutBlock, /github\.event\.schedule == '4\/20 \* \* \* \*'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '8,23,38,53 \* \* \* \*' && 'apply'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* \*' && 'failed-review-retry'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit'/);
   assert.match(
     fanoutBlock,
-    /FANOUT_MODE: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review' \|\| \(github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit' \|\| 'hot-intake'\) \}\}/,
+    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '4\/20 \* \* \* \*' && '20' \|\| '12' \}\}/,
   );
   assert.match(
     fanoutBlock,
-    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' && '12' \|\| \(github\.event\.schedule == '37 \*\/6 \* \* \*' && '12' \|\| '20'\) \}\}/,
+    /if: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' \}\}[\s\S]*uses: \.\/\.github\/actions\/setup-state/,
   );
 });
 
