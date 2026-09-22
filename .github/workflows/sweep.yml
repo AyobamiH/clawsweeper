@@ -3,16 +3,12 @@ name: ClawSweeper
 run-name: >-
   ${{
     (github.event_name == 'schedule' &&
-    (github.event_name == 'schedule' && github.event.schedule == '8,23,38,53 * * * *') &&
-      'Fan out ClawSweeper apply targets' ||
-    (github.event_name == 'schedule' && github.event.schedule == '13 * * * *') &&
-      'Fan out failed-review retry targets' ||
       (github.event.schedule == '4/20 * * * *' ||
         github.event.schedule == '41/10 * * * *' ||
-        github.event.schedule == '37 */6 * * *')) &&
+        github.event.schedule == '37 */6 * * *' ||
+        github.event.schedule == '8,23,38,53 * * * *' ||
+        github.event.schedule == '13 * * * *')) &&
       'Fan out ClawSweeper targets' ||
-    (github.event_name == 'schedule' && github.event.schedule == '13 * * * *') &&
-      'Retry failed Codex reviews' ||
     (github.event_name == 'repository_dispatch' &&
       github.event.action == 'clawsweeper_target_sweep' &&
       github.event.client_payload.hot_intake == 'true') &&
