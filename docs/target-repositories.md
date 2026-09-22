@@ -71,6 +71,48 @@ failed-review retry for `AyobamiH/openclaw-operator` and
 `AyobamiH/openclaw-ops`. Idea-archive revival is enabled only for
 `AyobamiH/openclaw-operator`.
 
+### GTM vault fleet
+
+The owner's current Google Drive GTM vault resolves to 22 distinct source
+repositories. All 22 are enrolled in `target_inventory.allow_repositories`;
+the pre-existing private `AyobamiH/openclaw-ops` target remains enrolled as
+well, so the managed allowlist contains 23 repositories.
+
+- Proof & State: `AyobamiH/proof-and-state`,
+  `AyobamiH/proof-and-state-website`, `AyobamiH/donestate`,
+  `AyobamiH/opstruth-chatgpt-plugin`, `AyobamiH/opstruth`,
+  `AyobamiH/agentproof`
+- post-once: `AyobamiH/post-once`
+- OneClickPostFactory: `AyobamiH/oneclickpostfactory`,
+  `OneClickPostFactory/social-agents`
+- Tail Wagging Websites: `AyobamiH/wagging-web-wins`
+- Agent Shop Products: `AyobamiH/agent-shop-products`
+- Public Decision Intelligence: `AyobamiH/public-decision-intelligence`
+- Capability Intelligence: `AyobamiH/capability-intelligence`
+- Relay Live Business Engagement:
+  `AyobamiH/relay-live-business-engagement-connector`
+- OpenClaw Operator: `AyobamiH/openclaw-operator`
+- One Click for ChatGPT: `AyobamiH/oneclick-chatgpt-plugin`
+- Lovable Architecture Auditor:
+  `AyobamiH/founders-oneclickwebsitedesignfactory`
+- Global Bill Forge: `AyobamiH/global-bill-forge`
+- Coding Agent Skills: `AyobamiH/coding-agent-skills`
+- AgroLink Nigeria: `AyobamiH/ng-agro-connect`
+- PostSteward: `AyobamiH/poststeward`
+- ParcelBasis / Tax Lien Intelligence:
+  `AyobamiH/tax-lien-intelligence-platform`
+
+GTM fleet onboarding is deliberately conservative. The `AyobamiH` and
+`OneClickPostFactory` generic profiles enable hot intake, normal review and
+audit, but keep apply, comment sync, failed-review retry and idea revival off.
+Generic live tests are also disabled. Before mutation lanes are enabled for a
+newly enrolled repo, give it an explicit profile with its verified native
+toolchain and live-test setup.
+
+The two existing full-automation OpenClaw targets are explicit profiles and use
+their observed npm lockfiles: `npm ci` is the live-test setup for both
+`AyobamiH/openclaw-operator` and `AyobamiH/openclaw-ops`.
+
 Configuration is necessary but not sufficient authority: the ClawSweeper
 GitHub App must also be installed on every target repository. Config answers
 "may ClawSweeper manage this repo?"; the App installation answers "may GitHub
