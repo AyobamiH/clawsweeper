@@ -66,9 +66,6 @@ for status in queued in_progress pending waiting requested; do
   fi
 done
 
-expected_targets="$(retry_gh api "repos/$repo/contents/config/target-repositories.json" --jq '.content' | base64 -d | jq -r '.target_inventory.allow_repositories | length')"
-test "$expected_targets" -gt 0
-
 smoke_initial_state="$(retry_gh api "repos/$repo/actions/workflows/$smoke" --jq '.state')"
 workflow_rows="$(retry_gh api --paginate "repos/$repo/actions/workflows?per_page=100" \
   --jq '.workflows[] | select(.state == "active") | [.id, .path] | @tsv')"
@@ -143,6 +140,15 @@ retry_gh run view "$run_id" --repo "$repo" --log >"$log_file" || true
 if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ]; then
   grep -E 'PASS fleet target:|permissions requested|level of access|not found|FAIL:' "$log_file" || cat "$log_file"
   echo "FAIL: ClawSweeper App fleet token smoke did not pass: $run_url" >&2
+  exit 1
+fi
+
+expected_targets="$(grep -F 'Target count:' "$log_file" | tail -1 | sed 's/.*Target count: //' | tr -d '[:space:]')"
+if ! printf '%s' "$expected_targets" | grep -Eq '^[1-9][0-9]*printf 'SUCCESS: %s\n' "$run_url"
+printf 'Actions enabled: %s\n' "$(retry_gh api "repos/$repo/actions/permissions" --jq '.enabled')"
+; then
+  cat "$log_file"
+  echo "FAIL: could not recover the active target count from the fleet smoke logs: $run_url" >&2
   exit 1
 fi
 
