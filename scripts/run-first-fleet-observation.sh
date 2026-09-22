@@ -249,7 +249,8 @@ for index in "${!targets[@]}"; do
   # across a cron boundary.
   if ! start_status="$(wait_for_run_to_start "$run_id")"; then
     retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
-    echo "FAIL: $run_id stayed queued for more than 60 seconds; sweep.yml was disabled again." >&2
+    echo "FAIL: $run_id stayed queued for more than 60 seconds; cancelling the zero-job dispatch before restoring containment." >&2
+    retry_gh run cancel "$run_id" --repo "$repo" >/dev/null 2>&1 || true
     exit 1
   fi
   retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
