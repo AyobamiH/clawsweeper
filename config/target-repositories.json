@@ -33,7 +33,8 @@
         "audit": true,
         "apply": true,
         "failed_review_retry": true,
-        "idea_archive_revival": true
+        "idea_archive_revival": true,
+        "comment_sync": true
       }
     },
     {
@@ -68,7 +69,8 @@
         "audit": true,
         "apply": true,
         "failed_review_retry": true,
-        "idea_archive_revival": false
+        "idea_archive_revival": false,
+        "comment_sync": true
       }
     }
   ],
@@ -108,7 +110,8 @@
         "audit": true,
         "apply": false,
         "failed_review_retry": false,
-        "idea_archive_revival": false
+        "idea_archive_revival": false,
+        "comment_sync": false
       }
     }
   ],
