@@ -74,17 +74,21 @@ failed-review retry for `AyobamiH/openclaw-operator` and
 ### GTM vault fleet
 
 The owner's current Google Drive GTM vault resolves to 22 distinct source
-repositories. All 22 are enrolled in `target_inventory.allow_repositories`;
-the pre-existing private `AyobamiH/openclaw-ops` target remains enrolled as
-well, so the managed allowlist contains 23 repositories.
+repositories. Twenty-one `AyobamiH/*` GTM repositories are currently enrolled
+in `target_inventory.allow_repositories`. The separate
+`OneClickPostFactory/social-agents` organisation repository is deliberately
+deferred until its ClawSweeper App installation is configured. The pre-existing
+private `AyobamiH/openclaw-ops` target remains enrolled, so the active managed
+allowlist contains 22 repositories.
 
 - Proof & State: `AyobamiH/proof-and-state`,
   `AyobamiH/proof-and-state-website`, `AyobamiH/donestate`,
   `AyobamiH/opstruth-chatgpt-plugin`, `AyobamiH/opstruth`,
   `AyobamiH/agentproof`
 - post-once: `AyobamiH/post-once`
-- OneClickPostFactory: `AyobamiH/oneclickpostfactory`,
-  `OneClickPostFactory/social-agents`
+- OneClickPostFactory: `AyobamiH/oneclickpostfactory`; the separate
+  `OneClickPostFactory/social-agents` worker is deferred from active fleet
+  membership until the ClawSweeper App is installed for that organisation
 - Tail Wagging Websites: `AyobamiH/wagging-web-wins`
 - Agent Shop Products: `AyobamiH/agent-shop-products`
 - Public Decision Intelligence: `AyobamiH/public-decision-intelligence`
@@ -102,9 +106,11 @@ well, so the managed allowlist contains 23 repositories.
 - ParcelBasis / Tax Lien Intelligence:
   `AyobamiH/tax-lien-intelligence-platform`
 
-GTM fleet onboarding is deliberately conservative. The `AyobamiH` and
-`OneClickPostFactory` generic profiles enable hot intake, normal review and
-audit, but keep apply, comment sync, failed-review retry and idea revival off.
+GTM fleet onboarding is deliberately conservative. The active `AyobamiH`
+generic profile enables hot intake, normal review and audit, but keeps apply,
+comment sync, failed-review retry and idea revival off. A dormant
+`OneClickPostFactory` generic profile remains available for the deferred
+organisation repo when it is later installed and enrolled.
 Generic live tests are also disabled. Before mutation lanes are enabled for a
 newly enrolled repo, give it an explicit profile with its verified native
 toolchain and live-test setup.
