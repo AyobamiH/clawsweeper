@@ -144,9 +144,7 @@ if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ]; then
 fi
 
 expected_targets="$(grep -F 'Target count:' "$log_file" | tail -1 | sed 's/.*Target count: //' | tr -d '[:space:]')"
-if ! printf '%s' "$expected_targets" | grep -Eq '^[1-9][0-9]*printf 'SUCCESS: %s\n' "$run_url"
-printf 'Actions enabled: %s\n' "$(retry_gh api "repos/$repo/actions/permissions" --jq '.enabled')"
-; then
+if ! printf '%s' "$expected_targets" | grep -Eq '^[1-9][0-9]*$'; then
   cat "$log_file"
   echo "FAIL: could not recover the active target count from the fleet smoke logs: $run_url" >&2
   exit 1
