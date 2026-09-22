@@ -102,7 +102,7 @@ export interface ReviewFanoutRepository extends ReviewPlanningRepository {
 export type FanoutCursorSnapshot = DurableCursorSnapshot<DurableFanoutMode>;
 export type FanoutCursorStoreOptions = DurableCursorStoreOptions<DurableFanoutMode>;
 
-interface FanoutOptions {
+export interface FanoutOptions {
   mode: FanoutMode;
   limit: number;
   cursorStoreUrl: string;
@@ -215,12 +215,12 @@ export async function runTargetFanout(argv: string[]): Promise<void> {
         ? coverageTrackedCountsFromManifest(coverageManifestPath)
         : undefined;
       planningRepositories = reviewPlanningRepositories({
-        repositories,
+        repositories: modeRepositories,
         openCounts,
         ...(coverageTrackedCounts ? { coverageTrackedCounts } : {}),
       });
     } else {
-      planningRepositories = repositoriesWithOpenItems(repositories, openCounts);
+      planningRepositories = repositoriesWithOpenItems(modeRepositories, openCounts);
     }
   }
   const durableMode = isDurableFanoutMode(mode);
