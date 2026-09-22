@@ -3632,6 +3632,7 @@ jobs:
 
       - name: Resolve inventory record slugs
         id: inventory-record-slugs
+        if: ${{ github.event.schedule == '41/10 * * * *' }}
         run: |
           set -euo pipefail
           records_repo_slugs="$(node --input-type=module -e '
@@ -3651,6 +3652,7 @@ jobs:
           echo "records_repo_slugs=$records_repo_slugs" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/setup-state
+        if: ${{ github.event.schedule == '41/10 * * * *' }}
         with:
           coordinator-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           records-url: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
@@ -5627,6 +5629,18 @@ jobs:
           echo "target_repo_owner=$target_owner" >> "$GITHUB_OUTPUT"
           echo "target_repo_name=$target_name" >> "$GITHUB_OUTPUT"
 
+      - name: Create proof target read token
+        id: proof-target-read-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.target_repo_owner }}
+          repositories: ${{ steps.target.outputs.target_repo_name }}
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
+
       - name: Resolve proof artifact identity
         id: proof-artifact
         run: |
@@ -5659,7 +5673,7 @@ jobs:
       - name: Reconcile read-only proof inputs
         if: ${{ !(github.event_name == 'schedule' && github.event.schedule == '6,21,36,51 * * * *') && !(github.event_name == 'workflow_dispatch' && (github.event.inputs.apply_sync_comments_only == 'true' || github.event.inputs.apply_item_numbers == '__cursor__')) }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.proof-target-read-token.outputs.token }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
         run: |
           set -euo pipefail
