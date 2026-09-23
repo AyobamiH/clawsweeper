@@ -5,7 +5,7 @@
       "target_repo": "AyobamiH/openclaw-operator",
       "display_name": "openclaw-operator",
       "checkout_dir": "openclaw-operator",
-      "prompt_note": "Use the openclaw-operator source tree and current main branch. Review automation, operator wiring, and repository dispatch behavior conservatively. Propose auto-close only when the issue or pull request is certainly implemented on main; keep everything else open for maintainer triage.",
+      "prompt_note": "Use the openclaw-operator source tree and current main branch. Review automation, operator wiring, and repository dispatch behavior conservatively. Propose auto-close only when the issue or pull request is certainly implemented on main; keep everything else open for maintainer triage. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing.",
       "apply_close_rules": {
         "issue": [
           "implemented_on_main"
@@ -41,7 +41,7 @@
       "target_repo": "AyobamiH/openclaw-ops",
       "display_name": "openclaw-ops",
       "checkout_dir": "openclaw-ops",
-      "prompt_note": "Use the openclaw-ops source tree and current default branch. Review operational wiring, schedules, deployment config, and maintenance workflows conservatively. Propose auto-close only when the issue or pull request is certainly implemented on the default branch; keep everything else open for maintainer triage.",
+      "prompt_note": "Use the openclaw-ops source tree and current default branch. Review operational wiring, schedules, deployment config, and maintenance workflows conservatively. Propose auto-close only when the issue or pull request is certainly implemented on the default branch; keep everything else open for maintainer triage. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing.",
       "apply_close_rules": {
         "issue": [
           "implemented_on_main"
@@ -82,7 +82,7 @@
         "AyobamiH/.github"
       ],
       "allow_repo_name_pattern": "^[A-Za-z0-9_.-]+$",
-      "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there.",
+      "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing.",
       "apply_close_rules": {
         "issue": [
           "implemented_on_main"
