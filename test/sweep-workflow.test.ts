@@ -26,6 +26,14 @@ import {
 } from "./helpers.ts";
 import { scheduledReviewSemanticSourceRevision } from "../scripts/classify-scheduled-review-noop.ts";
 
+test("workflow trusts the installed ClawSweeper App comment identity", () => {
+  const workflow = YAML.parse(readText(".github/workflows/sweep.yml"));
+  assert.equal(
+    workflow.env.CLAWSWEEPER_COMMENT_AUTHOR_LOGIN,
+    "${{ vars.CLAWSWEEPER_COMMENT_AUTHOR_LOGIN || 'ayobamih-clawsweeper[bot]' }}",
+  );
+});
+
 test("exact review failure annotation follows logical generation and preserves the failure gate", () => {
   const workflow = YAML.parse(readText(".github/workflows/sweep.yml"));
   const failure = workflow.jobs["event-review-apply"].steps.find(
