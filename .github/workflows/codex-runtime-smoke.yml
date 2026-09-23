@@ -1,0 +1,61 @@
+name: ClawSweeper Codex runtime smoke
+
+run-name: Verify ClawSweeper Codex review runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  smoke:
+    name: Authenticate and execute Codex
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          filter: blob:none
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Require configured review runtime
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+        run: |
+          set -euo pipefail
+          test -n "$OPENAI_API_KEY"
+          test -n "$CLAWSWEEPER_INTERNAL_MODEL"
+          echo "Required Codex runtime secrets are present."
+
+      - uses: ./.github/actions/setup-codex
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+        with:
+          login-status: "true"
+
+      - name: Execute read-only Codex smoke
+        run: |
+          set -euo pipefail
+          output="$(mktemp)"
+          trap 'rm -f "$output"' EXIT
+          printf '%s\n' 'Reply with exactly: ok' | \
+            codex exec \
+              -c 'service_tier="fast"' \
+              -c 'model_reasoning_effort="low"' \
+              -c 'approval_policy="never"' \
+              --sandbox read-only \
+              - >"$output"
+          test -s "$output"
+          echo "Codex exec completed successfully."
+          tail -n 20 "$output"
