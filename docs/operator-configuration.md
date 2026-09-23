@@ -29,6 +29,12 @@ environment settings are authoritative for workflow variables and secrets.
 | `REVIEW_OBSERVABILITY_REQUIRED`   | Selects whether review observability is required for status assembly.      |
 | `REVIEW_RECOVERY_ENABLED`         | Selects review recovery behavior in the deployed Worker.                   |
 
+## GitHub Actions operating-state invariant
+
+Normal review, audit, retry, and fanout schedules require repository GitHub Actions to remain enabled. Maintenance and verification tooling must not achieve isolation by disabling repository-wide Actions or bulk-toggling workflow activation.
+
+Containment belongs at the authority and dispatch layers: use target automation policy, exact workflow inputs, concurrency, and scoped credentials. If an external operator ever changes repository or workflow activation as part of emergency maintenance, it must snapshot the starting state and restore that exact state before reporting success.
+
 ## Workflow credential names
 
 Provider keys used by the optional OpenClaw runner are `ANTHROPIC_API_KEY`,

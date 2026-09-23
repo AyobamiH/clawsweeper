@@ -52,6 +52,18 @@ const retiredPatterns: { label: string; pattern: RegExp }[] = [
   { label: "retired repair Codex token", pattern: /\bCLAWSWEEPER_CODEX_GH_TOKEN\b/ },
   { label: "retired review token", pattern: /\bCLAWSWEEPER_REVIEW_GH_TOKEN\b/ },
   { label: "unsupported gh run list workflow flag", pattern: /\bgh run list\b.*--workflow\b/ },
+  {
+    label: "repository-wide GitHub Actions permission mutation",
+    pattern: /\bactions\/permissions\b/,
+  },
+  {
+    label: "workflow activation mutation",
+    pattern: /\bactions\/workflows\/[^\s"'\`]+\/(?:enable|disable)\b/,
+  },
+  {
+    label: "gh workflow activation mutation",
+    pattern: /\bgh workflow (?:enable|disable)\b/,
+  },
 ];
 
 type Finding = {
