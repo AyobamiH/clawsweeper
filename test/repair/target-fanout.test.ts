@@ -614,6 +614,12 @@ process.exit(2);
     calls.filter((call) => call.args[0] === "repo").map((call) => call.ghToken),
     ["inventory-ayobamih"],
   );
+  assert.deepEqual(
+    calls
+      .filter((call) => call.args[0] === "api" && call.args[1] === "graphql")
+      .map((call) => call.ghToken),
+    ["inventory-ayobamih"],
+  );
 });
 
 test("target fanout can use anonymous public inventory in Actions", () => {
