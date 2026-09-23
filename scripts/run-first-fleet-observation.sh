@@ -34,7 +34,11 @@ shards=(
 
 original_active_ids=()
 original_active_paths=()
+attempted_run_ids=()
 run_ids=()
+run_labels=()
+dispatch_failures=0
+dispatch_failure_label=''
 repo_actions_enabled=false
 workflow_initial_state=''
 restored=false
@@ -251,7 +255,7 @@ for index in "${!targets[@]}"; do
   for _ in $(seq 1 30); do
     latest_id="$(retry_gh run list --repo "$repo" --workflow "$workflow" --event workflow_dispatch --limit 1 \
       --json databaseId --jq '.[0].databaseId // 0')"
-    if [ "$latest_id" != '0' ] && [ "$latest_id" != "$before_id" ] && ! contains_id "$latest_id" "${run_ids[@]}"; then
+    if [ "$latest_id" != '0' ] && [ "$latest_id" != "$before_id" ] && ! contains_id "$latest_id" "${attempted_run_ids[@]}"; then
       run_id="$latest_id"
       break
     fi
@@ -260,15 +264,18 @@ for index in "${!targets[@]}"; do
 
   if [ -z "$run_id" ]; then
     retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
+    dispatch_failures=$((dispatch_failures + 1))
+    dispatch_failure_label="$label"
     if [ "$dispatch_rc" -ne 0 ]; then
-      echo "FAIL: dispatch failed for $label and no new run was observed." >&2
+      echo "DISPATCH FAIL: $label was not accepted by GitHub." >&2
     else
-      echo "FAIL: dispatch for $label was not observed within 60 seconds." >&2
+      echo "DISPATCH FAIL: $label was accepted by the CLI but no new run was observed within 60 seconds." >&2
     fi
-    exit 1
+    echo "Stopping new dispatches; already-admitted observations will be drained before containment is restored." >&2
+    break
   fi
 
-  run_ids+=("$run_id")
+  attempted_run_ids+=("$run_id")
   echo "  accepted run: $run_id"
 
   # A workflow_dispatch receipt is not proof that GitHub has admitted a job.
@@ -277,11 +284,16 @@ for index in "${!targets[@]}"; do
   # across a cron boundary.
   if ! start_status="$(wait_for_run_to_start "$run_id")"; then
     retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
-    echo "FAIL: $run_id stayed queued for more than 60 seconds; cancelling the zero-job dispatch before restoring containment." >&2
+    dispatch_failures=$((dispatch_failures + 1))
+    dispatch_failure_label="$label"
+    echo "DISPATCH FAIL: $run_id stayed queued for more than 60 seconds; cancelling the zero-job dispatch." >&2
     retry_gh run cancel "$run_id" --repo "$repo" >/dev/null 2>&1 || true
-    exit 1
+    echo "Stopping new dispatches; already-admitted observations will be drained before containment is restored." >&2
+    break
   fi
   retry_gh api --method PUT "repos/$repo/actions/workflows/$workflow/disable" >/dev/null
+  run_ids+=("$run_id")
+  run_labels+=("$label")
   echo "  run admitted: $run_id ($start_status)"
 done
 
@@ -290,7 +302,7 @@ done
 unexpected=0
 while IFS=$'\t' read -r id event status title url; do
   [ -n "${id:-}" ] || continue
-  if contains_id "$id" "${baseline_ids[@]}" || contains_id "$id" "${run_ids[@]}"; then
+  if contains_id "$id" "${baseline_ids[@]}" || contains_id "$id" "${attempted_run_ids[@]}"; then
     continue
   fi
   unexpected=$((unexpected + 1))
@@ -309,13 +321,13 @@ if [ "$unexpected" -gt 0 ]; then
 fi
 
 echo
-echo "All ${#run_ids[@]} observation reviews are dispatched. Waiting for completion..."
+echo "${#run_ids[@]} observation review(s) were admitted. Waiting for every admitted run to finish before restoring containment..."
 echo
 
 failures=0
 for index in "${!run_ids[@]}"; do
   run_id="${run_ids[$index]}"
-  label="${labels[$index]}"
+  label="${run_labels[$index]}"
 
   set +e
   gh run watch "$run_id" --repo "$repo" --exit-status
@@ -326,13 +338,15 @@ for index in "${!run_ids[@]}"; do
   url="$(retry_gh run view "$run_id" --repo "$repo" --json url --jq '.url')"
   review_total="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select(.name | startswith("Review shard "))] | length')"
   review_bad="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select((.name | startswith("Review shard ")) and (.conclusion != "success"))] | length')"
+  publish_total="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select(.name == "Publish review artifacts")] | length')"
+  publish_bad="$(retry_gh run view "$run_id" --repo "$repo" --json jobs --jq '[.jobs[] | select(.name == "Publish review artifacts" and .conclusion != "success")] | length')"
 
-  if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ] || [ "$review_total" = '0' ] || [ "$review_bad" != '0' ]; then
+  if [ "$watch_rc" -ne 0 ] || [ "$conclusion" != 'success' ] || [ "$review_total" = '0' ] || [ "$review_bad" != '0' ] || [ "$publish_total" != '1' ] || [ "$publish_bad" != '0' ]; then
     failures=$((failures + 1))
-    printf 'OBSERVATION FAIL: %s | workflow=%s | review_shards=%s | failed_review_shards=%s | %s\n' \
-      "$label" "$conclusion" "$review_total" "$review_bad" "$url"
+    printf 'OBSERVATION FAIL: %s | workflow=%s | review_shards=%s | failed_review_shards=%s | publish_jobs=%s | failed_publish_jobs=%s | %s\n' \
+      "$label" "$conclusion" "$review_total" "$review_bad" "$publish_total" "$publish_bad" "$url"
   else
-    printf 'OBSERVATION PASS: %s | review_shards=%s/%s | %s\n' "$label" "$review_total" "$review_total" "$url"
+    printf 'OBSERVATION PASS: %s | review_shards=%s/%s | publish=success | %s\n' "$label" "$review_total" "$review_total" "$url"
   fi
 done
 
@@ -372,9 +386,15 @@ if [ "$missing_restored_workflows" -gt 0 ]; then
   exit 1
 fi
 
-if [ "$failures" -gt 0 ]; then
-  echo "Observation completed with $failures failed review run(s); inspect those receipts before expanding scope." >&2
+if [ "$dispatch_failures" -gt 0 ]; then
+  echo "Observation stopped after dispatch failure at: $dispatch_failure_label" >&2
+  echo "All earlier admitted runs were drained before repository Actions was disabled." >&2
   exit 1
 fi
 
-echo "PASS: all selected real ClawSweeper reviews completed and repository Actions returned to disabled containment."
+if [ "$failures" -gt 0 ]; then
+  echo "Observation completed with $failures failed review/publish run(s); inspect those receipts before expanding scope." >&2
+  exit 1
+fi
+
+echo "PASS: all selected real ClawSweeper reviews and publications completed and repository Actions returned to disabled containment."
