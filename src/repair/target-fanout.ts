@@ -864,31 +864,44 @@ function loadRepositoryOpenCounts(
   repositories: readonly SelectedRepository[],
 ): Map<string, RepositoryOpenCounts> {
   const counts = new Map<string, RepositoryOpenCounts>();
+  const repositoriesByOwner = new Map<string, SelectedRepository[]>();
+  for (const repository of repositories) {
+    const [owner] = repository.targetRepo.split("/");
+    if (!owner) throw new Error(`Invalid target repository: ${repository.targetRepo}`);
+    const ownerRepositories = repositoriesByOwner.get(owner) ?? [];
+    ownerRepositories.push(repository);
+    repositoriesByOwner.set(owner, ownerRepositories);
+  }
+
   const batchSize = 25;
-  for (let start = 0; start < repositories.length; start += batchSize) {
-    const batch = repositories.slice(start, start + batchSize);
-    const fields = batch
-      .map((repository, index) => {
-        const [owner, name] = repository.targetRepo.split("/");
-        return `r${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){issues(states:OPEN){totalCount} pullRequests(states:OPEN){totalCount}}`;
-      })
-      .join(" ");
-    const output = runGh(
-      ["api", "graphql", "-f", `query=query FleetCoverage { ${fields} }`],
-      publicInventoryEnv(),
-    );
-    const data = record(record(JSON.parse(output), "GraphQL response").data, "GraphQL data");
-    for (const [index, repository] of batch.entries()) {
-      const result = record(data[`r${index}`], `${repository.targetRepo} counts`);
-      const issues = record(result.issues, `${repository.targetRepo} issue counts`);
-      const pullRequests = record(
-        result.pullRequests,
-        `${repository.targetRepo} pull request counts`,
+  for (const [owner, ownerRepositories] of repositoriesByOwner) {
+    const env = inventoryEnv(owner);
+    if (!env) throw new Error(`Missing inventory token for ${owner}`);
+    for (let start = 0; start < ownerRepositories.length; start += batchSize) {
+      const batch = ownerRepositories.slice(start, start + batchSize);
+      const fields = batch
+        .map((repository, index) => {
+          const [, name] = repository.targetRepo.split("/");
+          return `r${index}:repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){issues(states:OPEN){totalCount} pullRequests(states:OPEN){totalCount}}`;
+        })
+        .join(" ");
+      const output = runGh(
+        ["api", "graphql", "-f", `query=query FleetCoverage { ${fields} }`],
+        env,
       );
-      counts.set(repository.targetRepo, {
-        issues: nonNegativeNumber(issues.totalCount, "issue totalCount"),
-        pullRequests: nonNegativeNumber(pullRequests.totalCount, "pull request totalCount"),
-      });
+      const data = record(record(JSON.parse(output), "GraphQL response").data, "GraphQL data");
+      for (const [index, repository] of batch.entries()) {
+        const result = record(data[`r${index}`], `${repository.targetRepo} counts`);
+        const issues = record(result.issues, `${repository.targetRepo} issue counts`);
+        const pullRequests = record(
+          result.pullRequests,
+          `${repository.targetRepo} pull request counts`,
+        );
+        counts.set(repository.targetRepo, {
+          issues: nonNegativeNumber(issues.totalCount, "issue totalCount"),
+          pullRequests: nonNegativeNumber(pullRequests.totalCount, "pull request totalCount"),
+        });
+      }
     }
   }
   return counts;
