@@ -4,6 +4,8 @@ set -Eeuo pipefail
 repo='AyobamiH/clawsweeper'
 workflow='sweep.yml'
 workflow_path='.github/workflows/sweep.yml'
+ignored_ghost_run_id='35794270775'
+ignore_verified_ghost=false
 
 labels=(
   'DoneState #87 — Sandbox RPC reconciliation'
@@ -142,6 +144,23 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
+ghost_status="$(retry_gh run view "$ignored_ghost_run_id" --repo "$repo" --json status --jq '.status // ""' 2>/dev/null || true)"
+ghost_jobs="$(retry_gh api "repos/$repo/actions/runs/$ignored_ghost_run_id/jobs?per_page=1" --jq '.total_count' 2>/dev/null || printf '0')"
+if [ "$ghost_status" = 'queued' ] && [ "$ghost_jobs" = '0' ]; then
+  ignore_verified_ghost=true
+  echo "Ignoring verified zero-job GitHub ghost run $ignored_ghost_run_id during containment checks."
+fi
+
+count_status_runs() {
+  local status="$1"
+  if [ "$ignore_verified_ghost" = true ]; then
+    retry_gh api "repos/$repo/actions/runs?status=$status&per_page=100" \
+      --jq "[.workflow_runs[] | select(.id != $ignored_ghost_run_id)] | length"
+  else
+    retry_gh api "repos/$repo/actions/runs?status=$status&per_page=100" --jq '.total_count'
+  fi
+}
+
 secret_names="$(retry_gh secret list --repo "$repo" --json name --jq '.[].name')"
 for required_secret in OPENAI_API_KEY CLAWSWEEPER_MODEL; do
   if ! grep -Fxq "$required_secret" <<<"$secret_names"; then
@@ -158,9 +177,9 @@ if [ "$initial_enabled" != 'false' ]; then
 fi
 
 for status in queued in_progress pending waiting requested; do
-  count="$(retry_gh api "repos/$repo/actions/runs?status=$status&per_page=1" --jq '.total_count')"
+  count="$(count_status_runs "$status")"
   if [ "$count" != '0' ]; then
-    echo "ABORT: found $count $status Actions run(s)." >&2
+    echo "ABORT: found $count non-ghost $status Actions run(s)." >&2
     exit 1
   fi
 done
@@ -321,8 +340,8 @@ restore_environment
 trap - EXIT
 
 final_enabled="$(retry_gh api "repos/$repo/actions/permissions" --jq '.enabled')"
-queued="$(retry_gh api "repos/$repo/actions/runs?status=queued&per_page=1" --jq '.total_count')"
-running="$(retry_gh api "repos/$repo/actions/runs?status=in_progress&per_page=1" --jq '.total_count')"
+queued="$(count_status_runs queued)"
+running="$(count_status_runs in_progress)"
 
 missing_restored_workflows=0
 for id in "${original_active_ids[@]}"; do
@@ -336,8 +355,11 @@ done
 echo
 echo "Observation cycle complete."
 echo "Actions enabled: $final_enabled"
-echo "Queued runs: $queued"
-echo "In-progress runs: $running"
+echo "Non-ghost queued runs: $queued"
+echo "Non-ghost in-progress runs: $running"
+if [ "$ignore_verified_ghost" = true ]; then
+  echo "Known zero-job GitHub ghost retained for audit: $ignored_ghost_run_id"
+fi
 echo "Workflow restore failures: $missing_restored_workflows"
 
 if [ "$final_enabled" != 'false' ]; then
