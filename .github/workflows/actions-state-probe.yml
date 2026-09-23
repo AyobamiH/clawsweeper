@@ -7,12 +7,12 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - name: Create read-only ClawSweeper App token
+      - name: Create scoped ClawSweeper App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
@@ -20,20 +20,39 @@ jobs:
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-actions: read
+          permission-actions: write
           permission-contents: read
-      - name: Inspect repository and sweep workflow state
+      - name: Refresh sweep scheduler registration
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           actions_scope='actions'
-          permissions_leaf='permissions'
           workflows_leaf='workflows'
-          sweep_state="$(gh api "repos/$GITHUB_REPOSITORY/$actions_scope/$workflows_leaf/sweep.yml" --jq '.state')"
-          echo "PROBE sweep_workflow_state=$sweep_state"
-          repo_state="$(gh api "repos/$GITHUB_REPOSITORY/$actions_scope/$permissions_leaf" --jq '.enabled' 2>/dev/null || true)"
-          echo "PROBE repository_actions_enabled=${repo_state:-unavailable}"
-          echo "PROBE recent_schedule_runs:"
-          gh api "repos/$GITHUB_REPOSITORY/$actions_scope/runs?event=schedule&per_page=10" \
-            --jq '.workflow_runs[] | [.id, .path, .status, (.conclusion // ""), .created_at] | @tsv'
+          workflow='sweep.yml'
+          endpoint="repos/$GITHUB_REPOSITORY/$actions_scope/$workflows_leaf/$workflow"
+
+          before="$(gh api "$endpoint" --jq '.state')"
+          echo "REFRESH before=$before"
+          if [ "$before" != 'active' ]; then
+            echo "REFUSE: sweep.yml must start active; observed $before" >&2
+            exit 1
+          fi
+
+          gh api --method PUT "$endpoint/disable" >/dev/null
+          disabled="$(gh api "$endpoint" --jq '.state')"
+          echo "REFRESH disabled=$disabled"
+          if [ "$disabled" = 'active' ]; then
+            echo 'FAIL: sweep.yml did not enter a disabled state.' >&2
+            exit 1
+          fi
+
+          gh api --method PUT "$endpoint/enable" >/dev/null
+          after="$(gh api "$endpoint" --jq '.state')"
+          echo "REFRESH after=$after"
+          if [ "$after" != 'active' ]; then
+            echo "FAIL: sweep.yml was not restored to active." >&2
+            exit 1
+          fi
+
+          echo 'PASS: sweep.yml scheduler registration refreshed; final state active.'
