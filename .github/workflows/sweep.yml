@@ -197,7 +197,7 @@ on:
     - cron: "37 */6 * * *"        # audit
     - cron: "8,23,38,53 * * * *"  # guarded apply
     - cron: "6,21,36,51 * * * *"  # durable review-comment sync
-    - cron: "13 * * * *"          # failed-review retry
+    - cron: "13 * * * 0-6"        # failed-review retry; all days explicit
 
 permissions:
   contents: write
