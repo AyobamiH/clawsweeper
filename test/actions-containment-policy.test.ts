@@ -34,7 +34,7 @@ test("production scheduler remains configured for continuous operation", () => {
     'cron: "37 */6 * * *"',
     'cron: "8,23,38,53 * * * *"',
     'cron: "6,21,36,51 * * * *"',
-    'cron: "13 * * * *"',
+    'cron: "13 * * * 0-6"',
   ]) {
     assert.equal(workflow.includes(cron), true, cron);
   }
