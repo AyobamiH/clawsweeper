@@ -126,7 +126,10 @@ test("exact-review queue coalesces deliveries, dispatches a bound rollout snapsh
       await workflowCheckRelease;
       return jsonResponse({ state: workflowState });
     }
-    if ((/^\/repos\/openclaw\/(?:gogcli|openclaw)\/installation$/.test(url.pathname) || url.pathname === "/repos/AyobamiH/clawsweeper/installation")) {
+    if (
+      /^\/repos\/openclaw\/(?:gogcli|openclaw)\/installation$/.test(url.pathname) ||
+      url.pathname === "/repos/AyobamiH/clawsweeper/installation"
+    ) {
       return jsonResponse({ id: 999 });
     }
     if (/^\/repos\/openclaw\/(?:clawsweeper|gogcli|openclaw)\/issues\/\d+$/.test(url.pathname)) {
