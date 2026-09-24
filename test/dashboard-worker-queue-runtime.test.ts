@@ -121,12 +121,15 @@ test("exact-review queue coalesces deliveries, dispatches a bound rollout snapsh
   });
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
-    if (url.pathname === "/repos/openclaw/clawsweeper/actions/workflows/sweep.yml") {
+    if (url.pathname === "/repos/AyobamiH/clawsweeper/actions/workflows/sweep.yml") {
       signalWorkflowCheckStarted();
       await workflowCheckRelease;
       return jsonResponse({ state: workflowState });
     }
-    if (/^\/repos\/openclaw\/(?:clawsweeper|gogcli|openclaw)\/installation$/.test(url.pathname)) {
+    if (
+      /^\/repos\/openclaw\/(?:gogcli|openclaw)\/installation$/.test(url.pathname) ||
+      url.pathname === "/repos/AyobamiH/clawsweeper/installation"
+    ) {
       return jsonResponse({ id: 999 });
     }
     if (/^\/repos\/openclaw\/(?:clawsweeper|gogcli|openclaw)\/issues\/\d+$/.test(url.pathname)) {
@@ -135,7 +138,7 @@ test("exact-review queue coalesces deliveries, dispatches a bound rollout snapsh
     if (url.pathname === "/app/installations/999/access_tokens") {
       return jsonResponse({ token: "dispatch-token" });
     }
-    if (url.pathname === "/repos/openclaw/clawsweeper/dispatches") {
+    if (url.pathname === "/repos/AyobamiH/clawsweeper/dispatches") {
       assert.equal(new Headers(init?.headers).get("authorization"), "Bearer dispatch-token");
       dispatched.push(JSON.parse(String(init?.body)));
       return new Response(null, { status: 204 });
@@ -149,6 +152,7 @@ test("exact-review queue coalesces deliveries, dispatches a bound rollout snapsh
       {
         CLAWSWEEPER_APP_CLIENT_ID: "Iv23test",
         CLAWSWEEPER_APP_PRIVATE_KEY: privateKey,
+        CLAWSWEEPER_REPO: "AyobamiH/clawsweeper",
         EXACT_REVIEW_DISPATCH_DEBOUNCE_MS: "0",
         EXACT_REVIEW_QUEUE_MAX_CONCURRENT: "1",
       },

@@ -210,7 +210,17 @@ export {
 const RECENT_DURABLE_PUBLICATION_EVENTS_CACHE_MS = 60_000;
 
 const GITHUB_TIMEOUT_MS = 4500;
-const CLAWSWEEPER_REVIEW_REPO = "openclaw/clawsweeper";
+const DEFAULT_CLAWSWEEPER_REVIEW_REPO = "openclaw/clawsweeper";
+
+function clawsweeperReviewRepo(env: unknown): string {
+  const configured =
+    env && typeof env === "object" && !Array.isArray(env)
+      ? String((env as Record<string, unknown>).CLAWSWEEPER_REPO || "").trim()
+      : "";
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(configured)
+    ? configured
+    : DEFAULT_CLAWSWEEPER_REVIEW_REPO;
+}
 
 type ExactReviewBackoffReason =
   | "dispatch_debounce"
@@ -13842,22 +13852,24 @@ async function exactReviewRepositoryToken(env, permissions) {
   const credentials = githubAppCredentials(env);
   if (!credentials) throw new Error("github app is not configured");
   const appJwt = await signGithubAppJwt(credentials.issuer, credentials.privateKey);
-  const installationId = await githubAppInstallationId(appJwt, CLAWSWEEPER_REVIEW_REPO, env);
+  const reviewRepo = clawsweeperReviewRepo(env);
+  const installationId = await githubAppInstallationId(appJwt, reviewRepo, env);
   return createGithubAppTokenFor({
     env,
     appJwt,
     installationId,
-    label: CLAWSWEEPER_REVIEW_REPO,
-    repositories: [repoName(CLAWSWEEPER_REVIEW_REPO)],
+    label: reviewRepo,
+    repositories: [repoName(reviewRepo)],
     permissions,
   });
 }
 
 async function exactReviewWorkflowState(token: string, env = {}) {
+  const reviewRepo = clawsweeperReviewRepo(env);
   const payload = await githubTokenJson({
     env,
     token,
-    path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/actions/workflows/sweep.yml`,
+    path: `/repos/${reviewRepo}/actions/workflows/sweep.yml`,
     method: "GET",
     body: undefined,
     errorLabel: "ClawSweeper workflow status",
@@ -13872,10 +13884,11 @@ export async function exactReviewTerminalRun(
   candidate: ExactReviewClaimedRun & { requestedRunAttempt?: number },
   env = {},
 ) {
+  const reviewRepo = clawsweeperReviewRepo(env);
   const latest = await githubTokenJson({
     env,
     token,
-    path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/actions/runs/${candidate.runId}`,
+    path: `/repos/${reviewRepo}/actions/runs/${candidate.runId}`,
     method: "GET",
     body: undefined,
     errorLabel: "ClawSweeper run status",
@@ -13890,13 +13903,14 @@ export async function exactReviewTerminalRunsFromBatch(
 ) {
   const runsById = new Map<string, Record<string, unknown>>();
   const unresolved = new Set(candidates.map((candidate) => candidate.runId));
+  const reviewRepo = clawsweeperReviewRepo(env);
   for (let page = 1; page <= EXACT_REVIEW_RECONCILE_LIST_PAGE_LIMIT; page += 1) {
     let payload;
     try {
       payload = await githubTokenJson({
         env,
         token,
-        path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/actions/workflows/sweep.yml/runs?event=repository_dispatch&per_page=100&page=${page}`,
+        path: `/repos/${reviewRepo}/actions/workflows/sweep.yml/runs?event=repository_dispatch&per_page=100&page=${page}`,
         method: "GET",
         body: undefined,
         errorLabel: "ClawSweeper run batch",
@@ -13932,6 +13946,7 @@ async function exactReviewTerminalRunFromSummary(
   latest: Record<string, unknown>,
   env = {},
 ) {
+  const reviewRepo = clawsweeperReviewRepo(env);
   const expectedRunAttempt = candidate.requestedRunAttempt ?? candidate.runAttempt;
   if (String(latest.id || "") !== candidate.runId) {
     throw new Error("ClawSweeper run status response id mismatch");
@@ -13946,7 +13961,7 @@ async function exactReviewTerminalRunFromSummary(
   const payload = await githubTokenJson({
     env,
     token,
-    path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/actions/runs/${candidate.runId}/attempts/${latestRunAttempt}`,
+    path: `/repos/${reviewRepo}/actions/runs/${candidate.runId}/attempts/${latestRunAttempt}`,
     method: "GET",
     body: undefined,
     errorLabel: "ClawSweeper run attempt status",
@@ -14008,10 +14023,11 @@ async function dispatchClawsweeperItem({
     ...(decision.additionalPrompt ? { additional_prompt: decision.additionalPrompt } : {}),
     ...(decision.publication ? { publication: decision.publication } : {}),
   };
+  const reviewRepo = clawsweeperReviewRepo(env);
   await githubTokenJson({
     env,
     token,
-    path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/dispatches`,
+    path: `/repos/${reviewRepo}/dispatches`,
     method: "POST",
     body: {
       event_type: "clawsweeper_item",
@@ -14139,10 +14155,11 @@ async function dispatchExactReviewBatchWorkflow({
   dispatchId: string;
   dispatchedAt: string;
 }) {
+  const reviewRepo = clawsweeperReviewRepo(env);
   await githubTokenJson({
     env,
     token,
-    path: `/repos/${CLAWSWEEPER_REVIEW_REPO}/actions/workflows/exact-review-batch-publish.yml/dispatches`,
+    path: `/repos/${reviewRepo}/actions/workflows/exact-review-batch-publish.yml/dispatches`,
     method: "POST",
     body: {
       ref: "main",
