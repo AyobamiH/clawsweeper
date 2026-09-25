@@ -8,27 +8,14 @@ on:
       - ".github/workflows/private-exact-review-smoke.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  dispatch:
+  inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Enqueue one canonical private exact review
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Inspect final exact-review queue item
         run: |
           set -euo pipefail
-          jq -n '{
-            event_type: "clawsweeper_item",
-            client_payload: {
-              target_repo: "AyobamiH/wagging-web-wins",
-              target_branch: "main",
-              item_number: 86,
-              item_kind: "pull_request",
-              source_event: "pull_request",
-              source_action: "manual_private_exact_review_acceptance",
-              supersedes_in_progress: true,
-              codex_timeout_ms: "1200000"
-            }
-          }' | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
+          curl --fail --silent --show-error             "https://ayobamih-clawsweeper-status.woeinvests.workers.dev/internal/exact-review/item-status?target_repo=AyobamiH%2Fwagging-web-wins&item_number=86" |
+            jq .
