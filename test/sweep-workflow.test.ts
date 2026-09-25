@@ -5679,7 +5679,10 @@ test("comment commands keep the router-to-sweep dispatch contract", () => {
   assert.match(routerSource, /source_delivery_id:\s*String\(command\.source_delivery_id\)/);
   assert.match(routerSource, /`item_numbers=\$\{dispatchKey\}`/);
   assert.match(routerSource, /event:\s*"workflow_dispatch"/);
-  assert.match(sweepWorkflow, /types:\s*\[[\s\S]*?clawsweeper_item,[\s\S]*?clawsweeper_target_sweep,/);
+  assert.match(
+    sweepWorkflow,
+    /types:\s*\[[\s\S]*?clawsweeper_item,[\s\S]*?clawsweeper_target_sweep,/,
+  );
   assert.match(sweepWorkflow, /Review event item \{0\}#\{1\} \[\{2\}\]/);
   assert.match(sweepWorkflow, /startsWith\(github\.event\.inputs\.item_numbers, 'router-'\)/);
   assert.match(sweepWorkflow, /sourceDeliveryId:\s*payload\.source_delivery_id/);
@@ -6147,7 +6150,10 @@ test("fleet fanout owns all scheduled repository lanes", () => {
     fanoutBlock,
     /github\.event\.schedule == '6,21,36,51 \* \* \* \*' && 'comment-sync'/,
   );
-  assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* 0-6' && 'failed-review-retry'/);
+  assert.match(
+    fanoutBlock,
+    /github\.event\.schedule == '13 \* \* \* 0-6' && 'failed-review-retry'/,
+  );
   assert.match(fanoutBlock, /github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit'/);
   assert.match(
@@ -6314,10 +6320,7 @@ test("background planners fetch exact-review queue pressure once and pass its le
     sweepWorkflow.indexOf("- id: select"),
   );
   for (const block of [sweepBlock]) {
-    assert.match(
-      block,
-      /QUEUE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \}\}/,
-    );
+    assert.match(block, /QUEUE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \}\}/);
     assert.equal(block.match(/queue-pressure --queue-url/g)?.length, 1);
     assert.match(block, /--pressure-level "\$pressure_level"/);
     assert.match(block, /queue pressure: \$pressure_level/);
