@@ -26,7 +26,10 @@ test("private target git fetch auth is ephemeral command-scope config", () => {
     assert.doesNotMatch(value, /target-read-token/);
     assert.match(value, /^AUTHORIZATION: basic /);
     const encoded = value.replace(/^AUTHORIZATION: basic /, "");
-    assert.equal(Buffer.from(encoded, "base64").toString("utf8"), "x-access-token:target-read-token");
+    assert.equal(
+      Buffer.from(encoded, "base64").toString("utf8"),
+      "x-access-token:target-read-token",
+    );
   } finally {
     if (originalToken === undefined) {
       delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
