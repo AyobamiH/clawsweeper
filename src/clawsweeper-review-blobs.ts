@@ -412,7 +412,7 @@ export function hydratePullRequestReviewBlobs({
       {
         cwd: targetDir,
         encoding: "utf8",
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+        env: { ...process.env, ...reviewGitFetchAuthEnv(), GIT_OPTIONAL_LOCKS: "0" },
         input: `${[...missing].join("\n")}\n`,
         timeout: Math.max(1, deadlineAt - Date.now()),
         maxBuffer: MAX_GIT_OUTPUT_BYTES,
