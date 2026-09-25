@@ -34,7 +34,7 @@ jobs:
           GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           TARGET_REPO: AyobamiH/wagging-web-wins
           ITEM_NUMBER: "81"
-          STALE_LEASE_OWNER: github-run-36139445539-1
+          STALE_LEASE_OWNER: github-run-36142406475-1
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN"
