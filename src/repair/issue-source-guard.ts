@@ -17,6 +17,8 @@ const CLAWSWEEPER_BOTS = new Set([
   "clawsweeper[bot]",
   "openclaw-clawsweeper",
   "openclaw-clawsweeper[bot]",
+  "ayobamih-clawsweeper",
+  "ayobamih-clawsweeper[bot]",
 ]);
 
 export function issueSourceRevisionSha256(issue: LooseRecord, comments: JsonValue[] = []): string {

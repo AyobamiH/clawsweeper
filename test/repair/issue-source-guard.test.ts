@@ -13,30 +13,43 @@ const issue = {
 };
 
 test("source issue revision ignores ClawSweeper comments but tracks human edits", () => {
-  const botComment = {
-    id: 1,
-    user: { login: "clawsweeper[bot]" },
-    body: "review v1",
-    updated_at: "2026-06-11T10:00:00Z",
-  };
   const humanComment = {
     id: 2,
     user: { login: "maintainer" },
     body: "keep this narrow",
     updated_at: "2026-06-11T10:01:00Z",
   };
-  const revision = issueSourceRevisionSha256(issue, [botComment, humanComment]);
+  const botAliases = [
+    "clawsweeper",
+    "clawsweeper[bot]",
+    "openclaw-clawsweeper",
+    "openclaw-clawsweeper[bot]",
+    "ayobamih-clawsweeper",
+    "ayobamih-clawsweeper[bot]",
+  ];
 
-  assert.equal(
-    issueSourceRevisionSha256(issue, [
-      { ...botComment, body: "review v2", updated_at: "2026-06-11T10:02:00Z" },
-      humanComment,
-    ]),
-    revision,
-  );
+  for (const login of botAliases) {
+    const botComment = {
+      id: 1,
+      user: { login },
+      body: "review v1",
+      updated_at: "2026-06-11T10:00:00Z",
+    };
+    const revision = issueSourceRevisionSha256(issue, [botComment, humanComment]);
+
+    assert.equal(
+      issueSourceRevisionSha256(issue, [
+        { ...botComment, body: "review v2", updated_at: "2026-06-11T10:02:00Z" },
+        humanComment,
+      ]),
+      revision,
+      `expected ${login} comments to be excluded from the source revision`,
+    );
+  }
+
+  const revision = issueSourceRevisionSha256(issue, [humanComment]);
   assert.notEqual(
     issueSourceRevisionSha256(issue, [
-      botComment,
       { ...humanComment, body: "expanded request", updated_at: "2026-06-11T10:03:00Z" },
     ]),
     revision,
