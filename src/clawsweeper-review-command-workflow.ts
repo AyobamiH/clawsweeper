@@ -1311,6 +1311,21 @@ export function createReviewCommandWorkflow(dependencies: CreateReviewCommandWor
               },
             );
           } else {
+            const wrapperFailureKind =
+              error instanceof Error &&
+              error.message.startsWith("Codex dirtied the OpenClaw checkout")
+                ? "checkout_mutation"
+                : error instanceof Error &&
+                    /pull request #\d+ head .* was unavailable in the restricted review checkout/.test(
+                      error.message,
+                    )
+                  ? "review_tree_unavailable"
+                  : "unexpected_exception";
+            console.error(
+              `[review] review-wrapper-failure item=#${item.number} kind=${wrapperFailureKind} error_name=${
+                error instanceof Error ? error.name : typeof error
+              }`,
+            );
             decision = codexFailureDecision(
               null,
               error instanceof Error ? error.message : String(error),
