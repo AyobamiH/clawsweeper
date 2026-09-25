@@ -1711,7 +1711,7 @@ jobs:
           lease_ids="$(
             gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100" \
               --paginate \
-              --jq ".[] | select(.user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | select(.body | contains(\"owner=$LEASE_OWNER \")) | .id"
+              --jq ".[] | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | select(.body | contains(\"owner=$LEASE_OWNER \")) | .id"
           )"
           while IFS= read -r lease_id; do
             [ -n "$lease_id" ] || continue
@@ -1721,7 +1721,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions" \
             -f content="eyes" -F per_page=100 --paginate \
-            --jq '.[] | select(.content == "eyes") | select(.user.login == "clawsweeper" or .user.login == "clawsweeper[bot]" or .user.login == "openclaw-clawsweeper[bot]") | .id')"
+            --jq ".[] | select(.content == \"eyes\") | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | .id")"
           while IFS= read -r reaction_id; do
             [ -n "$reaction_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions/$reaction_id" --method DELETE
@@ -2879,7 +2879,7 @@ jobs:
           set -euo pipefail
           test -n "$GH_TOKEN"
           test "$(gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER" --jq .state)" = "closed"
-          lease_ids="$(gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100" --paginate --jq ".[] | select(.user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | .id")"
+          lease_ids="$(gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100" --paginate --jq ".[] | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | .id")"
           while IFS= read -r lease_id; do
             [ -n "$lease_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/comments/$lease_id" --method DELETE
@@ -2890,7 +2890,7 @@ jobs:
             -f content="eyes" \
             -F per_page=100 \
             --paginate \
-            --jq '.[] | select(.content == "eyes") | select(.user.login == "clawsweeper" or .user.login == "clawsweeper[bot]" or .user.login == "openclaw-clawsweeper[bot]") | .id')"
+            --jq ".[] | select(.content == \"eyes\") | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | .id")"
           while IFS= read -r reaction_id; do
             [ -n "$reaction_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions/$reaction_id" --method DELETE
@@ -2925,7 +2925,7 @@ jobs:
           reaction_ids="$(gh api -X GET -H "Accept: application/vnd.github+json" \
             "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions" \
             -f content="eyes" -F per_page=100 --paginate \
-            --jq '.[] | select(.content == "eyes") | select(.user.login == "clawsweeper" or .user.login == "clawsweeper[bot]" or .user.login == "openclaw-clawsweeper[bot]") | .id')"
+            --jq ".[] | select(.content == \"eyes\") | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | .id")"
           while IFS= read -r reaction_id; do
             [ -n "$reaction_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions/$reaction_id" --method DELETE || true
@@ -2939,7 +2939,7 @@ jobs:
           ITEM_NUMBER: ${{ steps.publication-context.outputs.item_number }}
           LEASE_OWNER: github-run-${{ steps.publication-context.outputs.producer_run_id }}-${{ steps.publication-context.outputs.generation_attempt }}
         run: |
-          lease_ids="$(gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100" --paginate --jq ".[] | select(.user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | select(.body | contains(\"owner=$LEASE_OWNER \")) | .id")"
+          lease_ids="$(gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100" --paginate --jq ".[] | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | select(.body | contains(\"<!-- clawsweeper-review-lease item=$ITEM_NUMBER -->\")) | select(.body | contains(\"owner=$LEASE_OWNER \")) | .id")"
           while IFS= read -r lease_id; do
             [ -n "$lease_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/comments/$lease_id" --method DELETE
@@ -2948,7 +2948,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions" \
             -f content="eyes" -F per_page=100 --paginate \
-            --jq '.[] | select(.content == "eyes") | select(.user.login == "clawsweeper" or .user.login == "clawsweeper[bot]" or .user.login == "openclaw-clawsweeper[bot]") | .id')"
+            --jq ".[] | select(.content == \"eyes\") | select(.user.login == \"$CLAWSWEEPER_COMMENT_AUTHOR_LOGIN\" or .user.login == \"clawsweeper\" or .user.login == \"clawsweeper[bot]\" or .user.login == \"openclaw-clawsweeper[bot]\") | .id")"
           while IFS= read -r reaction_id; do
             [ -n "$reaction_id" ] || continue
             gh api "repos/$TARGET_REPO/issues/$ITEM_NUMBER/reactions/$reaction_id" --method DELETE

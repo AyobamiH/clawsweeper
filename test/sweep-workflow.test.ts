@@ -1484,6 +1484,7 @@ test("exact event review publishes directly with a queue-bounded canonical fallb
     );
   }
   assert.match(releaseGeneration.if ?? "", /reserve-exact-review-lease\.outputs\.status != 'held'/);
+  assert.match(releaseGeneration.run ?? "", /CLAWSWEEPER_COMMENT_AUTHOR_LOGIN/);
   assert.match(releaseGeneration.run ?? "", /content == "eyes"/);
   for (const cleanup of [releaseGeneration, step(reviewer, "Mark unsuccessful re-review")]) {
     for (const kind of ["github_rate_limit", "github_transient"]) {
@@ -1720,6 +1721,7 @@ test("exact event review publishes directly with a queue-bounded canonical fallb
   );
   assert.doesNotMatch(releaseTerminal.if ?? "", /publication-context.*live_terminal_noop/);
   assert.match(releaseTerminal.if ?? "", /publish-event-result.*terminal_noop/);
+  assert.match(releaseUnsuccessful.run ?? "", /CLAWSWEEPER_COMMENT_AUTHOR_LOGIN/);
   assert.match(releaseUnsuccessful.run ?? "", /\.user\.login == \\"clawsweeper\[bot\]\\"/);
   assert.match(releaseUnsuccessful.run ?? "", /content == "eyes"/);
   assert.match(releaseUnsuccessful.if ?? "", /completion_kind == 'superseded'/);
