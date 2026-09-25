@@ -22,6 +22,7 @@ import {
   hydratePullRequestReviewHistory,
   materializePullRequestReviewTree,
   removePullRequestReviewTree,
+  reviewGitFetchAuthEnv,
 } from "../dist/clawsweeper-review-blobs.js";
 import { MAX_SCAN_BYTES } from "../dist/agent-input-scan.js";
 import { readReviewGit, reviewMergeBase } from "../dist/pr-review-evidence.js";
@@ -29,6 +30,38 @@ import { readReviewGit, reviewMergeBase } from "../dist/pr-review-evidence.js";
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
+
+test("private review fetch auth is ephemeral and token-safe", () => {
+  const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+  try {
+    process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = "private-review-token";
+    const env = reviewGitFetchAuthEnv();
+    assert.equal(env.GIT_CONFIG_COUNT, "1");
+    assert.equal(env.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+    assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+    const header = String(env.GIT_CONFIG_VALUE_0);
+    assert.doesNotMatch(header, /private-review-token/);
+    const encoded = header.replace(/^AUTHORIZATION: basic /, "");
+    assert.equal(
+      Buffer.from(encoded, "base64").toString("utf8"),
+      "x-access-token:private-review-token",
+    );
+  } finally {
+    if (originalToken === undefined) delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    else process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = originalToken;
+  }
+});
+
+test("private review fetch auth is absent without a dedicated token", () => {
+  const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+  try {
+    delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    assert.deepEqual(reviewGitFetchAuthEnv(), {});
+  } finally {
+    if (originalToken === undefined) delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    else process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = originalToken;
+  }
+});
 
 function ensureShallowPullRequestReviewHead(targetDir: string, headSha: string): boolean {
   return ensureReviewTreeCommit({
