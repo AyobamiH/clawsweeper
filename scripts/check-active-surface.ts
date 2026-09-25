@@ -58,7 +58,7 @@ const retiredPatterns: { label: string; pattern: RegExp }[] = [
   },
   {
     label: "workflow activation mutation",
-    pattern: /\bactions\/workflows\/[^\s"'\`]+\/(?:enable|disable)\b/,
+    pattern: /\bactions\/workflows\/[^\s"'`]+\/(?:enable|disable)\b/,
   },
   {
     label: "gh workflow activation mutation",
