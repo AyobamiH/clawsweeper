@@ -2716,8 +2716,8 @@ test("sweep failed-review retry lane defaults to dry-run exact-item dispatch", (
     workflow.indexOf("\n    runs-on:", workflow.indexOf("\n  plan:")),
   );
 
-  assert.match(workflow, /cron: "13 \* \* \* \*"/);
-  assert.match(planHeader, /github\.event\.schedule == '13 \* \* \* \*'/);
+  assert.match(workflow, /cron: "13 \* \* \* 0-6"/);
+  assert.match(planHeader, /github\.event\.schedule == '13 \* \* \* 0-6'/);
   assert.match(retryBlock, /pnpm run retry-failed-reviews --/);
   assert.match(
     retryBlock,
