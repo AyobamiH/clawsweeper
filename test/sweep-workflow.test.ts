@@ -6147,7 +6147,10 @@ test("fleet fanout owns all scheduled repository lanes", () => {
   ]);
   assert.match(fanoutBlock, /github\.event\.schedule == '4\/20 \* \* \* \*'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '8,23,38,53 \* \* \* \*' && 'apply'/);
-  assert.match(fanoutBlock, /github\.event\.schedule == '6,21,36,51 \* \* \* \*' && 'comment-sync'/);
+  assert.match(
+    fanoutBlock,
+    /github\.event\.schedule == '6,21,36,51 \* \* \* \*' && 'comment-sync'/,
+  );
   assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* \*' && 'failed-review-retry'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit'/);
@@ -6171,7 +6174,8 @@ test("idea archive schedule fans out only to configured revival targets", () => 
   assert.ok(revive);
   assert.match(fanout.if ?? "", /github\.event_name == 'schedule'/);
   assert.match(
-    fanout.steps.find((step) => step.name === "Dispatch configured idea-revival targets")?.run ?? "",
+    fanout.steps.find((step) => step.name === "Dispatch configured idea-revival targets")?.run ??
+      "",
     /--mode idea-archive-revival/,
   );
   assert.match(revive.if ?? "", /clawsweeper_idea_archive_revival/);
