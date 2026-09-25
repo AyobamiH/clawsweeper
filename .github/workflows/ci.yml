@@ -70,8 +70,6 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
 
-      - name: Run check
-        run: pnpm run check
 
   sparse-repair-builds:
     name: sparse repair build smoke

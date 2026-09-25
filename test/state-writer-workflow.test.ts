@@ -17,8 +17,7 @@ type WorkflowJob = { env?: Record<string, unknown>; steps?: WorkflowStep[] };
 type WorkflowDocument = { jobs?: Record<string, WorkflowJob> };
 
 const workflowDirectory = ".github/workflows";
-const workerUrl =
-  "${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}";
+const workerUrl = "${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}";
 const workerSecret = "${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}";
 
 test("every state hydration uses the canonical Worker with an explicit git-state decision", () => {
@@ -80,9 +79,11 @@ test("per-target state hydration is slug-scoped while fleet lanes retain discove
       ".github/workflows/spam-scanner.yml:scan",
       ".github/workflows/sweep.yml:event-review-apply",
       ".github/workflows/sweep.yml:event-review-publish",
+      ".github/workflows/sweep.yml:target-fanout",
       ".github/workflows/sweep.yml:plan",
       ".github/workflows/sweep.yml:publish",
       ".github/workflows/sweep.yml:retry-failed-reviews",
+      ".github/workflows/sweep.yml:audit-dashboard",
       ".github/workflows/sweep.yml:apply-proof",
       ".github/workflows/sweep.yml:apply-existing",
     ],

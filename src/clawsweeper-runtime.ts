@@ -764,6 +764,7 @@ export const {
   codexFailureLogKindForTest,
   codexReviewFailureRetryableForTest,
   defaultReviewArtifactDirForTest,
+  gitFetchAuthEnvForTest,
   localExactReviewHistoryPathForTest,
   makeTreeReadOnlyForTest,
   prepareManagedLocalReviewCheckoutForTest,
