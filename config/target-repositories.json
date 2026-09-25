@@ -7,13 +7,8 @@
       "checkout_dir": "openclaw-operator",
       "prompt_note": "Use the openclaw-operator source tree and current main branch. Review automation, operator wiring, and repository dispatch behavior conservatively. Propose auto-close only when the issue or pull request is certainly implemented on main; keep everything else open for maintainer triage. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing. Relationship notes are context, not cross-repository authority: ClawSweeper remains a repository-level specialist and must not coordinate or mutate sibling repositories merely because VISION.md names them.",
       "apply_close_rules": {
-        "issue": [
-          "implemented_on_main"
-        ],
-        "pull_request": [
-          "implemented_on_main",
-          "mostly_implemented_on_main"
-        ]
+        "issue": ["implemented_on_main"],
+        "pull_request": ["implemented_on_main", "mostly_implemented_on_main"]
       },
       "package_manager": "npm",
       "validation_commands": [],
@@ -21,9 +16,7 @@
       "live_test": {
         "enabled": true,
         "surface_default": "terminal",
-        "setup": [
-          "npm ci"
-        ],
+        "setup": ["npm ci"],
         "ready_timeout_seconds": 240,
         "max_recording_seconds": 90
       },
@@ -43,13 +36,8 @@
       "checkout_dir": "openclaw-ops",
       "prompt_note": "Use the openclaw-ops source tree and current default branch. Review operational wiring, schedules, deployment config, and maintenance workflows conservatively. Propose auto-close only when the issue or pull request is certainly implemented on the default branch; keep everything else open for maintainer triage. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing. Relationship notes are context, not cross-repository authority: ClawSweeper remains a repository-level specialist and must not coordinate or mutate sibling repositories merely because VISION.md names them.",
       "apply_close_rules": {
-        "issue": [
-          "implemented_on_main"
-        ],
-        "pull_request": [
-          "implemented_on_main",
-          "mostly_implemented_on_main"
-        ]
+        "issue": ["implemented_on_main"],
+        "pull_request": ["implemented_on_main", "mostly_implemented_on_main"]
       },
       "package_manager": "npm",
       "validation_commands": [],
@@ -57,9 +45,7 @@
       "live_test": {
         "enabled": true,
         "surface_default": "terminal",
-        "setup": [
-          "npm ci"
-        ],
+        "setup": ["npm ci"],
         "ready_timeout_seconds": 240,
         "max_recording_seconds": 90
       },
@@ -77,20 +63,12 @@
   "generic_fallbacks": [
     {
       "owner": "AyobamiH",
-      "deny_repositories": [
-        "AyobamiH/clawsweeper-state",
-        "AyobamiH/.github"
-      ],
+      "deny_repositories": ["AyobamiH/clawsweeper-state", "AyobamiH/.github"],
       "allow_repo_name_pattern": "^[A-Za-z0-9_.-]+$",
       "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing. Relationship notes are context, not cross-repository authority: ClawSweeper remains a repository-level specialist and must not coordinate or mutate sibling repositories merely because VISION.md names them.",
       "apply_close_rules": {
-        "issue": [
-          "implemented_on_main"
-        ],
-        "pull_request": [
-          "implemented_on_main",
-          "mostly_implemented_on_main"
-        ]
+        "issue": ["implemented_on_main"],
+        "pull_request": ["implemented_on_main", "mostly_implemented_on_main"]
       },
       "package_manager": "npm",
       "validation_commands": [],
@@ -118,13 +96,8 @@
       "allow_repo_name_pattern": "^[A-Za-z0-9_.-]+$",
       "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there.",
       "apply_close_rules": {
-        "issue": [
-          "implemented_on_main"
-        ],
-        "pull_request": [
-          "implemented_on_main",
-          "mostly_implemented_on_main"
-        ]
+        "issue": ["implemented_on_main"],
+        "pull_request": ["implemented_on_main", "mostly_implemented_on_main"]
       },
       "package_manager": "npm",
       "validation_commands": [],
@@ -149,9 +122,7 @@
   ],
   "core_target_overrides": {},
   "target_inventory": {
-    "owners": [
-      "AyobamiH"
-    ],
+    "owners": ["AyobamiH"],
     "allow_repositories": [
       "AyobamiH/openclaw-operator",
       "AyobamiH/openclaw-ops",
@@ -176,10 +147,7 @@
       "AyobamiH/poststeward",
       "AyobamiH/tax-lien-intelligence-platform"
     ],
-    "deny_repositories": [
-      "AyobamiH/clawsweeper-state",
-      "AyobamiH/.github"
-    ],
+    "deny_repositories": ["AyobamiH/clawsweeper-state", "AyobamiH/.github"],
     "include_private": true,
     "include_archived": false,
     "include_forks": false,
