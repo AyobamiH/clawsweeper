@@ -43,7 +43,7 @@ test("dead-letter workflow is manual, serialized, and bounded to safe actions", 
   );
   assert.equal(
     operatorStep.env.CLAWSWEEPER_WEBHOOK_SECRET,
-    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET }}",
+    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
   );
   assert.equal(
     operatorStep.env.CLAWSWEEPER_APP_PRIVATE_KEY,
@@ -110,7 +110,7 @@ test("automatic dead-letter reconciliation is scheduled, bounded, and least priv
   );
   assert.equal(
     parked.env.CLAWSWEEPER_WEBHOOK_SECRET,
-    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET }}",
+    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
   );
   assert.equal(
     parked.env.CLAWSWEEPER_APP_PRIVATE_KEY,
