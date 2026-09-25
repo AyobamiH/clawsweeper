@@ -2728,7 +2728,7 @@ test("sweep failed-review retry lane defaults to dry-run exact-item dispatch", (
   assert.match(retryBlock, /--target-repo "\$TARGET_REPO"/);
   assert.match(retryBlock, /RETRY_MAX_RUNTIME_MS:.*'600000'/);
   assert.match(retryBlock, /--max-runtime-ms "\$RETRY_MAX_RUNTIME_MS"/);
-  assert.match(retryBlock, /--state-dir results\/failed-review-retries\/openclaw-openclaw/);
+  assert.match(retryBlock, /--state-dir "results\/failed-review-retries\/\$\{\{ steps\.retry-target\.outputs\.target_slug \}\}"/);
   assert.match(retryBlock, /--path results\/failed-review-retries\/openclaw-openclaw/);
   assert.doesNotMatch(retryBlock, /--path records\/openclaw-openclaw/);
   const publishIndex = retryBlock.indexOf("- name: Publish failed-review retry state");
