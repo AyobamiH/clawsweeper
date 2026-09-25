@@ -6151,7 +6151,7 @@ test("fleet fanout owns all scheduled repository lanes", () => {
     fanoutBlock,
     /github\.event\.schedule == '6,21,36,51 \* \* \* \*' && 'comment-sync'/,
   );
-  assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* \*' && 'failed-review-retry'/);
+  assert.match(fanoutBlock, /github\.event\.schedule == '13 \* \* \* 0-6' && 'failed-review-retry'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '41\/10 \* \* \* \*' && 'normal-review'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '37 \*\/6 \* \* \*' && 'audit'/);
   assert.match(
