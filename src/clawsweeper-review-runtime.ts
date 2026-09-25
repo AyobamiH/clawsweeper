@@ -92,6 +92,24 @@ export function createReviewRuntime({
   let reviewDecisionSchemaCache: string | undefined;
   let prCloseCoverageProofPromptTemplateCache: string | undefined;
 
+  function gitFetchAuthEnv(): NodeJS.ProcessEnv | undefined {
+    const token = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN?.trim();
+    if (!token) return undefined;
+    return {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(
+        `x-access-token:${token}`,
+        "utf8",
+      ).toString("base64")}`,
+      GIT_TERMINAL_PROMPT: "0",
+    };
+  }
+
+  function gitFetchAuthEnvForTest(): NodeJS.ProcessEnv | undefined {
+    return gitFetchAuthEnv();
+  }
+
   function gitInfo(openclawDir: string, options: ReviewGitInfoOptions = {}): GitInfo {
     const targetBranch = options.targetBranch ?? reviewTargetBranch(openclawDir);
     requireSafeGitBranchName(targetBranch, "target branch");
@@ -105,6 +123,7 @@ export function createReviewRuntime({
       ],
       {
         cwd: openclawDir,
+        env: gitFetchAuthEnv(),
       },
     );
     const mainSha = run("git", ["rev-parse", `refs/remotes/origin/${targetBranch}`], {
@@ -136,6 +155,7 @@ export function createReviewRuntime({
       try {
         run("git", ["fetch", "--force", "origin", "tag", latestRelease.tagName, "--depth=1"], {
           cwd: openclawDir,
+          env: gitFetchAuthEnv(),
         });
         latestRelease.sha = run("git", ["rev-list", "-n", "1", latestRelease.tagName], {
           cwd: openclawDir,
@@ -1134,6 +1154,7 @@ ${extra}
     defaultReviewArtifactDir,
     displayDurationMs,
     displayPath,
+    gitFetchAuthEnvForTest,
     gitInfo,
     isSafeGitBranchName,
     localExactReviewItem,
