@@ -12,6 +12,20 @@ export type ReviewBlobHydration = {
   blobs: number;
 };
 
+export function reviewGitFetchAuthEnv(): NodeJS.ProcessEnv {
+  const token = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN?.trim();
+  if (!token) return {};
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(
+      `x-access-token:${token}`,
+      "utf8",
+    ).toString("base64")}`,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
+
 function gitCommitExists(targetDir: string, sha: string): boolean {
   return (
     spawnSync("git", ["cat-file", "-e", `${sha}^{commit}`], {
@@ -62,7 +76,7 @@ export function ensureReviewTreeCommit({
     ],
     {
       cwd: targetDir,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...process.env, ...reviewGitFetchAuthEnv(), GIT_OPTIONAL_LOCKS: "0" },
       stdio: "ignore",
       timeout: 30_000,
     },
@@ -118,7 +132,7 @@ function deepenReviewHistory(targetDir: string, revisions: readonly string[]): v
     ],
     {
       cwd: targetDir,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...process.env, ...reviewGitFetchAuthEnv(), GIT_OPTIONAL_LOCKS: "0" },
       stdio: "ignore",
       timeout: 30_000,
     },
