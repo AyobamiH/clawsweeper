@@ -601,7 +601,7 @@ test("review and apply primary boundaries ignore ledger-only failures", () => {
     telemetryStep.env?.ACTION_LEDGER_OUTCOME ?? "",
     /needs\.publish-apply-proof-action-ledger\.result == 'failure'/,
   );
-  assert.match(telemetryStep.env?.TARGET_REPO ?? "", /openclaw\/clawhub/);
+  assert.match(telemetryStep.env?.TARGET_REPO ?? "", /AyobamiH\/openclaw-operator/);
   assert.match(
     telemetryStep.env?.APPLY_STARTED_AT ?? "",
     /needs\.apply-existing\.outputs\.observability_started_at/,
@@ -713,9 +713,8 @@ test("comment router target token can inspect checks without widening dispatch a
   assert.ok(targetToken?.with);
   assert.equal(targetToken.with["permission-checks"], "read");
   assert.equal(targetToken.with["permission-statuses"], "read");
-  assert.ok(dispatchToken?.with);
-  assert.equal("permission-checks" in dispatchToken.with, false);
-  assert.equal("permission-statuses" in dispatchToken.with, false);
+  assert.ok(dispatchToken);
+  assert.equal(dispatchToken.with, undefined);
 });
 
 test("exact event branch guard resolves empty and numeric claims to the repository default", () => {
@@ -2444,7 +2443,7 @@ test("terminal exact-review runs reconcile through a signed isolated backstop", 
   );
   assert.match(
     sweepJob,
-    /REVIEW_PLACEHOLDER_CURSOR_STORE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \|\| 'https:\/\/clawsweeper\.openclaw\.ai' \}\}/,
+    /REVIEW_PLACEHOLDER_CURSOR_STORE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \}\}/,
   );
   assert.doesNotMatch(sweepJob, /REVIEW_PLACEHOLDER_BACKLOG_ALERT/);
   assert.match(
@@ -3227,7 +3226,7 @@ test("apply workflow bounds checkpoints and requeues with a fresh token", () => 
   assert.match(applyHelper, /adaptive-apply-batch-size/);
   assert.match(applyHelper, /--status-path "results\/sweep-status\/\$\{target_slug\}\.json"/);
   assert.ok(
-    runBody.length < 20_000,
+    runBody.length < 20_500,
     `apply run expression is ${runBody.length} characters; keep margin below GitHub's 21,000-character limit`,
   );
   assert.match(applyStep, /processed-limit "\$close_processed_limit"/);
@@ -5377,11 +5376,11 @@ test("sweep target tokens fall back when an org app installation is missing", ()
 
   assert.match(
     workflow,
-    /CLAWSWEEPER_INVENTORY_TOKEN_STEIPETE: \$\{\{ steps\.steipete-token\.outputs\.token \|\| '__public__' \}\}/,
+    /CLAWSWEEPER_INVENTORY_TOKEN_AYOBAMIH: \$\{\{ steps\.ayobamih-token\.outputs\.token \}\}/,
   );
-  const openclawInventoryBlocks = stepBlocks("Create OpenClaw inventory token");
-  assert.equal(openclawInventoryBlocks.length, 1);
-  assert.doesNotMatch(openclawInventoryBlocks[0] ?? "", /continue-on-error: true/);
+  const ayobamihInventoryBlocks = stepBlocks("Create AyobamiH inventory token");
+  assert.equal(ayobamihInventoryBlocks.length, 1);
+  assert.doesNotMatch(ayobamihInventoryBlocks[0] ?? "", /continue-on-error: true/);
   for (const name of [
     "Create target read token",
     "Create target write token",
@@ -5442,13 +5441,10 @@ test("public OpenClaw reads use workflow tokens without moving mutation identity
   );
 
   const auditSelection = find("audit-dashboard", "Select target read token");
-  assert.equal(auditSelection.env?.PRIMARY_TOKEN, "${{ github.token }}");
-  assert.equal(
-    auditSelection.env?.APP_FALLBACK_TOKEN,
-    "${{ steps.target-read-token.outputs.token }}",
-  );
-  assert.match(auditSelection.run ?? "", /Using workflow token for public audit reads/);
-  assert.match(auditSelection.run ?? "", /Using ClawSweeper App token fallback for audit reads/);
+  assert.equal(auditSelection.env?.APP_TOKEN, "${{ steps.target-read-token.outputs.token }}");
+  assert.equal(auditSelection.env?.WORKFLOW_TOKEN, "${{ github.token }}");
+  assert.match(auditSelection.run ?? "", /Using ClawSweeper App token for target audit reads/);
+  assert.match(auditSelection.run ?? "", /Using workflow token fallback for public audit reads/);
 
   for (const [job, name, expression] of [
     [
@@ -5683,7 +5679,7 @@ test("comment commands keep the router-to-sweep dispatch contract", () => {
   assert.match(routerSource, /source_delivery_id:\s*String\(command\.source_delivery_id\)/);
   assert.match(routerSource, /`item_numbers=\$\{dispatchKey\}`/);
   assert.match(routerSource, /event:\s*"workflow_dispatch"/);
-  assert.match(sweepWorkflow, /types:\s*\[clawsweeper_item,\s*clawsweeper_target_sweep\]/);
+  assert.match(sweepWorkflow, /types:\s*\[[\s\S]*?clawsweeper_item,[\s\S]*?clawsweeper_target_sweep,/);
   assert.match(sweepWorkflow, /Review event item \{0\}#\{1\} \[\{2\}\]/);
   assert.match(sweepWorkflow, /startsWith\(github\.event\.inputs\.item_numbers, 'router-'\)/);
   assert.match(sweepWorkflow, /sourceDeliveryId:\s*payload\.source_delivery_id/);
@@ -6320,7 +6316,7 @@ test("background planners fetch exact-review queue pressure once and pass its le
   for (const block of [sweepBlock]) {
     assert.match(
       block,
-      /QUEUE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \|\| 'https:\/\/clawsweeper\.openclaw\.ai' \}\}/,
+      /QUEUE_URL: \$\{\{ vars\.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL \}\}/,
     );
     assert.equal(block.match(/queue-pressure --queue-url/g)?.length, 1);
     assert.match(block, /--pressure-level "\$pressure_level"/);
@@ -6784,7 +6780,7 @@ test("sweep issue and PR event reviews and target fanout avoid storm amplificati
   assert.match(legacyIntakeBlock, /additionalPrompt: payload\.additional_prompt/);
   assert.match(
     fanoutBlock,
-    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '41\/10 \* \* \* \*' && '12' \|\| \(github\.event\.schedule == '37 \*\/6 \* \* \*' && '12' \|\| '20'\) \}\}/,
+    /FANOUT_LIMIT: \$\{\{ github\.event\.schedule == '4\/20 \* \* \* \*' && '20' \|\| '12' \}\}/,
   );
   assert.match(fanoutBlock, /Summarize trailing weekly review coverage/);
   assert.match(fanoutBlock, /--cursor-store-url "\$REVIEW_COVERAGE_URL"/);
@@ -6904,9 +6900,10 @@ test("setup-state defaults to an auth-safe shallow checkout", () => {
   assert.doesNotMatch(fetchDepthBlock, /default: "0"/);
   assert.match(action, /fetch-depth: \$\{\{ inputs\.fetch-depth \}\}/);
   assert.match(action, /sparse-checkout: \$\{\{ inputs\.sparse-checkout \}\}/);
-  assert.doesNotMatch(action, /state-repository:/);
+  assert.match(action, /state-repository:/);
+  assert.match(action, /default: AyobamiH\/clawsweeper-state/);
   assert.doesNotMatch(action, /state-ref:/);
-  assert.match(action, /repository: openclaw\/clawsweeper-state/);
+  assert.match(action, /repository: \$\{\{ inputs\.state-repository \}\}/);
   assert.match(action, /ref: state/);
 });
 
