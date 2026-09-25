@@ -30,9 +30,7 @@ jobs:
               source_action: "synchronize",
               source_head_sha: "e9a57c563c47d5508159d62d64cdc1251e34f5f5",
               source_base_sha: "0bb18eea7e91816da1db602df93d097121004ff5",
-              source_is_draft: false,
               source_updated_at: "2026-09-25T11:52:04Z",
-              supersedes_in_progress: true,
-              codex_timeout_ms: "1200000"
+              supersedes_in_progress: true
             }
           }' | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
