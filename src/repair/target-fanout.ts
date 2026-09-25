@@ -1076,10 +1076,7 @@ function normalizeCursor(cursor: number, length: number): number {
   return ((cursor % length) + length) % length;
 }
 
-function automationOverrides(
-  value: unknown,
-  label: string,
-): RepositoryAutomationOverrides {
+function automationOverrides(value: unknown, label: string): RepositoryAutomationOverrides {
   const raw = record(value, label);
   const result: Partial<Record<FanoutMode, boolean>> = {};
   for (const [key, rawValue] of Object.entries(raw)) {
