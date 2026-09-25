@@ -87,7 +87,13 @@ run-name: >-
 
 on:
   repository_dispatch:
-    types: [clawsweeper_item, clawsweeper_target_sweep, clawsweeper_apply_target, clawsweeper_failed_review_retry]
+    types:
+      [
+        clawsweeper_item,
+        clawsweeper_target_sweep,
+        clawsweeper_apply_target,
+        clawsweeper_failed_review_retry,
+      ]
   workflow_dispatch:
     inputs:
       target_repo:
@@ -192,12 +198,12 @@ on:
         default: "false"
   schedule:
     # Repository selection comes from config/target-repositories.json.
-    - cron: "4/20 * * * *"        # hot intake
-    - cron: "41/10 * * * *"       # normal review
-    - cron: "37 */6 * * *"        # audit
-    - cron: "8,23,38,53 * * * *"  # guarded apply
-    - cron: "6,21,36,51 * * * *"  # durable review-comment sync
-    - cron: "13 * * * 0-6"        # failed-review retry; all days explicit
+    - cron: "4/20 * * * *" # hot intake
+    - cron: "41/10 * * * *" # normal review
+    - cron: "37 */6 * * *" # audit
+    - cron: "8,23,38,53 * * * *" # guarded apply
+    - cron: "6,21,36,51 * * * *" # durable review-comment sync
+    - cron: "13 * * * 0-6" # failed-review retry; all days explicit
 
 permissions:
   contents: write
