@@ -40,7 +40,7 @@ test("review git fetch auth stays unchanged when no dedicated token is present",
   const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
   try {
     delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
-    assert.equal(gitFetchAuthEnvForTest(), undefined);
+    assert.deepEqual(gitFetchAuthEnvForTest(), {});
   } finally {
     if (originalToken === undefined) {
       delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
