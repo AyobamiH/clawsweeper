@@ -936,8 +936,25 @@ jobs:
 
       - name: Check out target repository
         if: ${{ steps.claim-exact-review-queue.outputs.claimed == 'true' && steps.live-item.outputs.proceed == 'true' }}
+        env:
+          TARGET_GIT_TOKEN: ${{ steps.target-write-token.outputs.token }}
         run: |
           set -euo pipefail
+          if [ -n "${TARGET_GIT_TOKEN:-}" ]; then
+            askpass="$(mktemp)"
+            trap 'rm -f "$askpass"' EXIT
+            cat > "$askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$TARGET_GIT_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+            chmod 700 "$askpass"
+            export GIT_ASKPASS="$askpass"
+            export GIT_TERMINAL_PROMPT=0
+          fi
           url="https://github.com/${{ steps.target.outputs.target_repo }}.git"
           cache_dir="${{ steps.target.outputs.target_checkout_dir }}-cache.git"
           checkout_dir="${{ steps.target.outputs.target_checkout_dir }}"
@@ -4313,8 +4330,25 @@ jobs:
             ${{ needs.plan.outputs.target_repo_name }}-git-${{ runner.os }}-
 
       - name: Check out target repository
+        env:
+          TARGET_GIT_TOKEN: ${{ steps.target-read-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
+          if [ -n "${TARGET_GIT_TOKEN:-}" ]; then
+            askpass="$(mktemp)"
+            trap 'rm -f "$askpass"' EXIT
+            cat > "$askpass" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$TARGET_GIT_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+            chmod 700 "$askpass"
+            export GIT_ASKPASS="$askpass"
+            export GIT_TERMINAL_PROMPT=0
+          fi
           url="https://github.com/${{ needs.plan.outputs.target_repo }}.git"
           cache_dir="${{ needs.plan.outputs.target_checkout_dir }}-cache.git"
           checkout_dir="${{ needs.plan.outputs.target_checkout_dir }}"
