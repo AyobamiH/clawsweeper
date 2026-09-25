@@ -74,9 +74,7 @@ jobs:
         run: |
           pnpm run format
           git diff --no-color -- config/target-repositories.json test/clawsweeper.test.ts test/sweep-workflow.test.ts
-
-      - name: Run check
-        run: pnpm run check
+          exit 1
 
   sparse-repair-builds:
     name: sparse repair build smoke
