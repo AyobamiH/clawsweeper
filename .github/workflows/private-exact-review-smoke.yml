@@ -8,16 +8,27 @@ on:
       - ".github/workflows/private-exact-review-smoke.yml"
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
 
 jobs:
-  contain:
+  dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel duplicate manual review run
+      - name: Enqueue one canonical private exact review
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/36131679056/cancel" || true
+          jq -n '{
+            event_type: "clawsweeper_item",
+            client_payload: {
+              target_repo: "AyobamiH/wagging-web-wins",
+              target_branch: "main",
+              item_number: 86,
+              item_kind: "pull_request",
+              source_event: "pull_request",
+              source_action: "manual_private_exact_review_acceptance",
+              supersedes_in_progress: true,
+              codex_timeout_ms: "1200000"
+            }
+          }' | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
