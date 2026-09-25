@@ -4763,7 +4763,7 @@ jobs:
         if: ${{ always() && !cancelled() && steps.setup-publish-state.outcome == 'success' && steps.download-review-artifacts.outcome == 'success' }}
         env:
           CLAWSWEEPER_CANONICAL_RECORD_BASELINE_DIR: .artifacts/review-canonical-baseline
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           EXACT_ITEM: ${{ github.event.client_payload.item_number || github.event.inputs.item_number || github.event.inputs.item_numbers || '' }}
           EXPECTED_METRIC_COUNT: ${{ needs.plan.outputs.planned_shards }}
           HOT_INTAKE: ${{ needs.plan.outputs.hot_intake }}
@@ -4838,7 +4838,7 @@ jobs:
         env:
           CLAWSWEEPER_CANONICAL_RECORD_BASELINE_DIR: .artifacts/review-canonical-baseline
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.target-write-token.outputs.token }}
           ITEM_NUMBERS: ${{ steps.reviewed-items.outputs.item_numbers }}
           QUEUE_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           TARGET_REPO: ${{ needs.plan.outputs.target_repo }}
