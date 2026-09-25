@@ -528,6 +528,17 @@ test("restricted PR review can inspect changed blobs from a genuine blobless clo
   }
 });
 
+test("restricted review worktree add reuses private review git authentication", () => {
+  const source = readFileSync(
+    new URL("../src/clawsweeper-review-blobs.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /worktree", "add"[\s\S]*env: \{ \.\.\.process\.env, \.\.\.reviewGitFetchAuthEnv\(\), GIT_OPTIONAL_LOCKS: "0" \}/,
+  );
+});
+
 test("restricted review materializes the exact pull request head before model execution", () => {
   const fixture = partialCloneFixture({ prefetchHead: false });
   const reviewTree = join(fixture.root, "review-tree");

@@ -216,7 +216,7 @@ export function materializePullRequestReviewTree({
     ["worktree", "add", "--detach", "--force", worktreeDir, headSha],
     {
       cwd: targetDir,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...process.env, ...reviewGitFetchAuthEnv(), GIT_OPTIONAL_LOCKS: "0" },
       stdio: "ignore",
     },
   );
