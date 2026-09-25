@@ -97,13 +97,18 @@ test("target automation defaults keep mutation lanes opt-in", () => {
     ]),
   };
 
-  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "normal-review"), repositories);
-  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "apply"), repositories);
-  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "comment-sync"), repositories);
   assert.deepEqual(
-    filterRepositoriesForMode(repositories, laneConfig, "idea-archive-revival"),
-    [repositories[0]],
+    filterRepositoriesForMode(repositories, laneConfig, "normal-review"),
+    repositories,
   );
+  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "apply"), repositories);
+  assert.deepEqual(
+    filterRepositoriesForMode(repositories, laneConfig, "comment-sync"),
+    repositories,
+  );
+  assert.deepEqual(filterRepositoriesForMode(repositories, laneConfig, "idea-archive-revival"), [
+    repositories[0],
+  ]);
 });
 
 test("target automation config is read from explicit and owner profiles", () => {
