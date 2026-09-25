@@ -8,10 +8,47 @@ import {
   isExplicitReviewDispatch,
   prepareReviewCommand,
 } from "../dist/clawsweeper-review-preparation.js";
-import { reviewPromptForTest } from "../dist/clawsweeper.js";
+import { gitFetchAuthEnvForTest, reviewPromptForTest } from "../dist/clawsweeper.js";
 import { repositoryProfileFor } from "../dist/repository-profiles.js";
 import { hydratePrimaryBody, longProofBody } from "./primary-body-fixture.ts";
 import { git } from "./helpers.ts";
+
+test("private target git fetch auth is ephemeral command-scope config", () => {
+  const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+  try {
+    process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = "target-read-token";
+    const env = gitFetchAuthEnvForTest();
+    assert.ok(env);
+    assert.equal(env.GIT_CONFIG_COUNT, "1");
+    assert.equal(env.GIT_CONFIG_KEY_0, "http.https://github.com/.extraheader");
+    assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+    const value = String(env.GIT_CONFIG_VALUE_0);
+    assert.doesNotMatch(value, /target-read-token/);
+    assert.match(value, /^AUTHORIZATION: basic /);
+    const encoded = value.replace(/^AUTHORIZATION: basic /, "");
+    assert.equal(Buffer.from(encoded, "base64").toString("utf8"), "x-access-token:target-read-token");
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    } else {
+      process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = originalToken;
+    }
+  }
+});
+
+test("review git fetch auth stays unchanged when no dedicated token is present", () => {
+  const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+  try {
+    delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    assert.equal(gitFetchAuthEnvForTest(), undefined);
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
+    } else {
+      process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN = originalToken;
+    }
+  }
+});
 
 test("body-file keeps its authoritative precedence over compact hosted context", () => {
   const dir = mkdtempSync(join(tmpdir(), "clawsweeper-body-override-"));
