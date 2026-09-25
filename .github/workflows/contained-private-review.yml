@@ -9,6 +9,7 @@ permissions:
   actions: write
   contents: read
 
+# API credit restored acceptance rerun
 jobs:
   dispatch:
     runs-on: ubuntu-latest
