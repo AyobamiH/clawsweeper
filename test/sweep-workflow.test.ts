@@ -6143,7 +6143,7 @@ test("fleet fanout owns all scheduled repository lanes", () => {
     "37 */6 * * *",
     "8,23,38,53 * * * *",
     "6,21,36,51 * * * *",
-    "13 * * * *",
+    "13 * * * 0-6",
   ]);
   assert.match(fanoutBlock, /github\.event\.schedule == '4\/20 \* \* \* \*'/);
   assert.match(fanoutBlock, /github\.event\.schedule == '8,23,38,53 \* \* \* \*' && 'apply'/);
