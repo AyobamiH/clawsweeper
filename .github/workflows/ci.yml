@@ -70,6 +70,11 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
 
+      - name: Temporary formatter oracle
+        run: |
+          pnpm run format
+          git diff --no-color
+
       - name: Run check
         run: pnpm run check
 
