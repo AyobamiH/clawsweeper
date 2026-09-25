@@ -1289,6 +1289,17 @@ export function createReviewCommandWorkflow(dependencies: CreateReviewCommandWor
           codexFailureRetryable = codexReviewFailureRetryable(error);
           codexFailureDisposition = actionLedgerFailureDisposition(error);
           if (error instanceof CodexReviewError) {
+            console.error(
+              `[review] codex-runtime-failure item=#${item.number} status=${error.status ?? "null"} error_code=${error.errorCode ?? "none"} signal=${error.signal ?? "none"} retryable=${codexFailureRetryable} classification=${codexFailureLogKind(
+                codexFailureDecision(
+                  error.status,
+                  error.message,
+                  error.stdout,
+                  error.stderr,
+                  { errorCode: error.errorCode, signal: error.signal },
+                ).summary,
+              )}`,
+            );
             decision = codexFailureDecision(
               error.status,
               error.message,
