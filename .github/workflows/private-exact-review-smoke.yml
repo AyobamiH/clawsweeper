@@ -8,7 +8,8 @@ on:
       - ".github/workflows/private-exact-review-smoke.yml"
 
 permissions:
-  contents: write
+  actions: write
+  contents: read
 
 jobs:
   dispatch:
@@ -19,16 +20,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          jq -n '{
-            event_type: "clawsweeper_item",
-            client_payload: {
-              target_repo: "AyobamiH/wagging-web-wins",
-              target_branch: "main",
-              item_number: 86,
-              item_kind: "pull_request",
-              source_event: "manual_smoke",
-              source_action: "manual_private_exact_review_smoke",
-              supersedes_in_progress: true,
-              codex_timeout_ms: "1200000"
-            }
-          }' | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
+          gh workflow run sweep.yml             --repo "${GITHUB_REPOSITORY}"             --ref main             -f target_repo="AyobamiH/wagging-web-wins"             -f target_branch="main"             -f item_number="86"             -f batch_size="1"             -f shard_count="1"             -f hot_intake="false"             -f apply_after_review="false"
