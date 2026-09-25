@@ -17,8 +17,7 @@ type WorkflowJob = { env?: Record<string, unknown>; steps?: WorkflowStep[] };
 type WorkflowDocument = { jobs?: Record<string, WorkflowJob> };
 
 const workflowDirectory = ".github/workflows";
-const workerUrl =
-  "${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL || 'https://clawsweeper.openclaw.ai' }}";
+const workerUrl = "${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}";
 const workerSecret = "${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}";
 
 test("every state hydration uses the canonical Worker with an explicit git-state decision", () => {
