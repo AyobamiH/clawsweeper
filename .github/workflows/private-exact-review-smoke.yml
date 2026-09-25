@@ -14,7 +14,7 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Enqueue current private PR revision
+      - name: Enqueue one same-head re-review command
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -27,10 +27,9 @@ jobs:
               item_number: 86,
               item_kind: "pull_request",
               source_event: "pull_request",
-              source_action: "synchronize",
-              source_head_sha: "e9a57c563c47d5508159d62d64cdc1251e34f5f5",
-              source_base_sha: "0bb18eea7e91816da1db602df93d097121004ff5",
-              source_updated_at: "2026-09-25T11:52:04Z",
-              supersedes_in_progress: true
+              source_action: "exact_review_command",
+              command_status_marker: "<!-- clawsweeper-command-status:acceptance-20260925 -->",
+              status_comment_id: 5832043205,
+              source_comment_id: 5831867343
             }
           }' | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
