@@ -3387,7 +3387,10 @@ test("apply workflow bounds checkpoints and requeues with a fresh token", () => 
   assert.doesNotMatch(continueStep, /gh run list/);
   assert.match(continueStep, /pnpm run --silent workflow -- apply-continuation-blocker/);
   assert.match(continueStep, /--current-run-id "\$\{\{ github\.run_id \}\}"/);
-  assert.match(continueStep, /--target-repo "\$\{APPLY_TARGET_REPO:-AyobamiH\/openclaw-operator\}"/);
+  assert.match(
+    continueStep,
+    /--target-repo "\$\{APPLY_TARGET_REPO:-AyobamiH\/openclaw-operator\}"/,
+  );
   assert.match(continueStep, /APPLY_CONTINUATION_BLOCKED/);
   assert.match(continueStep, /existing default cursor run will continue the lane/);
   assert.match(continueStep, /already covered by \$/);
