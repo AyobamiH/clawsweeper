@@ -12,12 +12,12 @@ permissions:
   contents: read
 
 jobs:
-  dispatch:
+  contain:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch one private target exact review
+      - name: Cancel duplicate manual review run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh workflow run sweep.yml             --repo "${GITHUB_REPOSITORY}"             --ref main             -f target_repo="AyobamiH/wagging-web-wins"             -f target_branch="main"             -f item_number="86"             -f batch_size="1"             -f shard_count="1"             -f hot_intake="false"             -f apply_after_review="false"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/36131679056/cancel" || true
