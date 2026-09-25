@@ -92,9 +92,9 @@ export function createReviewRuntime({
   let reviewDecisionSchemaCache: string | undefined;
   let prCloseCoverageProofPromptTemplateCache: string | undefined;
 
-  function gitFetchAuthEnv(): NodeJS.ProcessEnv | undefined {
+  function gitFetchAuthEnv(): NodeJS.ProcessEnv {
     const token = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN?.trim();
-    if (!token) return undefined;
+    if (!token) return {};
     return {
       GIT_CONFIG_COUNT: "1",
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
@@ -106,7 +106,7 @@ export function createReviewRuntime({
     };
   }
 
-  function gitFetchAuthEnvForTest(): NodeJS.ProcessEnv | undefined {
+  function gitFetchAuthEnvForTest(): NodeJS.ProcessEnv {
     return gitFetchAuthEnv();
   }
 
