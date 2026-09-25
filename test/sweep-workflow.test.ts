@@ -508,6 +508,7 @@ test("review and apply primary boundaries ignore ledger-only failures", () => {
     assert.equal(step("publish", name)["continue-on-error"], true, `${name} must fail open`);
   }
   const artifactApply = step("publish", "Apply review artifacts");
+  assert.equal(artifactApply.env?.GH_TOKEN, "${{ steps.target-write-token.outputs.token }}");
   assert.match(artifactApply.if ?? "", /setup-publish-state\.outcome == 'success'/);
   assert.match(artifactApply.if ?? "", /download-review-artifacts\.outcome == 'success'/);
   assert.doesNotMatch(artifactApply.if ?? "", /action-ledger/);
@@ -516,6 +517,7 @@ test("review and apply primary boundaries ignore ledger-only failures", () => {
   const artifactLedger = step("publish", "Publish review artifact action ledger");
   assert.match(artifactLedger.if ?? "", /apply-review-artifacts\.outputs\.artifacts_applied/);
   const recordPublish = step("publish", "Commit review records");
+  assert.equal(recordPublish.env?.GH_TOKEN, "${{ steps.target-write-token.outputs.token }}");
   assert.match(recordPublish.if ?? "", /always\(\) && !cancelled\(\)/);
   assert.match(recordPublish.if ?? "", /apply-review-artifacts\.outputs\.artifacts_applied/);
   assert.match(recordPublish.run ?? "", /records_published=true/);
