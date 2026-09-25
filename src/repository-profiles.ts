@@ -138,10 +138,35 @@ const CORE_OPENCLAW_PROFILE: RepositoryProfile = {
   },
 };
 
+const CORE_CLAWSWEEPER_COMPAT_PROFILE: RepositoryProfile = {
+  targetRepo: "openclaw/clawsweeper",
+  slug: "openclaw-clawsweeper",
+  displayName: "ClawSweeper",
+  checkoutDir: "clawsweeper",
+  packageManager: "pnpm",
+  promptNote:
+    "Use the ClawSweeper source tree and current main branch. Review bot automation, workflow, and documentation changes conservatively. Propose auto-close for issues and pull requests that are certainly implemented on main; for pull requests only, also allow age-gated mostly implemented on main. Keep everything else open for maintainer triage.",
+  applyCloseRules: {
+    issue: ["implemented_on_main"],
+    pull_request: ["implemented_on_main", "mostly_implemented_on_main"],
+  },
+  liveTest: {
+    enabled: true,
+    surfaceDefault: "browser",
+    setup: ["pnpm install --frozen-lockfile"],
+    allowInstallScripts: false,
+    start: "./scripts/live-proof/bay-demo/start.sh",
+    url: "http://127.0.0.1:8787",
+    readyTimeoutSeconds: 240,
+    maxRecordingSeconds: 90,
+  },
+};
+
 const TARGET_REPOSITORY_CONFIG = readTargetRepositoryConfig();
 
 export const REPOSITORY_PROFILES: RepositoryProfile[] = [
   repositoryProfileWithFallbackLiveTest(CORE_OPENCLAW_PROFILE),
+  repositoryProfileWithFallbackLiveTest(CORE_CLAWSWEEPER_COMPAT_PROFILE),
   ...TARGET_REPOSITORY_CONFIG.repositories.map(configuredRepositoryProfile),
 ];
 
