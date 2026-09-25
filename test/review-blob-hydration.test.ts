@@ -52,6 +52,16 @@ test("private review fetch auth is ephemeral and token-safe", () => {
   }
 });
 
+test("missing review blob fetches reuse private review git authentication", () => {
+  const source = readFileSync(
+    new URL("../src/clawsweeper-review-blobs.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /env: \{ \.\.\.process\.env, \.\.\.reviewGitFetchAuthEnv\(\), GIT_OPTIONAL_LOCKS: "0" \},/,
+  );
+});
 test("private review fetch auth is absent without a dedicated token", () => {
   const originalToken = process.env.COMMIT_SWEEPER_TARGET_GH_TOKEN;
   try {
