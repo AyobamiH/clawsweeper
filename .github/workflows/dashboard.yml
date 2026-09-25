@@ -34,6 +34,7 @@ jobs:
       CLAWSWEEPER_STATUS_INGEST_TOKEN: ${{ secrets.CLAWSWEEPER_STATUS_INGEST_TOKEN }}
       CLAWSWEEPER_APP_PRIVATE_KEY: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
       CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+      EXACT_REVIEW_OPERATOR_SECRET: ${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
     steps:
       - uses: actions/checkout@v7
 
@@ -59,12 +60,17 @@ jobs:
           set -euo pipefail
           test -n "$CLAWSWEEPER_APP_PRIVATE_KEY"
           test -n "$CLAWSWEEPER_WEBHOOK_SECRET"
+          test -n "$EXACT_REVIEW_OPERATOR_SECRET"
           secrets_file="$RUNNER_TEMP/clawsweeper-worker-secrets.json"
           response_file="$RUNNER_TEMP/clawsweeper-worker-secrets-response.json"
           trap 'rm -f "$secrets_file" "$response_file"' EXIT
           node -e '
             const fs = require("node:fs");
-            const names = ["CLAWSWEEPER_APP_PRIVATE_KEY", "CLAWSWEEPER_WEBHOOK_SECRET"];
+            const names = [
+              "CLAWSWEEPER_APP_PRIVATE_KEY",
+              "CLAWSWEEPER_WEBHOOK_SECRET",
+              "EXACT_REVIEW_OPERATOR_SECRET",
+            ];
             const secrets = Object.fromEntries(
               names.map((name) => {
                 const text = process.env[name] || "";
