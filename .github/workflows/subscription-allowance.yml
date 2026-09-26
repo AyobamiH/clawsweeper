@@ -1,0 +1,36 @@
+name: Refresh shared ChatGPT allowance
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/subscription-quota-*.ts"
+      - ".github/workflows/subscription-allowance.yml"
+permissions:
+  contents: read
+concurrency:
+  group: subscription-allowance
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          build-script: build
+      - uses: ./.github/actions/setup-codex
+        with:
+          login-status: "true"
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+      - name: Refresh allowance without starting inference
+        env:
+          CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+        run: node dist/subscription-quota-worker.js admit

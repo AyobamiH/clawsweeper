@@ -16,6 +16,7 @@ branch, not a promise that every method will remain supported.
 
 | Route                                    | Method | Purpose and authoritative source                                                                     |
 | ---------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `/api/subscription-quota` | `GET` | Shared subscription percentages, reset times, observation freshness and cooldown; no account identity or credentials. |
 | `/api/health`                            | `ANY`  | Service liveness and deployed source marker from the Worker environment.                             |
 | `/api/exact-review-queue`                | `GET`  | Closed queue aggregates plus a bounded allowlisted public repository/item reference sample.          |
 | `/api/durable-lifecycle-bay`             | `GET`  | Lifecycle inventory, six closed lane counts, and a bounded verified-public item-card sample.         |

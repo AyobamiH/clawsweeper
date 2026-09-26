@@ -1737,6 +1737,7 @@ a.pill:hover { color: var(--claw); text-decoration: none; }
       <span class="muted mono" id="updated"></span>
     </div>
   </header>
+  <section aria-label="ChatGPT subscription allowance" class="card" id="subscription-quota">ChatGPT allowance: loading…</section>
   <section class="hero">
     <div class="hero-headline"><span class="hero-dot" id="hero-dot"></span><span id="hero-headline">Loading pipeline state...</span></div>
     <div class="muted" id="subtitle"></div>
@@ -4064,6 +4065,21 @@ if (lastData) {
   }
 }
 
+async function loadSubscriptionQuota() {
+  const element = document.getElementById("subscription-quota");
+  if (!element) return;
+  try {
+    const response = await fetch("/api/subscription-quota", { cache: "no-store" });
+    if (!response.ok) throw new Error("unavailable");
+    const quota = await response.json();
+    const windows = (quota.windows || []).map(w => w.windowMinutes + " minute window: " + w.remainingPercent + "% remaining" + (w.stale ? " (last observed; stale)" : "") + "; resets " + new Date(w.resetsAt).toLocaleString());
+    element.textContent = "ChatGPT subscription · " + quota.status + " · " + (windows.join(" · ") || "Remaining allowance unknown") +
+      (quota.observedAt ? " · Observed " + new Date(quota.observedAt).toLocaleString() : "") +
+      (quota.retryAt ? " · Next allowance check after " + new Date(quota.retryAt).toLocaleString() : "") +
+      " · Shared across enrolled repositories. No API fallback.";
+  } catch { element.textContent = "ChatGPT allowance unavailable. No API fallback."; }
+}
+
 async function load() {
   if (loading) return;
   loading = true;
@@ -4089,6 +4105,7 @@ async function load() {
         ? "Updated with partial GitHub telemetry."
         : "",
   );
+  loadSubscriptionQuota().catch(() => undefined);
   loadHealthHistory(activeHealthRange, false).catch(() => undefined);
   loadApplyObservability().catch(() => undefined);
   loadReviewCoverage().catch(() => undefined);

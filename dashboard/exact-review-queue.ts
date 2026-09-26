@@ -1,3 +1,4 @@
+import { QUOTA_KEY, emptyQuota, quotaView, quotaRequest } from "./subscription-quota.ts";
 import { stableJson } from "../src/stable-json.ts";
 import {
   clawSweeperCommandAckMarker,
@@ -866,6 +867,12 @@ export class ExactReviewQueue {
 
   private async handleFetch(request: Request) {
     const url = new URL(request.url);
+    if (url.pathname === "/subscription-quota") {
+      if (request.method === "GET")
+        return json(quotaView((await this.storage.get(QUOTA_KEY)) || emptyQuota(), Date.now()));
+      if (request.method === "POST")
+        return json(await quotaRequest(this.storage, await request.json()));
+    }
     // This is deliberately the only route that may observe lifecycle rows
     // before full queue initialization. Its constructor-managed schema barrier
     // is already complete; the handler itself performs no schema creation,
@@ -4565,6 +4572,7 @@ export class ExactReviewQueue {
       await this.scheduleNext(checkedState, checkedAt);
       return;
     }
+    const subscriptionQuota = await this.storage.get(QUOTA_KEY);
     const dispatchable = admission.flatMap((candidate) => {
       const item = checkedState.items[candidate.key];
       if (!item || item.revision !== candidate.revision || item.state !== "pending") return [];
@@ -4576,6 +4584,7 @@ export class ExactReviewQueue {
         const livePublication = livePublicationStateByCandidate.get(candidate.key);
         return !livePublication || livePublication.state.state !== "terminal" ? [item] : [];
       }
+      if (subscriptionQuota?.blockedUntil > Date.now()) return [];
       const live = liveStateByCandidate.get(candidate.key);
       // A command acknowledgement needs the workflow's terminal completion
       // path even when the target is already closed. Unprobed reviews wait for
@@ -4595,9 +4604,12 @@ export class ExactReviewQueue {
     const shouldThrottleReviewAdmission =
       liveCandidates.length === EXACT_REVIEW_ADMISSION_LIVE_CHECK_MAX_ITEMS ||
       (terminalCompleted > 0 && hasReadyPendingReview);
-    const nextReviewAdmissionAt = shouldThrottleReviewAdmission
-      ? checkedAt + EXACT_REVIEW_ADMISSION_INTERVAL_MS
-      : Number(checkedState.dispatcher?.reviewAdmissionNextAt || 0);
+    const nextReviewAdmissionAt = Math.max(
+      Number(subscriptionQuota?.blockedUntil || 0),
+      shouldThrottleReviewAdmission
+        ? checkedAt + EXACT_REVIEW_ADMISSION_INTERVAL_MS
+        : Number(checkedState.dispatcher?.reviewAdmissionNextAt || 0),
+    );
     checkedState.dispatcher = {
       state: "active",
       workflowState: preflight.workflowState,
