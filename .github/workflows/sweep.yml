@@ -1021,7 +1021,7 @@ jobs:
       - uses: ./.github/actions/setup-codex
         if: ${{ env.CLAWSWEEPER_RUNNER != 'openclaw' && steps.claim-exact-review-queue.outputs.claimed == 'true' && steps.live-item.outputs.proceed == 'true' }}
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
         with:
           login-status: "true"
@@ -4322,7 +4322,7 @@ jobs:
       - uses: ./clawsweeper/.github/actions/setup-codex
         if: ${{ env.CLAWSWEEPER_RUNNER != 'openclaw' }}
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
         with:
           login-status: "true"
@@ -5776,7 +5776,7 @@ jobs:
       - uses: ./.github/actions/setup-codex
         if: ${{ env.CLAWSWEEPER_RUNNER != 'openclaw' && steps.proof-select.outputs.item_numbers != '' }}
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
 
       - uses: ./.github/actions/setup-openclaw
@@ -5801,7 +5801,7 @@ jobs:
         if: ${{ steps.proof-select.outputs.item_numbers != '' }}
         timeout-minutes: 50
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           GH_TOKEN: ${{ github.token }}
           CLAWSWEEPER_PROOF_INSPECTION_TOKEN: ${{ steps.proof-inspection-token.outputs.token }}
           TARGET_REPO: ${{ steps.target.outputs.target_repo }}
