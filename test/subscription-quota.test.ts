@@ -126,3 +126,46 @@ test("signed Worker route uses the singleton SQL store and public view excludes 
   );
   assert.equal((await resumed.json()).probeId, undefined);
 });
+
+test("populated coordinator preserves pending reviews and publishes during cooldown", async () => {
+  const {
+    createExactReviewAdmissionHarness,
+    buildExactReviewQueueRequest,
+    exactReviewPublicationOverrides,
+    jsonResponse,
+  } = await import("./dashboard-worker-harness.ts");
+  const { quotaRequest } = await import("../dashboard/subscription-quota.ts");
+  const harness = createExactReviewAdmissionHarness(() => jsonResponse({ state: "open" }), {
+    maxConcurrent: "16",
+  });
+  try {
+    assert.equal(
+      (await harness.queue.fetch(buildExactReviewQueueRequest("existing-review", 597, "opened")))
+        .status,
+      202,
+    );
+    assert.equal(
+      (
+        await harness.queue.fetch(
+          buildExactReviewQueueRequest(
+            "existing-publication",
+            9211,
+            "exact_review_artifact_publish",
+            "issue",
+            "openclaw/gogcli",
+            exactReviewPublicationOverrides(9211, "92110", "opened", 1, "openclaw/gogcli"),
+          ),
+        )
+      ).status,
+      202,
+    );
+    quotaRequest(harness.storage, { action: "exhausted", sentAt: Date.now() });
+    await harness.queue.alarm();
+    assert.equal(harness.dispatched.length, 1);
+    const stats = await (await harness.queue.fetch(new Request("https://queue/stats"))).json();
+    assert.equal(stats.pending, 1);
+    assert.ok(JSON.stringify(harness.dispatched[0]).includes("exact_review_artifact_publish"));
+  } finally {
+    harness.restore();
+  }
+});

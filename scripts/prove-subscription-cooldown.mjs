@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { readQuota, quotaRequest, quotaView } from "../dashboard/subscription-quota.ts";
 const root = mkdtempSync(join(tmpdir(), "clawsweeper-quota-proof-"));
@@ -64,7 +65,7 @@ const fs = require('node:fs');
 if(process.argv.includes('app-server')) {
  let buffer=''; process.stdin.on('data', c => { buffer+=c; let i; while((i=buffer.indexOf('\\n'))>=0){ const m=JSON.parse(buffer.slice(0,i));buffer=buffer.slice(i+1);
  if(m.id===1) console.log(JSON.stringify({id:1,result:{}}));
- if(m.id===2) console.log(JSON.stringify({id:2,result:{rateLimits:{limitId:'codex',primary:{usedPercent:20,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+20000}}}}));
+ if(m.id===2) setTimeout(() => console.log(JSON.stringify({id:2,result:{rateLimits:{limitId:'codex',primary:{usedPercent:20,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+20000}}}})), 1000);
  }});
 } else { fs.appendFileSync(${JSON.stringify(calls)},'1'); console.log('synthetic model completed'); }
 `,
@@ -84,7 +85,7 @@ const invoke = () =>
       [
         "--input-type=module",
         "-e",
-        `import {runCodexProcess} from ${JSON.stringify(new URL("../dist/codex-process.js", import.meta.url).href)}; console.log(JSON.stringify(runCodexProcess({args:['exec','-'],cwd:${JSON.stringify(root)},env:process.env,input:'fixture',timeoutMs:30000})));`,
+        `import {runCodexProcess} from ${JSON.stringify(process.env.CLAWSWEEPER_PROOF_DIST ? pathToFileURL(join(process.env.CLAWSWEEPER_PROOF_DIST, "codex-process.js")).href : new URL("../dist/codex-process.js", import.meta.url).href)}; console.log(JSON.stringify(runCodexProcess({args:['exec','-'],cwd:${JSON.stringify(root)},env:process.env,input:'fixture',timeoutMs:30000})));`,
       ],
       { env },
     );
@@ -95,20 +96,21 @@ const invoke = () =>
     child.on("close", () => resolvePromise(JSON.parse(output)));
   });
 try {
-  const first = await invoke();
-  assert.equal(first.status, 0);
+  const healthy = await Promise.all([invoke(), invoke(), invoke()]);
+  assert.ok(healthy.every((r) => r.status === 0));
+  assert.equal(readFileSync(calls, "utf8"), "111");
   quotaRequest(storage, { action: "exhausted", sentAt: clock }, clock);
   const exhausted = readQuota(storage);
   const blocked = await Promise.all([invoke(), invoke()]);
-  assert.ok(blocked.every((r) => r.status === 1 && r.stderr.includes("fleet cooldown")));
-  assert.equal(readFileSync(calls, "utf8"), "1");
+  assert.ok(blocked.every((r) => r.status === 75 && r.stderr.includes("fleet cooldown")));
+  assert.equal(readFileSync(calls, "utf8"), "111");
   clock = exhausted.blockedUntil + 1;
   const recovered = await invoke();
   assert.equal(recovered.status, 0);
-  assert.equal(readFileSync(calls, "utf8"), "11");
+  assert.equal(readFileSync(calls, "utf8"), "1111");
   const report = {
     scenario: "two repository processes, shared persistent SQLite quota",
-    firstStarts: 1,
+    healthyConcurrentStarts: 3,
     blockedConcurrentStarts: 0,
     afterResetStarts: 1,
     state: quotaView(readQuota(storage), clock),

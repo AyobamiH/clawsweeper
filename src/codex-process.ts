@@ -101,7 +101,7 @@ export function runCodexProcess(options: {
     options = { ...options, timeoutMs: options.timeoutMs - (Date.now() - quotaStartedAt) };
     if (!allowed || options.timeoutMs <= 0)
       return {
-        status: 1,
+        status: 75,
         signal: null,
         stdout: "",
         stderr:

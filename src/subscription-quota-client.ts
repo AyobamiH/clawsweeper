@@ -117,7 +117,14 @@ export async function quotaCall(body: unknown, env: NodeJS.ProcessEnv = process.
   return response.json();
 }
 export async function admitSubscription(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
-  const admission = await quotaCall({ action: "admit" }, env);
+  const deadline = Date.now() + 25_000;
+  let admission = await quotaCall({ action: "admit" }, env);
+  // Refresh contention is not exhaustion. Wait for the single probe owner; never
+  // retry a model call or poll an actual cooldown. The outer helper is bounded.
+  while (admission.refreshPending === true && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    admission = await quotaCall({ action: "admit" }, env);
+  }
   if (admission.allowed === true) return true;
   if (!admission.probeId) return false;
   let windows: AllowanceWindow[] = [];

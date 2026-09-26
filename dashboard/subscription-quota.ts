@@ -95,7 +95,9 @@ export function quotaTransition(
     return { state, response: { allowed: !state.exhausted, ...quotaView(state, now) } };
   }
   if (body.action !== "admit") throw new Error("invalid quota action");
-  if (state.blockedUntil > now || state.probeUntil > now) return denied();
+  if (state.blockedUntil > now) return denied();
+  if (state.probeUntil > now)
+    return { state, response: { ...denied().response, refreshPending: true } };
   if (
     !state.exhausted &&
     state.observedAt > 0 &&
