@@ -85,7 +85,10 @@ test("automatic dead-letter reconciliation is scheduled, bounded, and least priv
   const step = scheduled.jobs.reconcile.steps.find(
     (candidate) => candidate.name === "Reconcile closed, duplicate, and recoverable dead letters",
   );
-  assert.equal(step.env.CLAWSWEEPER_WEBHOOK_SECRET, "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET }}");
+  assert.equal(
+    step.env.CLAWSWEEPER_WEBHOOK_SECRET,
+    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
+  );
   assert.equal(scheduled.jobs.reconcile.env.CLAWSWEEPER_WEBHOOK_SECRET, undefined);
   assert.match(step.run, /--max-targets "\$MAX_TARGETS"/);
   assert.match(step.run, /--max-recoveries "\$MAX_RECOVERIES"/);
@@ -107,7 +110,7 @@ test("automatic dead-letter reconciliation is scheduled, bounded, and least priv
   );
   assert.equal(
     parked.env.CLAWSWEEPER_WEBHOOK_SECRET,
-    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET }}",
+    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
   );
   assert.equal(
     parked.env.CLAWSWEEPER_APP_PRIVATE_KEY,
