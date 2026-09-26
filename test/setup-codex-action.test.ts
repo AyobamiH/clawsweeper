@@ -111,3 +111,24 @@ test(
     }
   },
 );
+
+
+test("setup-codex defaults to ChatGPT auth and fails closed away from API billing", () => {
+  const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
+    | (CompositeAction & { inputs?: Record<string, { default?: string }> })
+    | undefined;
+
+  assert.equal(action?.inputs?.["auth-mode"]?.default, "chatgpt");
+
+  const steps = action?.runs?.steps ?? [];
+  const chatgpt = steps.find((step) => step.name === "Authenticate Codex with ChatGPT");
+  const apiKey = steps.find((step) => step.name === "Authenticate Codex with API key");
+  const proxy = steps.find((step) => step.name === "Authenticate Codex through Responses proxy");
+
+  assert.equal(chatgpt?.if, "${{ inputs['auth-mode'] == 'chatgpt' }}");
+  assert.match(chatgpt?.run ?? "", /CLAWSWEEPER_CODEX_AUTH_JSON/);
+  assert.match(chatgpt?.run ?? "", /Logged in using ChatGPT/);
+  assert.match(chatgpt?.run ?? "", /env -u OPENAI_API_KEY -u CODEX_API_KEY -u PROXY_API_KEY/);
+  assert.equal(apiKey?.if, "${{ inputs['auth-mode'] == 'api-key' }}");
+  assert.equal(proxy?.if, "${{ inputs['auth-mode'] == 'api-proxy' }}");
+});

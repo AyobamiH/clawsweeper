@@ -865,9 +865,11 @@ value, and accepts an explicit `--test-concurrency` override for diagnostics.
 
 Required secrets:
 
-- `OPENAI_API_KEY`: OpenAI API key used by the per-job local Codex Responses
-  proxy. Codex subprocesses inherit only the proxy-backed `CODEX_HOME`, not the
-  raw API key.
+- `CLAWSWEEPER_CODEX_AUTH_JSON`: the `CODEX_HOME/auth.json` produced by a
+  ChatGPT-authenticated Codex login. Hosted ClawSweeper model work defaults to
+  this subscription-backed login and fails closed if `codex login status` does
+  not report ChatGPT authentication. Paid API modes remain explicit opt-in
+  compatibility paths and are not used by the production workflows.
 - `CLAWSWEEPER_APP_CLIENT_ID`: public GitHub App client ID for `clawsweeper`.
   Currently `Iv23liOECG0slfuhz093`.
 - `CLAWSWEEPER_APP_PRIVATE_KEY`: private key for `clawsweeper`; plan/review
@@ -881,9 +883,10 @@ Required secrets:
 Token flow:
 
 - Review jobs create an isolated per-run `CODEX_HOME`; steerable repair jobs
-  use a stable per-work cache path. Both start a local Responses proxy from
-  `OPENAI_API_KEY`, write proxy-only Codex config there, and run Codex without
-  OpenAI or Codex token environment variables.
+  use a stable per-work cache path. Production Codex lanes materialize the
+  ChatGPT-authenticated `auth.json` into that isolated home, verify the active
+  login method before model work, and do not provide an OpenAI Platform API key
+  to the Codex setup step.
 - Steerable repair jobs cache only the app-server `sessions/` directory and
   ClawSweeper thread-id file. Planning and execution resume the same logical
   Codex thread; CrabFleet credentials stay in the wrapper and are stripped
