@@ -7,27 +7,28 @@ on:
       - ".github/workflows/chatgpt-private-acceptance-probe.yml"
 
 permissions:
-  contents: write
+  actions: write
+  contents: read
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch private exact review
+      - name: Force fresh private review
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           payload="$(jq -nc '{
-            event_type: "clawsweeper_item",
-            client_payload: {
+            ref: "main",
+            inputs: {
               target_repo: "AyobamiH/wagging-web-wins",
               target_branch: "main",
-              item_number: 81,
-              item_kind: "issue",
-              source_event: "issues",
-              source_action: "chatgpt_private_acceptance",
-              supersedes_in_progress: false
+              item_number: "81",
+              hot_intake: "false",
+              apply_after_review: "false"
             }
           }')"
-          gh api repos/AyobamiH/clawsweeper/dispatches --method POST --input - <<< "$payload"
+          gh api repos/AyobamiH/clawsweeper/actions/workflows/sweep.yml/dispatches \
+            --method POST \
+            --input - <<< "$payload"
