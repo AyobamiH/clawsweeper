@@ -60,10 +60,13 @@ child.once("close", (status, signal) => {
   clearTimeout(timeout);
   closeCodexOutputCapture(stdout);
   closeCodexOutputCapture(stderr);
+  const stdinErrorCode = (stdinError as NodeJS.ErrnoException | undefined)?.code;
+  const childProducedDiagnostics =
+    codexOutputTail(stdout).trim().length > 0 || codexOutputTail(stderr).trim().length > 0;
   const processError =
     timeoutError ??
     spawnError ??
-    (status === 0 && (stdinError as NodeJS.ErrnoException | undefined)?.code === "EPIPE"
+    (stdinErrorCode === "EPIPE" && (status === 0 || childProducedDiagnostics)
       ? undefined
       : stdinError);
   writeFileSync(

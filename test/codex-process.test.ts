@@ -520,3 +520,36 @@ rl.on("line", (line) => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("Codex process preserves child diagnostics when a failing child closes stdin early", () => {
+  const root = mkdtempSync(tmpPrefix);
+  const binDir = join(root, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const codexPath = join(binDir, "codex");
+  writeFileSync(
+    codexPath,
+    `#!/usr/bin/env node
+process.stdin.destroy();
+process.stderr.write("error: unsupported runtime option\\n");
+process.exit(2);
+`,
+    { mode: 0o755 },
+  );
+
+  try {
+    const result = runCodexProcess({
+      args: [],
+      cwd: root,
+      env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` },
+      input: "prompt".repeat(256 * 1024),
+      timeoutMs: 10_000,
+    });
+
+    assert.equal(result.status, 2);
+    assert.equal(result.error, undefined);
+    assert.match(result.stderr, /unsupported runtime option/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
