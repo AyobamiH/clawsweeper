@@ -1,5 +1,5 @@
 name: ChatGPT private acceptance probe
-# acceptance-retrigger: chatgpt-runtime-login-method
+# acceptance-retrigger: fresh-private-item-88
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
             inputs: {
               target_repo: "AyobamiH/wagging-web-wins",
               target_branch: "main",
-              item_number: "81",
+              item_number: "88",
               hot_intake: "false",
               apply_after_review: "false"
             }
