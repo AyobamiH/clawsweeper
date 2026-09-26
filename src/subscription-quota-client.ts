@@ -6,8 +6,19 @@ export function allowanceWindows(result: any): AllowanceWindow[] {
   // The configured fleet shares the Codex bucket. Do not merge unrelated model buckets.
   const bucket = result?.rateLimitsByLimitId?.codex ?? result?.rateLimits;
   if (bucket?.limitId && bucket.limitId !== "codex") return [];
-  return [bucket?.primary, bucket?.secondary].filter(Boolean).map((w) => ({
-    remainingPercent: 100 - w.usedPercent,
+  const windows = [bucket?.primary, bucket?.secondary].filter(Boolean);
+  if (
+    windows.some(
+      (w) =>
+        typeof w.usedPercent !== "number" ||
+        !Number.isFinite(w.usedPercent) ||
+        w.usedPercent < 0 ||
+        w.usedPercent > 100,
+    )
+  )
+    return [];
+  return windows.map((w) => ({
+    remainingPercent: bucket?.rateLimitReachedType ? 0 : 100 - w.usedPercent,
     windowMinutes: w.windowDurationMins,
     resetsAt: w.resetsAt * 1000,
   }));

@@ -1,5 +1,4 @@
 // One shared ChatGPT credential pool. Never stores identity, tokens or raw diagnostics.
-export const QUOTA_KEY = "subscription-quota-v1";
 const FRESH_MS = 60_000;
 const PROBE_MS = 60_000;
 const UNKNOWN_RETRY_MS = 15 * 60_000;
@@ -109,10 +108,26 @@ export function quotaTransition(
   state.probeUntil = now + PROBE_MS;
   return { state, response: { allowed: false, probeId: state.probeId, ...quotaView(state, now) } };
 }
-export async function quotaRequest(storage: any, body: any, now = Date.now()) {
-  return storage.transaction(async (tx: any) => {
-    const result = quotaTransition((await tx.get(QUOTA_KEY)) || emptyQuota(), body, now);
-    await tx.put(QUOTA_KEY, result.state);
+export function readQuota(storage: any): QuotaState {
+  const exists = [
+    ...storage.sql.exec(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='subscription_quota'",
+    ),
+  ];
+  if (!exists.length) return emptyQuota();
+  const row = [...storage.sql.exec("SELECT value FROM subscription_quota WHERE id=1")][0];
+  return row ? JSON.parse(row.value) : emptyQuota();
+}
+export function quotaRequest(storage: any, body: any, now = Date.now()) {
+  return storage.transactionSync(() => {
+    storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS subscription_quota (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)",
+    );
+    const result = quotaTransition(readQuota(storage), body, now);
+    storage.sql.exec(
+      "INSERT OR REPLACE INTO subscription_quota (id, value) VALUES (1, ?)",
+      JSON.stringify(result.state),
+    );
     return result.response;
   });
 }

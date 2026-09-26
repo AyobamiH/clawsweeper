@@ -6,10 +6,28 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { emptyQuota, quotaTransition, quotaView } from "../dashboard/subscription-quota.ts";
+import { readQuota, quotaRequest, quotaView } from "../dashboard/subscription-quota.ts";
 const root = mkdtempSync(join(tmpdir(), "clawsweeper-quota-proof-"));
 const db = new DatabaseSync(join(root, "quota.sqlite"));
-db.exec("CREATE TABLE quota (id INTEGER PRIMARY KEY, value TEXT)");
+const storage = {
+  sql: {
+    exec(query, ...bindings) {
+      const rows = db.prepare(query).all(...bindings);
+      return rows;
+    },
+  },
+  transactionSync(fn) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const value = fn();
+      db.exec("COMMIT");
+      return value;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  },
+};
 let clock = Date.now();
 const secret = "isolated-proof-only";
 const server = createServer(async (req, res) => {
@@ -26,14 +44,11 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const stored = db.prepare("SELECT value FROM quota WHERE id=1").get();
-    const state = stored ? JSON.parse(stored.value) : emptyQuota();
     const parsed = JSON.parse(body);
     parsed.sentAt = clock;
-    const result = quotaTransition(state, parsed, clock);
-    db.prepare("INSERT OR REPLACE INTO quota VALUES (1, ?)").run(JSON.stringify(result.state));
+    const response = quotaRequest(storage, parsed, clock);
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify(result.response));
+    res.end(JSON.stringify(response));
   } catch {
     res.writeHead(400);
     res.end();
@@ -82,13 +97,12 @@ const invoke = () =>
 try {
   const first = await invoke();
   assert.equal(first.status, 0);
-  const stored = JSON.parse(db.prepare("SELECT value FROM quota WHERE id=1").get().value);
-  const exhausted = quotaTransition(stored, { action: "exhausted", sentAt: clock }, clock);
-  db.prepare("UPDATE quota SET value=? WHERE id=1").run(JSON.stringify(exhausted.state));
+  quotaRequest(storage, { action: "exhausted", sentAt: clock }, clock);
+  const exhausted = readQuota(storage);
   const blocked = await Promise.all([invoke(), invoke()]);
   assert.ok(blocked.every((r) => r.status === 1 && r.stderr.includes("fleet cooldown")));
   assert.equal(readFileSync(calls, "utf8"), "1");
-  clock = exhausted.state.blockedUntil + 1;
+  clock = exhausted.blockedUntil + 1;
   const recovered = await invoke();
   assert.equal(recovered.status, 0);
   assert.equal(readFileSync(calls, "utf8"), "11");
@@ -97,10 +111,7 @@ try {
     firstStarts: 1,
     blockedConcurrentStarts: 0,
     afterResetStarts: 1,
-    state: quotaView(
-      JSON.parse(db.prepare("SELECT value FROM quota WHERE id=1").get().value),
-      clock,
-    ),
+    state: quotaView(readQuota(storage), clock),
     limits:
       "Real HTTP/HMAC, SQLite, app-server protocol and native process guard. Synthetic allowance/model executables and controlled clock; no live quota exhaustion or production queue mutation.",
   };

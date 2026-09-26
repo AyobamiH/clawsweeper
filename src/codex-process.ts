@@ -84,11 +84,12 @@ export function runCodexProcess(options: {
   const quotaEnabled = options.env.CLAWSWEEPER_QUOTA_ENABLED === "1";
   const quotaWorker = fileURLToPath(new URL("./subscription-quota-worker.js", import.meta.url));
   if (quotaEnabled) {
+    const quotaStartedAt = Date.now();
     const probe = spawnSync(process.execPath, [quotaWorker, "admit"], {
       env: options.env,
       cwd: options.cwd,
       encoding: "utf8",
-      timeout: 45_000,
+      timeout: Math.max(1, Math.min(45_000, options.timeoutMs)),
       maxBuffer: 4096,
     });
     let allowed = false;
@@ -97,7 +98,8 @@ export function runCodexProcess(options: {
     } catch {
       /* fail closed */
     }
-    if (!allowed)
+    options = { ...options, timeoutMs: options.timeoutMs - (Date.now() - quotaStartedAt) };
+    if (!allowed || options.timeoutMs <= 0)
       return {
         status: 1,
         signal: null,

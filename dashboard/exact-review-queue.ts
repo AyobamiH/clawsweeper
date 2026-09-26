@@ -1,4 +1,4 @@
-import { QUOTA_KEY, emptyQuota, quotaView, quotaRequest } from "./subscription-quota.ts";
+import { readQuota, quotaView, quotaRequest } from "./subscription-quota.ts";
 import { stableJson } from "../src/stable-json.ts";
 import {
   clawSweeperCommandAckMarker,
@@ -868,8 +868,7 @@ export class ExactReviewQueue {
   private async handleFetch(request: Request) {
     const url = new URL(request.url);
     if (url.pathname === "/subscription-quota") {
-      if (request.method === "GET")
-        return json(quotaView((await this.storage.get(QUOTA_KEY)) || emptyQuota(), Date.now()));
+      if (request.method === "GET") return json(quotaView(readQuota(this.storage), Date.now()));
       if (request.method === "POST")
         return json(await quotaRequest(this.storage, await request.json()));
     }
@@ -4572,7 +4571,7 @@ export class ExactReviewQueue {
       await this.scheduleNext(checkedState, checkedAt);
       return;
     }
-    const subscriptionQuota = await this.storage.get(QUOTA_KEY);
+    const subscriptionQuota = readQuota(this.storage);
     const dispatchable = admission.flatMap((candidate) => {
       const item = checkedState.items[candidate.key];
       if (!item || item.revision !== candidate.revision || item.state !== "pending") return [];

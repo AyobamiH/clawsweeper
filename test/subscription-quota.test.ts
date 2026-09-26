@@ -87,3 +87,42 @@ test("Codex quota normalisation keeps subscription windows and excludes unrelate
   );
   assert.deepEqual(allowanceWindows({ rateLimits: { limitId: "other", primary: {} } }), []);
 });
+
+test("signed Worker route uses the singleton SQL store and public view excludes probe authority", async () => {
+  const { worker, ExactReviewQueue, MemoryDurableStorage, MemoryDurableNamespace, createHmac } =
+    await import("./dashboard-worker-harness.ts");
+  const storage = new MemoryDurableStorage();
+  const queue = new ExactReviewQueue({ storage }, {});
+  const env = {
+    EXACT_REVIEW_QUEUE: new MemoryDurableNamespace(queue),
+    CLAWSWEEPER_WEBHOOK_SECRET: "fixture",
+  };
+  const url = "https://test.invalid/internal/subscription-quota";
+  const denied = await worker.fetch(new Request(url, { method: "POST", body: "{}" }), env);
+  assert.equal(denied.status, 401);
+  const body = JSON.stringify({ action: "admit", sentAt: Date.now() });
+  const signed = await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      body,
+      headers: {
+        "x-clawsweeper-exact-review-signature": `sha256=${createHmac("sha256", "fixture").update(body).digest("hex")}`,
+      },
+    }),
+    env,
+  );
+  assert.equal(signed.status, 200);
+  assert.ok((await signed.json()).probeId);
+  const publicView = await worker.fetch(
+    new Request("https://test.invalid/api/subscription-quota"),
+    env,
+  );
+  const value = await publicView.json();
+  assert.equal(value.probeId, undefined);
+  assert.equal(value.scope, "shared-chatgpt-subscription");
+  const second = new ExactReviewQueue({ storage }, {});
+  const resumed = await second.fetch(
+    new Request("https://queue/subscription-quota", { method: "POST", body }),
+  );
+  assert.equal((await resumed.json()).probeId, undefined);
+});
