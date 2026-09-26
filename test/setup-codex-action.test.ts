@@ -132,3 +132,27 @@ test("setup-codex defaults to ChatGPT auth and fails closed away from API billin
   assert.equal(apiKey?.if, "${{ inputs['auth-mode'] == 'api-key' }}");
   assert.equal(proxy?.if, "${{ inputs['auth-mode'] == 'api-proxy' }}");
 });
+
+
+test("ChatGPT mode does not inherit the API-era internal model pin", () => {
+  const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
+    | (CompositeAction & { inputs?: Record<string, { default?: string }> })
+    | undefined;
+  assert.equal(action?.inputs?.["codex-version"]?.default, "0.157.1");
+
+  const steps = action?.runs?.steps ?? [];
+  const chatgptConfig = steps.find(
+    (step) => step.name === "Configure ChatGPT Codex login boundary",
+  );
+  const apiModel = steps.find((step) => step.name === "Configure API-backed Codex model");
+
+  assert.equal(chatgptConfig?.if, "${{ inputs['auth-mode'] == 'chatgpt' }}");
+  assert.match(chatgptConfig?.run ?? "", /forced_login_method = "chatgpt"/);
+  assert.doesNotMatch(chatgptConfig?.run ?? "", /CLAWSWEEPER_INTERNAL_MODEL/);
+
+  assert.equal(
+    apiModel?.if,
+    "${{ inputs['auth-mode'] == 'api-proxy' || inputs['auth-mode'] == 'api-key' }}",
+  );
+  assert.match(apiModel?.run ?? "", /CLAWSWEEPER_INTERNAL_MODEL/);
+});

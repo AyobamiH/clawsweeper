@@ -3,7 +3,7 @@ description: Cache, install, and authenticate the OpenAI Codex CLI.
 inputs:
   codex-version:
     description: Exact Codex CLI npm package version.
-    default: "0.146.0"
+    default: "0.157.1"
   proxy-version:
     description: Exact Codex Responses proxy npm package version.
     default: "0.139.0"
@@ -93,7 +93,17 @@ runs:
         export CODEX_HOME="$codex_home"
         echo "Using isolated CODEX_HOME=$CODEX_HOME"
 
-    - name: Configure internal Codex model
+    - name: Configure ChatGPT Codex login boundary
+      if: ${{ inputs['auth-mode'] == 'chatgpt' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        export CODEX_HOME="${CODEX_HOME:?}"
+        printf 'forced_login_method = "chatgpt"\n' > "$CODEX_HOME/config.toml"
+        chmod 600 "$CODEX_HOME/config.toml"
+
+    - name: Configure API-backed Codex model
+      if: ${{ inputs['auth-mode'] == 'api-proxy' || inputs['auth-mode'] == 'api-key' }}
       shell: bash
       run: |
         set -euo pipefail
