@@ -1725,7 +1725,7 @@ test("exact event review publishes directly with a queue-bounded canonical fallb
   assert.match(releaseTerminal.if ?? "", /publish-event-result.*terminal_noop/);
   assert.match(releaseUnsuccessful.run ?? "", /CLAWSWEEPER_COMMENT_AUTHOR_LOGIN/);
   assert.match(releaseUnsuccessful.run ?? "", /\.user\.login == \\"clawsweeper\[bot\]\\"/);
-  assert.match(releaseUnsuccessful.run ?? "", /content == "eyes"/);
+  assert.match((releaseUnsuccessful.run ?? "").replaceAll('\\"', '"'), /content == "eyes"/);
   assert.match(releaseUnsuccessful.if ?? "", /completion_kind == 'superseded'/);
   assert.doesNotMatch(releaseUnsuccessful.if ?? "", /completion_kind == 'deferred'/);
   for (const kind of ["github_rate_limit", "github_transient"]) {

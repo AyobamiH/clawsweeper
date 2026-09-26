@@ -70,6 +70,9 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
 
+      - name: Run full validation
+        run: pnpm run check
+
   sparse-repair-builds:
     name: sparse repair build smoke
     if: github.event_name == 'pull_request'
