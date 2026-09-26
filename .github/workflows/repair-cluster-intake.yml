@@ -284,7 +284,7 @@ jobs:
         env:
           TARGET_REPO: ${{ steps.prepare.outputs.target_repo }}
           GH_TOKEN: ${{ steps.target-token.outputs.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Paid API access is disabled; no fallback from subscription-backed Codex.
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
           MODEL: ${{ github.event.inputs.model || 'internal' }}
         run: |

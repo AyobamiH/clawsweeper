@@ -70,7 +70,6 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
 
-
   sparse-repair-builds:
     name: sparse repair build smoke
     if: github.event_name == 'pull_request'

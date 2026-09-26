@@ -43,6 +43,7 @@ import {
   codexJsonlFailureDetail,
   codexTerminalErrorDetail,
   isRetryableCodexErrorMessage,
+  isCodexUsageLimitError,
   isTerminalCodexErrorMessage,
 } from "./codex-transient.js";
 import { UserFacingCommandError } from "./command.js";
@@ -579,6 +580,7 @@ ${extra}
     if (detail.includes("did not produce output")) return "missing structured output";
     if (detail.includes("invalid JSON")) return "invalid structured output";
     if (errorCode === "ENOBUFS") return "output buffer overflow";
+    if (isCodexUsageLimitError(detail)) return "subscription allowance exhausted";
     if (isTerminalCodexErrorMessage(detail)) return "model unavailable or access denied";
     if (detail.includes("timed out") || detail.includes("ETIMEDOUT")) return "timeout";
     if (
@@ -608,6 +610,7 @@ ${extra}
     ) {
       return "content_or_output";
     }
+    if (/subscription allowance exhausted/i.test(markdown)) return "subscription_quota";
     if (/model unavailable or access denied/i.test(markdown)) return "model_access";
     if (/Codex review failed: timeout/i.test(markdown)) return "timeout";
     return "codex_execution";

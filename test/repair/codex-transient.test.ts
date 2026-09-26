@@ -107,3 +107,15 @@ test("Codex retry delay ignores blank and non-positive environment settings", ()
     }
   }
 });
+
+test("subscription exhaustion cannot become a transport retry", () => {
+  for (const message of [
+    "You've hit your usage limit. Try again after the weekly reset.",
+    "stream disconnected: usage_limit_reached",
+    "HTTP 429: insufficient_quota",
+  ]) {
+    assert.equal(isTerminalCodexErrorMessage(message), true);
+    assert.equal(isRetryableCodexErrorMessage(message), false);
+  }
+  assert.equal(isTerminalCodexErrorMessage("You've hit your usage limit.\nfetch failed"), false);
+});

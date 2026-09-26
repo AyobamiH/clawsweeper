@@ -138,7 +138,7 @@ jobs:
       - name: Scan spam comments
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Paid API access is disabled; no fallback from subscription-backed Codex.
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
         run: |
           set -euo pipefail

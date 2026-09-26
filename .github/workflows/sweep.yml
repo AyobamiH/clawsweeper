@@ -3853,7 +3853,7 @@ jobs:
             --run-url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           timeout 20s pnpm run repair:publish-main -- \
             --message "chore: mark sweep planning started" \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs || echo "::warning::Skipped slow planning-started dashboard publish so candidate selection can start."
 
       - id: mode
@@ -4243,7 +4243,7 @@ jobs:
             --capacity-reason "${{ steps.select.outputs.capacity_reason }}"
           timeout 20s pnpm run repair:publish-main -- \
             --message "chore: mark sweep review in progress" \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs || echo "::warning::Skipped slow in-progress dashboard publish so review shards can start."
 
   review:
@@ -4858,7 +4858,7 @@ jobs:
           echo "records_published=true" >> "$GITHUB_OUTPUT"
           if ! pnpm run repair:publish-main -- \
             --message "chore: update sweep status" \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs; then
             echo "::warning title=Sweep status publish failed::Review records are canonical; continuing without the best-effort Git dashboard update."
           fi
@@ -5038,7 +5038,7 @@ jobs:
           if ! pnpm run repair:publish-main -- \
             --message "chore: publish selected review comment status" \
             --path apply-report.json \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs; then
             echo "::warning title=Selected-comment bookkeeping failed::Canonical comment records are published; continuing without the best-effort Git report update."
           fi
@@ -5589,7 +5589,7 @@ jobs:
             --message "chore: publish sweep audit status" \
             --path README.md \
             --path "results/audit/${target_slug}.json" \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs; then
             echo "::warning title=Audit dashboard publish failed::Canonical reconciliation is complete; continuing without the best-effort Git dashboard update."
           fi
@@ -6491,7 +6491,7 @@ jobs:
           target_slug="${target_slug//\//-}"
           pnpm run repair:publish-main -- \
             --message "chore: mark sweep apply finished" \
-            --path "results/sweep-status/${target_slug}.json" \
+            --path "results/sweep-status/${target_slug,,}.json" \
             --rebase-strategy theirs
 
       - name: Publish apply action events

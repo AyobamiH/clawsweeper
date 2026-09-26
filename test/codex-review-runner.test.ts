@@ -1184,6 +1184,72 @@ process.exit(1);
   }
 });
 
+test("runCodex does not retry subscription exhaustion", () => {
+  const root = mkdtempSync(tmpPrefix);
+  const openclawDir = join(root, "openclaw");
+  const workDir = join(root, "codex-work");
+  const binDir = join(root, "bin");
+  const attemptsPath = join(root, "attempts");
+  mkdirSync(openclawDir, { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  initTrackedRepo(openclawDir);
+  const codexPath = join(binDir, "codex");
+  writeFileSync(
+    codexPath,
+    `#!/usr/bin/env node
+${fakeCodexSandboxPass}
+const fs = require("node:fs");
+const attemptsPath = process.env.CODEX_ATTEMPTS_PATH;
+const attempt = fs.existsSync(attemptsPath) ? Number(fs.readFileSync(attemptsPath, "utf8")) + 1 : 1;
+fs.writeFileSync(attemptsPath, String(attempt));
+process.stderr.write("reviewed patch text\\n");
+process.stderr.write("stream disconnected before completion: You have reached the usage limit: usage_limit_reached.\\n");
+process.exit(1);
+`,
+  );
+  chmodSync(codexPath, 0o755);
+  const previous = {
+    PATH: process.env.PATH,
+    CODEX_ATTEMPTS_PATH: process.env.CODEX_ATTEMPTS_PATH,
+    CLAWSWEEPER_CODEX_REVIEW_ATTEMPTS: process.env.CLAWSWEEPER_CODEX_REVIEW_ATTEMPTS,
+    CLAWSWEEPER_CODEX_REVIEW_RETRY_DELAY_MS: process.env.CLAWSWEEPER_CODEX_REVIEW_RETRY_DELAY_MS,
+  };
+  process.env.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
+  process.env.CODEX_ATTEMPTS_PATH = attemptsPath;
+  process.env.CLAWSWEEPER_CODEX_REVIEW_ATTEMPTS = "3";
+  process.env.CLAWSWEEPER_CODEX_REVIEW_RETRY_DELAY_MS = "1";
+  try {
+    assert.throws(
+      () =>
+        runCodexForTest({
+          item: item({ number: 89041 }),
+          context: { issue: {}, comments: [], timeline: [] },
+          git: { mainSha: "abc123", latestRelease: null },
+          model: "internal",
+          openclawDir,
+          reasoningEffort: "high",
+          sandboxMode: "read-only",
+          serviceTier: "",
+          timeoutMs: 10_000,
+          workDir,
+          prompt: "Return a review decision.",
+        }),
+      (error: unknown) => {
+        const reviewError = error as Error & { stderr?: string };
+        assert.match(reviewError.stderr ?? "", /usage_limit_reached/);
+        return true;
+      },
+    );
+    assert.equal(readFileSync(attemptsPath, "utf8"), "1");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Codex failure redaction hides the configured internal model", () => {
   const root = mkdtempSync(tmpPrefix);
   writeFileSync(join(root, "config.toml"), 'model = "secret-model-for-test"\n');
@@ -1240,4 +1306,17 @@ test("Codex failure redaction reads the default home configuration", () => {
     }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("subscription failure is recorded as terminal quota, not model access", () => {
+  const message = "You've hit your usage limit. Try again after reset.";
+  const decision = codexFailureDecisionForTest(
+    1,
+    "Codex exited",
+    JSON.stringify({ type: "turn.failed", error: { message } }),
+    "",
+  );
+  assert.equal(decision.codexTerminalFailure, true);
+  assert.match(decision.summary, /subscription allowance exhausted/);
+  assert.equal(codexFailureLogKindForTest(decision.summary), "subscription_quota");
 });
