@@ -43,6 +43,14 @@ jobs:
         env:
           CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+      - name: Prove shared cooldown across native processes
+        run: node scripts/prove-subscription-cooldown.mjs "$RUNNER_TEMP/subscription-cooldown-proof.json"
+      - name: Prove clean repair build admission
+        run: |
+          pnpm exec tsc -p tsconfig.repair.json --outDir "$RUNNER_TEMP/quota-repair-dist"
+          CLAWSWEEPER_PROOF_DIST="$RUNNER_TEMP/quota-repair-dist" node scripts/prove-subscription-cooldown.mjs "$RUNNER_TEMP/subscription-repair-cooldown-proof.json"
+      - name: Read ChatGPT allowance without inference
+        run: node dist/subscription-quota-worker.js read > "$RUNNER_TEMP/chatgpt-allowance.json"
       - name: Prove subscription fail-closed boundaries
         run: node scripts/prove-subscription-fail-closed.mjs "$RUNNER_TEMP/subscription-boundary-proof.json"
       - name: Prove refusal then clean structured review
@@ -54,6 +62,9 @@ jobs:
           path: |
             ${{ runner.temp }}/hosted-review-scan-proof.json
             ${{ runner.temp }}/subscription-boundary-proof.json
+            ${{ runner.temp }}/chatgpt-allowance.json
+            ${{ runner.temp }}/subscription-cooldown-proof.json
+            ${{ runner.temp }}/subscription-repair-cooldown-proof.json
           if-no-files-found: error
 
   check:

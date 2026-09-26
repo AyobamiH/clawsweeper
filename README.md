@@ -940,3 +940,30 @@ Target repository setup:
 - install the issue/PR dispatcher from
   [docs/target-dispatcher.md](docs/target-dispatcher.md) for exact item event
   reviews
+
+### Shared ChatGPT allowance
+
+The live dashboard reads `/api/subscription-quota`: remaining percentages, window
+lengths, provider reset timestamps, observation age and the fleet cooldown. Values
+older than one minute are labelled stale; an elapsed reset does not invent a new
+balance. No account identity, auth token, model identity or raw provider diagnostic
+is published. This is the shared Codex subscription bucket, not API credit.
+
+Repository review and repair workflows use `CLAWSWEEPER_QUOTA_ENABLED=1`, with
+`CLAWSWEEPER_QUOTA_URL` and the signed coordinator credential
+`CLAWSWEEPER_QUOTA_SECRET`. Every native Codex process checks the shared coordinator
+before starting inference. Missing configuration or unavailable telemetry fails
+closed. One worker refreshes stale quota using Codex app-server
+`account/rateLimits/read`, without starting a model turn. Exhaustion blocks new
+starts across repositories; already-running turns finish. Exact-review items stay
+queued during the known cooldown, while deterministic publication continues.
+
+After the reset, one allowance probe must confirm capacity before admission
+resumes. Unknown reset/failed allowance reads back off for 15 minutes. A scheduled
+allowance-only workflow refreshes idle fleets every 15 minutes. It never purchases
+credits, consumes reset credits, switches credentials or enables API fallback.
+The single coordinator represents the one ChatGPT credential shared by this
+fleet; separate credentials require separate pools before adoption. OpenClaw
+provider mode and external maintainer-report generation are not governed by this
+native Codex process guard. OpenClaw Bay's existing observer schema is unchanged;
+the main dashboard exposes the new aggregate, read-only allowance panel.

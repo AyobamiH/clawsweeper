@@ -1,3 +1,4 @@
+import { isCodexUsageLimitError, codexJsonlFailureDetail } from "./codex-transient.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,6 +81,33 @@ export function runCodexProcess(options: {
   stderrPath?: string;
   appServer?: CodexAppServerProcessOptions;
 }): CodexProcessResult {
+  const quotaEnabled = options.env.CLAWSWEEPER_QUOTA_ENABLED === "1";
+  const quotaWorker = fileURLToPath(new URL("./subscription-quota-worker.js", import.meta.url));
+  if (quotaEnabled) {
+    const quotaStartedAt = Date.now();
+    const probe = spawnSync(process.execPath, [quotaWorker, "admit"], {
+      env: options.env,
+      cwd: options.cwd,
+      encoding: "utf8",
+      timeout: Math.max(1, Math.min(45_000, options.timeoutMs)),
+      maxBuffer: 4096,
+    });
+    let allowed = false;
+    try {
+      allowed = probe.status === 0 && JSON.parse(probe.stdout).allowed === true;
+    } catch {
+      /* fail closed */
+    }
+    options = { ...options, timeoutMs: options.timeoutMs - (Date.now() - quotaStartedAt) };
+    if (!allowed || options.timeoutMs <= 0)
+      return {
+        status: 75,
+        signal: null,
+        stdout: "",
+        stderr:
+          "Subscription fleet cooldown: model start deferred; shared allowance unavailable or exhausted.",
+      };
+  }
   const workDir = mkdtempSync(join(tmpdir(), "clawsweeper-codex-process-"));
   const optionsPath = join(workDir, "options.json");
   const resultPath = join(workDir, "result.json");
@@ -102,9 +130,11 @@ export function runCodexProcess(options: {
       { encoding: "utf8", mode: 0o600 },
     );
     const workerPath = options.appServer ? CODEX_APP_SERVER_WORKER_PATH : CODEX_PROCESS_WORKER_PATH;
+    const modelEnv = { ...options.env };
+    delete modelEnv.CLAWSWEEPER_QUOTA_SECRET;
     const worker = spawnSync(process.execPath, [workerPath, optionsPath], {
       cwd: options.cwd,
-      env: options.env,
+      env: modelEnv,
       input: options.input,
       stdio: ["pipe", "ignore", "ignore"],
       timeout: options.timeoutMs + 10_000,
@@ -115,6 +145,19 @@ export function runCodexProcess(options: {
       // The parent input pipe can close after that result has been written.
       if (worker.error && codexProcessErrorCode(worker.error) !== "EPIPE") {
         return { ...result, error: worker.error };
+      }
+      if (
+        quotaEnabled &&
+        result.status !== 0 &&
+        (isCodexUsageLimitError(result.stderr) ||
+          isCodexUsageLimitError(codexJsonlFailureDetail(result.stdout)))
+      ) {
+        spawnSync(process.execPath, [quotaWorker, "exhausted"], {
+          env: options.env,
+          cwd: options.cwd,
+          timeout: 15_000,
+          stdio: "ignore",
+        });
       }
       return result;
     }

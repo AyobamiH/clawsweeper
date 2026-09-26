@@ -930,6 +930,10 @@ export default {
         deployment_sha: nullableString(env.CLAWSWEEPER_DEPLOY_SHA),
       });
     }
+    if (url.pathname === "/api/subscription-quota" && request.method === "GET")
+      return exactReviewQueueRequest(env, "/subscription-quota");
+    if (url.pathname === "/internal/subscription-quota" && request.method === "POST")
+      return authenticatedExactReviewQueueRequest(request, env, "/subscription-quota");
     if (url.pathname === "/api/events" && request.method === "POST")
       return ingestEvent(request, env);
     if (url.pathname === "/github/webhook" && request.method === "GET")

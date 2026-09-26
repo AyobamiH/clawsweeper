@@ -594,6 +594,7 @@ export function createRecordMetadata({
       return true;
     }
     return (
+      /subscription fleet cooldown/i.test(detail) ||
       isRetryableCodexTransportError(detail) ||
       /\b(?:ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|transport failure|codex transport|Codex worker timed out|Codex review failed: timeout|timed out after|shard timeout|workflow timeout|cancelledByParent)\b/i.test(
         detail,

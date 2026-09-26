@@ -1,6 +1,7 @@
 {
   "version": 1,
   "publicObserverRoutes": [
+    { "path": "/api/subscription-quota", "method": "GET" },
     { "path": "/api/health", "method": "ANY" },
     { "path": "/api/exact-review-queue", "method": "GET" },
     { "path": "/api/durable-lifecycle-bay", "method": "GET" },
