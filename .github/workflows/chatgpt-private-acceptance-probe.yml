@@ -1,5 +1,5 @@
 name: ChatGPT private acceptance probe
-# acceptance-retrigger: fresh-private-item-88
+# acceptance-retrigger: codex-diagnostic-ladder
 
 on:
   push:
@@ -12,9 +12,67 @@ permissions:
   contents: read
 
 jobs:
-  dispatch:
+  diagnose-and-dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-codex
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+        with:
+          login-status: "true"
+
+      - name: Diagnose subscription-backed codex exec contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$RUNNER_TEMP/chatgpt-codex-diagnostic"
+          mkdir -p "$scratch/proof"
+          cat > "$scratch/schema.json" <<'JSON'
+          {
+            "type": "object",
+            "properties": {
+              "ok": { "type": "boolean" }
+            },
+            "required": ["ok"],
+            "additionalProperties": false
+          }
+          JSON
+
+          run_case() {
+            name="$1"
+            shift
+            stdout="$scratch/$name.stdout"
+            stderr="$scratch/$name.stderr"
+            set +e
+            printf '%s\n' 'Return JSON with ok=true and no other fields.' |               env -u OPENAI_API_KEY -u CODEX_API_KEY -u PROXY_API_KEY               codex exec "$@" - >"$stdout" 2>"$stderr"
+            rc=$?
+            set -e
+            echo "=== $name rc=$rc ==="
+            sed -n '1,120p' "$stderr"
+            if [ "$rc" -ne 0 ]; then
+              return "$rc"
+            fi
+          }
+
+          run_case minimal --json
+
+          if ! run_case full             -c 'forced_login_method="chatgpt"'             -c 'approval_policy="never"'             -c 'model_reasoning_effort="high"'             -C "$GITHUB_WORKSPACE"             --output-schema "$scratch/schema.json"             --output-last-message "$scratch/last-message.json"             --json             --sandbox read-only             --add-dir "$scratch/proof"; then
+            echo "::notice::Full review contract failed; isolating the incompatible option."
+
+            run_case config               -c 'forced_login_method="chatgpt"'               -c 'approval_policy="never"'               -c 'model_reasoning_effort="high"'               --json || true
+
+            run_case sandbox               -c 'forced_login_method="chatgpt"'               -c 'approval_policy="never"'               -c 'model_reasoning_effort="high"'               -C "$GITHUB_WORKSPACE"               --json               --sandbox read-only || true
+
+            run_case schema               -c 'forced_login_method="chatgpt"'               -c 'approval_policy="never"'               -c 'model_reasoning_effort="high"'               -C "$GITHUB_WORKSPACE"               --output-schema "$scratch/schema.json"               --output-last-message "$scratch/last-message.json"               --json               --sandbox read-only || true
+
+            run_case add-dir               -c 'forced_login_method="chatgpt"'               -c 'approval_policy="never"'               -c 'model_reasoning_effort="high"'               -C "$GITHUB_WORKSPACE"               --output-schema "$scratch/schema.json"               --output-last-message "$scratch/last-message.json"               --json               --sandbox read-only               --add-dir "$scratch/proof" || true
+
+            exit 1
+          fi
+
       - name: Force fresh private review
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,6 +88,4 @@ jobs:
               apply_after_review: "false"
             }
           }')"
-          gh api repos/AyobamiH/clawsweeper/actions/workflows/sweep.yml/dispatches \
-            --method POST \
-            --input - <<< "$payload"
+          gh api repos/AyobamiH/clawsweeper/actions/workflows/sweep.yml/dispatches             --method POST             --input - <<< "$payload"
