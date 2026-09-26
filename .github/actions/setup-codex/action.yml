@@ -8,8 +8,8 @@ inputs:
     description: Exact Codex Responses proxy npm package version.
     default: "0.139.0"
   auth-mode:
-    description: Authentication mode. Use proxy to keep OPENAI_API_KEY out of Codex subprocesses, or login for legacy codex login.
-    default: "proxy"
+    description: Authentication mode. chatgpt uses the ChatGPT/Codex subscription credential cache; api-proxy and api-key are explicit paid API modes.
+    default: "chatgpt"
   codex-home:
     description: CODEX_HOME directory. Defaults to an isolated per-run ClawSweeper directory.
     default: ""
@@ -50,7 +50,7 @@ runs:
         install_env=(env -u OPENAI_API_KEY -u CODEX_API_KEY -u PROXY_API_KEY -u CLAWSWEEPER_INTERNAL_MODEL)
         "${install_env[@]}" npm install -g "@openai/codex@${{ inputs['codex-version'] }}" \
           --prefer-online --no-audit --no-fund --ignore-scripts
-        if [[ "${{ inputs['auth-mode'] }}" == "proxy" ]]; then
+        if [[ "${{ inputs['auth-mode'] }}" == "api-proxy" ]]; then
           "${install_env[@]}" npm install -g "@openai/codex-responses-api-proxy@${{ inputs['proxy-version'] }}" \
             --prefer-online --no-audit --no-fund --ignore-scripts
         fi
@@ -104,7 +104,7 @@ runs:
         chmod 600 "$CODEX_HOME/config.toml"
 
     - name: Authenticate Codex through Responses proxy
-      if: ${{ inputs['auth-mode'] == 'proxy' }}
+      if: ${{ inputs['auth-mode'] == 'api-proxy' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -138,8 +138,34 @@ runs:
         chmod 600 "$CODEX_HOME/config.toml"
         echo "Configured Codex Responses proxy on localhost."
 
-    - name: Authenticate Codex with login
-      if: ${{ inputs['auth-mode'] == 'login' }}
+    - name: Authenticate Codex with ChatGPT
+      if: ${{ inputs['auth-mode'] == 'chatgpt' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        export CODEX_HOME="${CODEX_HOME:?}"
+        test -n "${CLAWSWEEPER_CODEX_AUTH_JSON:-}"
+        printf '%s' "$CLAWSWEEPER_CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"
+        chmod 600 "$CODEX_HOME/auth.json"
+
+        status="$(
+          env -u OPENAI_API_KEY -u CODEX_API_KEY -u PROXY_API_KEY             codex login status 2>&1
+        )"
+        case "$status" in
+          *"Logged in using ChatGPT"*) ;;
+          *)
+            echo "ClawSweeper requires ChatGPT-backed Codex authentication; refusing API-backed or unknown credentials." >&2
+            echo "$status" >&2
+            exit 1
+            ;;
+        esac
+
+        if [[ "${{ inputs['login-status'] }}" == "true" ]]; then
+          echo "$status"
+        fi
+
+    - name: Authenticate Codex with API key
+      if: ${{ inputs['auth-mode'] == 'api-key' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -151,7 +177,7 @@ runs:
         fi
 
     - name: Reject unknown Codex auth mode
-      if: ${{ inputs['auth-mode'] != 'proxy' && inputs['auth-mode'] != 'login' }}
+      if: ${{ inputs['auth-mode'] != 'chatgpt' && inputs['auth-mode'] != 'api-proxy' && inputs['auth-mode'] != 'api-key' }}
       shell: bash
       run: |
         echo "Unsupported setup-codex auth-mode: ${{ inputs['auth-mode'] }}" >&2
