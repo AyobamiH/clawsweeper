@@ -505,6 +505,34 @@ test("failed review retry eligibility treats model access failures as terminal",
   );
 });
 
+test("failed review retry eligibility treats subscription exhaustion as terminal", () => {
+  const markdown = failedReviewReport({ review_terminal_failure: true })
+    .replaceAll(
+      "Codex review failed: timeout.",
+      "Codex review failed: subscription allowance exhausted.",
+    )
+    .replaceAll(
+      "Codex worker timed out after 600000ms with ETIMEDOUT.",
+      [
+        "ERROR: stream disconnected before completion: usage_limit_reached: weekly allowance exhausted.",
+        "- **codex terminal error:** ERROR: stream disconnected before completion: usage_limit_reached: weekly allowance exhausted.",
+      ].join("\n"),
+    );
+
+  assert.equal(isInfrastructureFailedReviewForTest(markdown), false);
+  assert.equal(
+    failedReviewRetryEligibilityForTest({
+      markdown,
+      liveState: "open",
+      liveHeadSha: "abc123def456",
+      now: Date.parse("2026-06-05T20:00:00Z"),
+      maxAttempts: 2,
+      cooldownMs: 45 * 60 * 1000,
+    }).action,
+    "skipped_non_infrastructure_failure",
+  );
+});
+
 test("failed review retry eligibility rejects ambiguous terminal-failure metadata", () => {
   const markdown = failedReviewReport().replace(
     "review_status: failed",

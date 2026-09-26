@@ -521,7 +521,6 @@ rl.on("line", (line) => {
   }
 });
 
-
 test("Codex process preserves child diagnostics when a failing child closes stdin early", () => {
   const root = mkdtempSync(tmpPrefix);
   const binDir = join(root, "bin");

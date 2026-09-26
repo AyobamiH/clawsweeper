@@ -112,7 +112,6 @@ test(
   },
 );
 
-
 test("setup-codex defaults to ChatGPT auth and fails closed away from API billing", () => {
   const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
     | (CompositeAction & { inputs?: Record<string, { default?: string }> })
@@ -132,7 +131,6 @@ test("setup-codex defaults to ChatGPT auth and fails closed away from API billin
   assert.equal(apiKey?.if, "${{ inputs['auth-mode'] == 'api-key' }}");
   assert.equal(proxy?.if, "${{ inputs['auth-mode'] == 'api-proxy' }}");
 });
-
 
 test("ChatGPT mode does not inherit the API-era internal model pin", () => {
   const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
@@ -157,7 +155,6 @@ test("ChatGPT mode does not inherit the API-era internal model pin", () => {
   assert.match(apiModel?.run ?? "", /CLAWSWEEPER_INTERNAL_MODEL/);
 });
 
-
 test("setup-codex exports the login method consumed by review runtime", () => {
   const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
     | CompositeAction
@@ -168,9 +165,6 @@ test("setup-codex exports the login method consumed by review runtime", () => {
   );
   const apiConfig = steps.find((step) => step.name === "Configure API-backed Codex model");
 
-  assert.match(
-    chatgptConfig?.run ?? "",
-    /CLAWSWEEPER_CODEX_LOGIN_METHOD=chatgpt/,
-  );
+  assert.match(chatgptConfig?.run ?? "", /CLAWSWEEPER_CODEX_LOGIN_METHOD=chatgpt/);
   assert.match(apiConfig?.run ?? "", /CLAWSWEEPER_CODEX_LOGIN_METHOD=api/);
 });

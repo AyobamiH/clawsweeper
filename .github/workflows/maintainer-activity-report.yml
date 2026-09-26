@@ -106,8 +106,7 @@ jobs:
 
       - uses: ./clawsweeper/.github/actions/setup-codex
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
 
       - name: Generate reports
         working-directory: maintainers

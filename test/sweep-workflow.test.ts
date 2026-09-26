@@ -1487,7 +1487,7 @@ test("exact event review publishes directly with a queue-bounded canonical fallb
   }
   assert.match(releaseGeneration.if ?? "", /reserve-exact-review-lease\.outputs\.status != 'held'/);
   assert.match(releaseGeneration.run ?? "", /CLAWSWEEPER_COMMENT_AUTHOR_LOGIN/);
-  assert.match(releaseGeneration.run ?? "", /content == "eyes"/);
+  assert.match((releaseGeneration.run ?? "").replaceAll('\\"', '"'), /content == "eyes"/);
   for (const cleanup of [releaseGeneration, step(reviewer, "Mark unsuccessful re-review")]) {
     for (const kind of ["github_rate_limit", "github_transient"]) {
       assert.match(
@@ -1725,7 +1725,7 @@ test("exact event review publishes directly with a queue-bounded canonical fallb
   assert.match(releaseTerminal.if ?? "", /publish-event-result.*terminal_noop/);
   assert.match(releaseUnsuccessful.run ?? "", /CLAWSWEEPER_COMMENT_AUTHOR_LOGIN/);
   assert.match(releaseUnsuccessful.run ?? "", /\.user\.login == \\"clawsweeper\[bot\]\\"/);
-  assert.match(releaseUnsuccessful.run ?? "", /content == "eyes"/);
+  assert.match((releaseUnsuccessful.run ?? "").replaceAll('\\"', '"'), /content == "eyes"/);
   assert.match(releaseUnsuccessful.if ?? "", /completion_kind == 'superseded'/);
   assert.doesNotMatch(releaseUnsuccessful.if ?? "", /completion_kind == 'deferred'/);
   for (const kind of ["github_rate_limit", "github_transient"]) {
@@ -2571,7 +2571,7 @@ test("broad record publishers isolate tuple reconciliation from status and auxil
     const recordsPath = block.indexOf('--path "records/${target_slug}"');
     const tupleStrategy = block.indexOf("--rebase-strategy normal", recordsPath);
     const secondPublish = block.indexOf("pnpm run repair:publish-main", tupleStrategy);
-    const statusPath = block.indexOf("results/sweep-status/${target_slug}.json", secondPublish);
+    const statusPath = block.indexOf("results/sweep-status/${target_slug,,}.json", secondPublish);
     const statusStrategy = block.indexOf("--rebase-strategy theirs", statusPath);
 
     assert.ok(recordsPath !== -1, `${stepName} records path`);
@@ -3456,7 +3456,7 @@ test("apply workflow finalization retries only target status after checkpointed 
   assert.match(finalStatusStep, /--message "chore: mark sweep apply finished"/);
   assert.deepEqual(
     [...finalStatusStep.matchAll(/--path\s+("?[^\\\s]+"?)/g)].map((match) => match[1]),
-    ['"results/sweep-status/${target_slug}.json"'],
+    ['"results/sweep-status/${target_slug,,}.json"'],
   );
   assert.match(finalStatusStep, /--rebase-strategy theirs/);
   assert.doesNotMatch(finalStatusStep, /--path\s+"?records(?:\/|\s)/);
@@ -5574,7 +5574,7 @@ test("event review completion removes ClawSweeper eyes reaction", () => {
   assert.match(block, /-f content="\+1"/);
   assert.match(block, /-f content="eyes"/);
   assert.match(block, /repos\/\$TARGET_REPO\/issues\/\$ITEM_NUMBER\/reactions\/\$reaction_id/);
-  assert.match(block, /"openclaw-clawsweeper\[bot\]"/);
+  assert.match(block.replaceAll('\\"', '"'), /"openclaw-clawsweeper\[bot\]"/);
   assert.doesNotMatch(block, /issues\/comments\/\$ITEM_NUMBER\/reactions/);
 });
 
@@ -5780,7 +5780,7 @@ test("sweep workflow publishes target-scoped state paths", () => {
 
   assert.match(workflow, /target_slug="\$TARGET_REPO"/);
   assert.match(workflow, /--path "records\/\$\{target_slug\}"/);
-  assert.match(workflow, /--path "results\/sweep-status\/\$\{target_slug\}\.json"/);
+  assert.match(workflow, /--path "results\/sweep-status\/\$\{target_slug,,\}\.json"/);
   assert.doesNotMatch(workflow, /--path records\s*\\/);
   assert.doesNotMatch(workflow, /--path results\/sweep-status\s*\\/);
 });

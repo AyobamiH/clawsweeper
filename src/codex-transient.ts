@@ -24,10 +24,19 @@ export function codexTerminalErrorDetail(value: string | null | undefined): stri
       .filter(Boolean)
       .at(-1) ?? "";
   const normalized = finalLine.toLowerCase();
+  if (isCodexUsageLimitError(finalLine)) return finalLine;
   const prefixIndex = normalized.indexOf(CODEX_MODEL_ACCESS_PREFIX);
   if (prefixIndex === -1) return "";
   const modelStart = prefixIndex + CODEX_MODEL_ACCESS_PREFIX.length;
   return normalized.indexOf(CODEX_MODEL_ACCESS_SUFFIX, modelStart) > modelStart ? finalLine : "";
+}
+
+// Only classify the final diagnostic, never quoted prompt or repository text.
+export function isCodexUsageLimitError(value: string | null | undefined): boolean {
+  const finalLine = (value ?? "").trim().split(/\r?\n/).at(-1) ?? "";
+  return /you(?:'|’)?ve hit your usage limit|usage_limit_reached|usage limit (?:has been )?(?:reached|exceeded)|insufficient_quota/i.test(
+    finalLine,
+  );
 }
 
 export function codexJsonlFailureDetail(value: string | null | undefined): string {

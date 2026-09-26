@@ -43,7 +43,7 @@ test("dead-letter workflow is manual, serialized, and bounded to safe actions", 
   );
   assert.equal(
     operatorStep.env.CLAWSWEEPER_WEBHOOK_SECRET,
-    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET || secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
+    "${{ secrets.EXACT_REVIEW_OPERATOR_SECRET }}",
   );
   assert.equal(
     operatorStep.env.CLAWSWEEPER_APP_PRIVATE_KEY,

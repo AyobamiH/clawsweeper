@@ -23,7 +23,11 @@ concurrency:
 jobs:
   hosted-review-scan:
     name: Hosted native review scan smoke
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'pull_request' &&
+           github.event.pull_request.head.repo.full_name == github.repository &&
+           github.actor == 'AyobamiH') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -32,17 +36,24 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-pnpm
         with:
-          build-script: build
+          build-script: build:node
       - uses: ./.github/actions/setup-codex
+        with:
+          login-status: "true"
         env:
           CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
           CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+      - name: Prove subscription fail-closed boundaries
+        run: node scripts/prove-subscription-fail-closed.mjs "$RUNNER_TEMP/subscription-boundary-proof.json"
       - name: Prove refusal then clean structured review
         run: node scripts/hosted-review-scan-smoke.mjs "$RUNNER_TEMP/hosted-review-scan-proof.json"
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
         with:
           name: hosted-review-scan-proof
-          path: ${{ runner.temp }}/hosted-review-scan-proof.json
+          path: |
+            ${{ runner.temp }}/hosted-review-scan-proof.json
+            ${{ runner.temp }}/subscription-boundary-proof.json
           if-no-files-found: error
 
   check:
@@ -70,6 +81,8 @@ jobs:
 
       - uses: ./.github/actions/setup-pnpm
 
+      - name: Run full validation
+        run: pnpm run check
 
   sparse-repair-builds:
     name: sparse repair build smoke

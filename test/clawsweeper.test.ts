@@ -2338,7 +2338,7 @@ test("agent workflows install pinned CLI releases and keep runner models secret"
     ".github/workflows/sweep.yml",
   ].map((file) => readText(file));
 
-  assert.match(action, /codex-version:[\s\S]*default: "0\.146\.0"/);
+  assert.match(action, /codex-version:[\s\S]*default: "0\.157\.1"/);
   assert.match(action, /proxy-version:[\s\S]*default: "0\.139\.0"/);
   assert.match(action, /@openai\/codex@\$\{\{ inputs\['codex-version'\] \}\}/);
   assert.match(action, /@openai\/codex-responses-api-proxy@\$\{\{ inputs\['proxy-version'\] \}\}/);
@@ -2357,8 +2357,7 @@ test("agent workflows install pinned CLI releases and keep runner models secret"
     /codex sandbox --permission-profile :read-only -C "\$GITHUB_WORKSPACE" -- \/bin\/true/,
   );
   for (const workflow of workflows) {
-    assert.match(workflow, /CLAWSWEEPER_MODEL: internal/);
-    assert.match(workflow, /CLAWSWEEPER_INTERNAL_MODEL: \$\{\{ secrets\.CLAWSWEEPER_MODEL \}\}/);
+    assert.match(workflow, /CLAWSWEEPER_CODEX_AUTH_JSON:/);
     assert.doesNotMatch(workflow, /CLAWSWEEPER_CODEX_CLI_VERSION/);
     for (const line of workflow
       .split("\n")
@@ -2732,7 +2731,7 @@ test("sweep failed-review retry lane defaults to dry-run exact-item dispatch", (
     retryBlock,
     /--state-dir "results\/failed-review-retries\/\$\{\{ steps\.retry-target\.outputs\.target_slug \}\}"/,
   );
-  assert.match(retryBlock, /--path results\/failed-review-retries\/openclaw-openclaw/);
+  assert.match(retryBlock, /--path "\$retry_state_path"/);
   assert.doesNotMatch(retryBlock, /--path records\/openclaw-openclaw/);
   const publishIndex = retryBlock.indexOf("- name: Publish failed-review retry state");
   const uploadIndex = retryBlock.indexOf("- uses: actions/upload-artifact@v7");
@@ -2740,7 +2739,7 @@ test("sweep failed-review retry lane defaults to dry-run exact-item dispatch", (
   assert.ok(uploadIndex > publishIndex);
   assert.match(
     retryBlock.slice(publishIndex, uploadIndex),
-    /if: \$\{\{ always\(\) && vars\.CLAWSWEEPER_FAILED_REVIEW_RETRY_ENABLED == '1' && hashFiles\('results\/failed-review-retries\/openclaw-openclaw\/\*\.json'\) != '' \}\}/,
+    /if: \$\{\{ always\(\) && vars\.CLAWSWEEPER_FAILED_REVIEW_RETRY_ENABLED == '1'/,
   );
   assert.match(
     retryBlock.slice(uploadIndex, retryBlock.indexOf("\n\n", uploadIndex)),
