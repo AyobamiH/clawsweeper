@@ -174,3 +174,21 @@ test("setup-codex exports the login method consumed by review runtime", () => {
   );
   assert.match(apiConfig?.run ?? "", /CLAWSWEEPER_CODEX_LOGIN_METHOD=api/);
 });
+
+
+test("setup-codex exports the selected login method for runtime config", () => {
+  const action = parse(readFileSync(".github/actions/setup-codex/action.yml", "utf8")) as
+    | CompositeAction
+    | undefined;
+  const steps = action?.runs?.steps ?? [];
+  const chatgptConfig = steps.find(
+    (step) => step.name === "Configure ChatGPT Codex login boundary",
+  );
+  const apiModel = steps.find((step) => step.name === "Configure API-backed Codex model");
+
+  assert.match(
+    chatgptConfig?.run ?? "",
+    /CLAWSWEEPER_CODEX_LOGIN_METHOD=chatgpt/,
+  );
+  assert.match(apiModel?.run ?? "", /CLAWSWEEPER_CODEX_LOGIN_METHOD=api/);
+});
