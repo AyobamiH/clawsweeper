@@ -101,6 +101,7 @@ runs:
         export CODEX_HOME="${CODEX_HOME:?}"
         printf 'forced_login_method = "chatgpt"\n' > "$CODEX_HOME/config.toml"
         chmod 600 "$CODEX_HOME/config.toml"
+        echo "CLAWSWEEPER_CODEX_LOGIN_METHOD=chatgpt" >> "$GITHUB_ENV"
 
     - name: Configure API-backed Codex model
       if: ${{ inputs['auth-mode'] == 'api-proxy' || inputs['auth-mode'] == 'api-key' }}
@@ -108,6 +109,7 @@ runs:
       run: |
         set -euo pipefail
         export CODEX_HOME="${CODEX_HOME:?}"
+        echo "CLAWSWEEPER_CODEX_LOGIN_METHOD=api" >> "$GITHUB_ENV"
         test -n "${CLAWSWEEPER_INTERNAL_MODEL:-}"
         model_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$CLAWSWEEPER_INTERNAL_MODEL")"
         printf 'model = %s\n' "$model_json" > "$CODEX_HOME/config.toml"

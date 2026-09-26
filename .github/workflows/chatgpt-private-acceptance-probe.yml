@@ -1,4 +1,5 @@
 name: ChatGPT private acceptance probe
+# acceptance-retrigger: chatgpt-runtime-login-method
 
 on:
   push:
