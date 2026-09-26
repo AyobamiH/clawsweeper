@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHmac } from "node:crypto";
 import { spawnCodex, terminateCodexProcessTree } from "./codex-spawn.js";
 
@@ -35,8 +38,9 @@ export async function readChatGPTAllowance(
     "CLAWSWEEPER_WEBHOOK_SECRET",
   ])
     delete safeEnv[key];
+  const probeCwd = mkdtempSync(join(tmpdir(), "clawsweeper-allowance-"));
   const child = spawnCodex(["app-server", "-c", 'forced_login_method="chatgpt"'], {
-    cwd: process.cwd(),
+    cwd: probeCwd,
     env: safeEnv,
   });
   return new Promise((resolve, reject) => {
@@ -55,7 +59,10 @@ export async function readChatGPTAllowance(
     const send = (value: unknown) => child.stdin.write(JSON.stringify(value) + "\n");
     child.stdin.on("error", () => finish());
     child.on("error", () => finish());
-    child.on("close", () => finish());
+    child.on("close", () => {
+      rmSync(probeCwd, { recursive: true, force: true });
+      finish();
+    });
     child.stderr.on("data", () => {}); // Never publish auth/provider diagnostics.
     child.stdout.on("data", (chunk) => {
       buffer += chunk.toString();

@@ -148,6 +148,7 @@ export function runCodexProcess(options: {
       }
       if (
         quotaEnabled &&
+        result.status !== 0 &&
         (isCodexUsageLimitError(result.stderr) ||
           isCodexUsageLimitError(codexJsonlFailureDetail(result.stdout)))
       ) {
