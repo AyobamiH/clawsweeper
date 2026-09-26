@@ -111,10 +111,9 @@ export function runCodexProcess(options: {
     });
     if (existsSync(resultPath)) {
       const result = deserializeProcessResult(JSON.parse(readFileSync(resultPath, "utf8")));
-      if (
-        worker.error &&
-        !(result.status === 0 && codexProcessErrorCode(worker.error) === "EPIPE")
-      ) {
+      // A complete worker result owns child exit diagnostics, even on failure.
+      // The parent input pipe can close after that result has been written.
+      if (worker.error && codexProcessErrorCode(worker.error) !== "EPIPE") {
         return { ...result, error: worker.error };
       }
       return result;
