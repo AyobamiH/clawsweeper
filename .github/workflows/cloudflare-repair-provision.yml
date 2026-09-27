@@ -56,10 +56,14 @@ jobs:
         run: |
           set -euo pipefail
           cd cloudflare-repair
-          npx wrangler deploy
+          npx wrangler deploy --containers-rollout=none
           probe_token="$(openssl rand -hex 32)"
           echo "::add-mask::$probe_token"
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
+          for old_name in csw-2f9f3a6753e28d3d-plan csw-58aff21dcf85b241-plan csw-ac4fe93ac24d99b8-plan; do
+            jq -n --arg name "$old_name" '{name:$name}' > "$RUNNER_TEMP/old-runner.json"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/old-runner.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+          done
           curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 \
             --request POST --header "Authorization: Bearer $probe_token" \
             https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/probe \
