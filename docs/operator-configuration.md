@@ -37,9 +37,10 @@ Containment belongs at the authority and dispatch layers: use target automation 
 
 ## Workflow credential names
 
-Provider keys used by the optional OpenClaw runner are `ANTHROPIC_API_KEY`,
-`GEMINI_API_KEY`, `KIMI_API_KEY`, and `OPENROUTER_API_KEY`. Maintainer-report
-and Cloudflare access workflows reference `CLOUDFLARE_ACCESS_CLIENT_ID`,
+Review and repair workflows require ChatGPT subscription authentication via
+`CLAWSWEEPER_CODEX_AUTH_JSON`; model API fallback is disabled. Cloudflare repair
+provisioning uses `CLOUDFLARE_API_TOKEN` and the `CLOUDFLARE_ACCOUNT_ID` variable.
+Maintainer-report and Cloudflare access workflows reference `CLOUDFLARE_ACCESS_CLIENT_ID`,
 `CLOUDFLARE_ACCESS_CLIENT_SECRET`, `OPENCLAW_CLOUDFLARE_ACCESS_API_TOKEN`,
 `OPENCLAW_CLOUDFLARE_CONFIG_API_TOKEN`, `OPENCLAW_CLOUDFLARE_PAGES_API_TOKEN`,
 `OPENCLAW_REPORTS_ACCESS_CLIENT_ID`, and `OPENCLAW_REPORTS_ACCESS_CLIENT_SECRET`.

@@ -37,8 +37,10 @@ Run `cloudflare-repair-provision.yml` to build/deploy the pinned image and Worke
 execute the real containment preflight on both Cloudflare runner roles, retain
 source/runner-bound artifacts, and destroy both runners. The narrow claim is:
 GitHub orchestration can provision Cloudflare compute, execute enforced Linux
-containment on two separate ephemeral roles, and clean them up. The proof does
-not authorise target mutation and does not invoke a model. The operational branch
+containment on two separate ephemeral roles, and clean them up. The containment steps do
+not authorise target mutation or invoke a model. After cleanup, a separate
+GitHub-hosted ChatGPT review inspects the branch through the shared allowance
+gate. The operational branch
 push trigger enables pre-merge validation; normal main updates do not deploy it.
 
 For full repair evidence, operator PR 10 was planned/repaired on Cloudflare in
