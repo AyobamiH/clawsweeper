@@ -1,0 +1,79 @@
+name: Run approved operator repair on Cloudflare
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/cloudflare-compute-inventory]
+    paths: [.github/workflows/cloudflare-repair-run.yml]
+permissions:
+  contents: read
+concurrency:
+  group: cloudflare-operator-10-acceptance
+  cancel-in-progress: false
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Create scoped runner and dispatch token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+          permission-actions: write
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start two ephemeral Cloudflare runners and dispatch approved repair
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ALLOW_EXECUTE: ${{ vars.CLAWSWEEPER_ALLOW_EXECUTE }}
+          ALLOW_FIX_PR: ${{ vars.CLAWSWEEPER_ALLOW_FIX_PR }}
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          if [ "$ALLOW_EXECUTE" != 1 ] || [ "$ALLOW_FIX_PR" != 1 ]; then
+            echo 'Repair execution gates are not enabled; no runners or model sessions started.'
+            exit 1
+          fi
+          cd cloudflare-repair
+          npm ci --no-audit --no-fund
+          npx wrangler deploy --containers-rollout=none
+          probe_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$probe_token"
+          printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
+          for old_name in csw-2f9f3a6753e28d3d-plan csw-58aff21dcf85b241-plan csw-ac4fe93ac24d99b8-plan; do
+            jq -n --arg name "$old_name" '{name:$name}' > "$RUNNER_TEMP/old-runner.json"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/old-runner.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+          done
+          nonce="$(openssl rand -hex 8)"
+          payload="$RUNNER_TEMP/runner-start.json"
+          trap 'rm -f "$payload"' EXIT
+          for lane in plan execute; do
+            runner_name="csw-$nonce-$lane"
+            registration="$(gh api --method POST repos/AyobamiH/clawsweeper/actions/runners/generate-jitconfig -f name="$runner_name" -F runner_group_id=1 -f 'labels[]=self-hosted' -f 'labels[]=Linux' -f 'labels[]=X64' -f "labels[]=$runner_name" --jq .encoded_jit_config)"
+            echo "::add-mask::$registration"
+            jq -n --arg name "$runner_name" --arg jit "$registration" '{name:$name,jit:$jit}' > "$payload"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+          done
+          for lane in plan execute; do
+            runner_name="csw-$nonce-$lane"
+            for attempt in $(seq 1 12); do
+              runner_status="$(gh api repos/AyobamiH/clawsweeper/actions/runners --jq ".runners[] | select(.name == \"$runner_name\") | .status")"
+              if [ "$runner_status" = online ]; then break; fi
+              sleep 5
+            done
+            if [ "$runner_status" != online ]; then
+              echo "Cloudflare runner $runner_name did not become online; repair not dispatched."
+              exit 1
+            fi
+          done
+          gh workflow run repair-cluster-worker.yml --repo AyobamiH/clawsweeper --ref ops/cloudflare-compute-inventory \
+            -f job=jobs/AyobamiH/inbox/automerge-ayobamih-openclaw-operator-10.md \
+            -f mode=autonomous -f dry_run=false -f runner="csw-$nonce-plan" -f execution_runner="csw-$nonce-execute"
+          echo 'Dispatched the existing repair job to Cloudflare runners; job-level merge and closure remain disabled.'

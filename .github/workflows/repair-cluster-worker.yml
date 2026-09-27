@@ -46,12 +46,12 @@ on:
       runner:
         description: "Runner label for cluster planning/review work"
         required: true
-        default: blacksmith-4vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       execution_runner:
         description: "Linux runner label for fix/apply execution work with delegated namespaces, recursive mount hardening, and optional Landlock defense in depth"
         required: true
-        default: blacksmith-16vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       planner_sandbox:
         description: "Codex planning sandbox; danger-full-access is for trusted ephemeral runner fallback only"
@@ -92,14 +92,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_MODEL: internal
-  CLAWSWEEPER_RUNNER: ${{ vars.CLAWSWEEPER_RUNNER || 'codex' }}
+  CLAWSWEEPER_RUNNER: codex
   CLAWSWEEPER_OPENCLAW_MODEL: ${{ secrets.CLAWSWEEPER_OPENCLAW_MODEL }}
-  CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON: ${{ secrets.CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON }}
-  CLAWSWEEPER_OPENCLAW_OPENAI_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.OPENAI_API_KEY || '' }}
-  ANTHROPIC_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.ANTHROPIC_API_KEY || '' }}
-  GEMINI_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.GEMINI_API_KEY || '' }}
-  KIMI_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.KIMI_API_KEY || '' }}
-  OPENROUTER_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.OPENROUTER_API_KEY || '' }}
+  CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON: ""
+  CLAWSWEEPER_OPENCLAW_OPENAI_KEY: ""
+  ANTHROPIC_API_KEY: ""
+  GEMINI_API_KEY: ""
+  KIMI_API_KEY: ""
+  OPENROUTER_API_KEY: ""
   CLUSTER_JOB_PATH: ${{ inputs.job }}
   CLUSTER_DISPATCH_KEY: ${{ inputs.dispatch_key }}
   CLUSTER_JOB_PAYLOAD: ${{ inputs.job_payload }}
@@ -142,7 +142,7 @@ jobs:
       - name: Authenticate durable intake before credentials
         if: ${{ inputs.job_payload != '' }}
         env:
-          CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+          CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: pnpm run repair:restore-cluster-intake-job
 
@@ -185,7 +185,7 @@ jobs:
       job_exists: ${{ steps.check_job.outputs.job_exists }}
       effective_mode: ${{ steps.run_worker.outputs.effective_mode }}
     env:
-      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
       CLAWSWEEPER_ALLOW_EXECUTE: ${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && vars.CLAWSWEEPER_ALLOW_EXECUTE == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_FIX_PR: ${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && vars.CLAWSWEEPER_ALLOW_FIX_PR == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_MERGE: "0"
@@ -465,7 +465,7 @@ jobs:
       actions: read
       contents: read
     env:
-      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
       CLAWSWEEPER_ALLOW_EXECUTE: ${{ needs.cluster.outputs.allow_execute == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_FIX_PR: ${{ needs.cluster.outputs.allow_fix_pr == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_MERGE: ${{ !contains(inputs.job, '/inbox/issue-') && needs.cluster.outputs.allow_merge || '0' }}
@@ -479,7 +479,7 @@ jobs:
       CLAWSWEEPER_TARGET_VALIDATION_MODE: ${{ vars.CLAWSWEEPER_TARGET_VALIDATION_MODE || 'changed-only' }}
       CLAWSWEEPER_POST_FLIGHT_IGNORE_CHECKS: ${{ vars.CLAWSWEEPER_POST_FLIGHT_IGNORE_CHECKS || 'auto-response,Labeler,Stale' }}
       CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA: ${{ vars.CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA || '50' }}
-      CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS: ${{ vars.CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS || '1' }}
+      CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS: "0"
       CLAWSWEEPER_GIT_USER_NAME: ${{ vars.CLAWSWEEPER_GIT_USER_NAME || 'clawsweeper[bot]' }}
       CLAWSWEEPER_GIT_USER_EMAIL: ${{ vars.CLAWSWEEPER_GIT_USER_EMAIL || '274271284+clawsweeper[bot]@users.noreply.github.com' }}
       CLAWSWEEPER_STEERABLE_CODEX: ${{ vars.CLAWSWEEPER_STEERABLE_CODEX || '0' }}
@@ -515,7 +515,7 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
+          owner: AyobamiH
           repositories: clawsweeper
           permission-actions: write
           permission-contents: write
@@ -852,7 +852,7 @@ jobs:
             --wait-for-capacity \
             --source-job-path "$CLUSTER_JOB_PATH" \
             --requeue-depth "$CLUSTER_REQUEUE_DEPTH" \
-            --max-requeue-depth 1 \
+            --max-requeue-depth 0 \
             --runner "$CLUSTER_WORKER_RUNNER" \
             --execution-runner "$CLUSTER_EXECUTION_RUNNER" \
             --model "$CLUSTER_WORKER_MODEL"
