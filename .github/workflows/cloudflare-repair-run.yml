@@ -24,7 +24,7 @@ jobs:
           repositories: clawsweeper
           permission-administration: write
           permission-actions: write
-          permission-variables: write
+          permission-actions-variables: write
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -45,10 +45,6 @@ jobs:
           probe_token="$(openssl rand -hex 32)"
           echo "::add-mask::$probe_token"
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
-          for old_name in csw-2f9f3a6753e28d3d-plan csw-58aff21dcf85b241-plan csw-ac4fe93ac24d99b8-plan; do
-            jq -n --arg name "$old_name" '{name:$name}' > "$RUNNER_TEMP/old-runner.json"
-            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/old-runner.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
-          done
           nonce="$(openssl rand -hex 8)"
           payload="$RUNNER_TEMP/runner-start.json"
           trap 'rm -f "$payload"' EXIT
@@ -71,6 +67,8 @@ jobs:
               exit 1
             fi
           done
+          echo "previous_execute=$ALLOW_EXECUTE" >> "$GITHUB_OUTPUT"
+          echo "previous_fix_pr=$ALLOW_FIX_PR" >> "$GITHUB_OUTPUT"
           echo "restore_gates=true" >> "$GITHUB_OUTPUT"
           gh variable set CLAWSWEEPER_ALLOW_EXECUTE --repo AyobamiH/clawsweeper --body 1
           gh variable set CLAWSWEEPER_ALLOW_FIX_PR --repo AyobamiH/clawsweeper --body 1
@@ -92,8 +90,8 @@ jobs:
         if: ${{ always() && steps.launch.outputs.restore_gates == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          PRIOR_EXECUTE: ${{ vars.CLAWSWEEPER_ALLOW_EXECUTE }}
-          PRIOR_FIX_PR: ${{ vars.CLAWSWEEPER_ALLOW_FIX_PR }}
+          PRIOR_EXECUTE: ${{ steps.launch.outputs.previous_execute }}
+          PRIOR_FIX_PR: ${{ steps.launch.outputs.previous_fix_pr }}
         run: |
           gh variable set CLAWSWEEPER_ALLOW_EXECUTE --repo AyobamiH/clawsweeper --body "$PRIOR_EXECUTE"
           gh variable set CLAWSWEEPER_ALLOW_FIX_PR --repo AyobamiH/clawsweeper --body "$PRIOR_FIX_PR"
