@@ -24,10 +24,12 @@ jobs:
           repositories: clawsweeper
           permission-administration: write
           permission-actions: write
+          permission-variables: write
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Start two ephemeral Cloudflare runners and dispatch approved repair
+        id: launch
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,10 +39,6 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
         run: |
           set -euo pipefail
-          if [ "$ALLOW_EXECUTE" != 1 ] || [ "$ALLOW_FIX_PR" != 1 ]; then
-            echo 'Repair execution gates are not enabled; no runners or model sessions started.'
-            exit 1
-          fi
           cd cloudflare-repair
           npm ci --no-audit --no-fund
           npx wrangler deploy --containers-rollout=none
@@ -73,7 +71,29 @@ jobs:
               exit 1
             fi
           done
+          echo "restore_gates=true" >> "$GITHUB_OUTPUT"
+          gh variable set CLAWSWEEPER_ALLOW_EXECUTE --repo AyobamiH/clawsweeper --body 1
+          gh variable set CLAWSWEEPER_ALLOW_FIX_PR --repo AyobamiH/clawsweeper --body 1
+          dispatch_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           gh workflow run repair-cluster-worker.yml --repo AyobamiH/clawsweeper --ref ops/cloudflare-compute-inventory \
             -f job=jobs/AyobamiH/inbox/automerge-ayobamih-openclaw-operator-10.md \
             -f mode=autonomous -f dry_run=false -f runner="csw-$nonce-plan" -f execution_runner="csw-$nonce-execute"
+          for attempt in $(seq 1 48); do
+            run_id="$(gh api 'repos/AyobamiH/clawsweeper/actions/workflows/repair-cluster-worker.yml/runs?branch=ops%2Fcloudflare-compute-inventory&per_page=10' --jq ".workflow_runs[] | select(.created_at >= \"$dispatch_time\") | .id" | head -1)"
+            if [ -n "$run_id" ]; then
+              gate="$(gh api "repos/AyobamiH/clawsweeper/actions/runs/$run_id/jobs" --jq '.jobs[] | select(.name == "Plan and review cluster") | .steps[]? | select(.name == "Capture execution gates") | .conclusion')"
+              if [ "$gate" = success ]; then break; fi
+            fi
+            sleep 5
+          done
+          if [ "${gate:-}" != success ]; then echo 'Repair did not capture execution gates within the bounded window'; exit 1; fi
           echo 'Dispatched the existing repair job to Cloudflare runners; job-level merge and closure remain disabled.'
+      - name: Restore prior execution gates
+        if: ${{ always() && steps.launch.outputs.restore_gates == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PRIOR_EXECUTE: ${{ vars.CLAWSWEEPER_ALLOW_EXECUTE }}
+          PRIOR_FIX_PR: ${{ vars.CLAWSWEEPER_ALLOW_FIX_PR }}
+        run: |
+          gh variable set CLAWSWEEPER_ALLOW_EXECUTE --repo AyobamiH/clawsweeper --body "$PRIOR_EXECUTE"
+          gh variable set CLAWSWEEPER_ALLOW_FIX_PR --repo AyobamiH/clawsweeper --body "$PRIOR_FIX_PR"
