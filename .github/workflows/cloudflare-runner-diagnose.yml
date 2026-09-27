@@ -5,11 +5,19 @@ on:
     paths: [.github/workflows/cloudflare-runner-diagnose.yml]
 permissions:
   contents: read
+  actions: write
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Cancel superseded runner tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for run in 36321623314 36321809539; do
+            gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/$run/cancel || true
+          done
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
