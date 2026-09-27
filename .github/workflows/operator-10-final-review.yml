@@ -1,0 +1,35 @@
+name: Request current operator 10 review
+on:
+  push:
+    branches: [ops/cloudflare-compute-inventory]
+    paths: [.github/workflows/operator-10-final-review.yml]
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: |
+            clawsweeper
+            openclaw-operator
+          permission-actions: write
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Fence evidence and request exactly one review
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/AyobamiH/openclaw-operator/pulls/10 > "$RUNNER_TEMP/pr.json"
+          jq -e '.head.sha == "c50244478afcc394732376f7e28448368ef02bad" and .merged == false and (.body | contains("36338829679"))' "$RUNNER_TEMP/pr.json" >/dev/null
+          gh workflow run sweep.yml --repo AyobamiH/clawsweeper --ref ops/cloudflare-compute-inventory \
+            -f target_repo=AyobamiH/openclaw-operator -f item_number=10 -f batch_size=1 -f shard_count=1 \
+            -f apply_existing=false -f hot_intake=false \
+            -f additional_prompt='Owner requests a fresh review of current PR head and body. Read the updated PR-body runtime evidence and findings disposition. The approved repair compute is Cloudflare; GitHub-hosted ChatGPT review is authorised. API fallback is forbidden. Do not merge, close, or launch another repair. The prior repair review predated publication of the external evidence. Report remaining actionable findings honestly.'
