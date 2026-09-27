@@ -169,3 +169,34 @@ test("populated coordinator preserves pending reviews and publishes during coold
     harness.restore();
   }
 });
+
+test("observer refresh replaces stale exhaustion without permitting model admission", () => {
+  const probe = apply(emptyQuota(), { action: "admit" });
+  const exhausted = apply(probe.state, {
+    action: "observe",
+    probeId: probe.response.probeId,
+    windows: [window(0, now + 7 * 86400_000)],
+  });
+  assert.equal(
+    apply(exhausted.state, { action: "refresh" }, now + 1000).response.probeId,
+    undefined,
+  );
+  const at = now + 16 * 60_000;
+  assert.equal(apply(exhausted.state, { action: "admit" }, at).response.allowed, false);
+  const fresh = apply(exhausted.state, { action: "refresh" }, at);
+  assert.ok(fresh.response.probeId);
+  assert.equal(fresh.response.allowed, false);
+  assert.equal(apply(fresh.state, { action: "admit" }, at).response.allowed, false);
+  const observed = apply(
+    fresh.state,
+    {
+      action: "observe",
+      probeId: fresh.response.probeId,
+      windows: [window(85, now + 8 * 86400_000)],
+    },
+    at,
+  );
+  assert.equal(observed.response.allowed, true);
+  assert.equal(observed.state.blockedUntil, 0);
+  assert.equal(quotaView(observed.state, at).windows[0].remainingPercent, 85);
+});

@@ -94,8 +94,20 @@ export function quotaTransition(
       : 0;
     return { state, response: { allowed: !state.exhausted, ...quotaView(state, now) } };
   }
-  if (body.action !== "admit") throw new Error("invalid quota action");
-  if (state.blockedUntil > now) return denied();
+  const refresh = body.action === "refresh";
+  if (body.action !== "admit" && !refresh) throw new Error("invalid quota action");
+  // Signed observer refreshes are not inference admission. Re-read exhausted
+  // pools periodically so renewed credentials/capacity cannot remain locked to
+  // an old reset date. Never reopen until the current probe reports capacity.
+  if (!refresh && state.blockedUntil > now) return denied();
+  if (refresh && state.observedAt > 0 && now - state.observedAt < UNKNOWN_RETRY_MS)
+    return {
+      state,
+      response: {
+        allowed: !state.exhausted && state.blockedUntil <= now,
+        ...quotaView(state, now),
+      },
+    };
   if (state.probeUntil > now)
     return { state, response: { ...denied().response, refreshPending: true } };
   if (

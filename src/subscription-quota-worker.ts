@@ -7,7 +7,11 @@ try {
       JSON.stringify({ observedAt: Date.now(), windows: await readChatGPTAllowance() }),
     );
   } else {
-    process.stdout.write(JSON.stringify({ allowed: await admitSubscription() }));
+    process.stdout.write(
+      JSON.stringify({
+        allowed: await admitSubscription(process.env, process.argv[2] === "refresh"),
+      }),
+    );
   }
 } catch {
   process.stdout.write(JSON.stringify({ allowed: false, error: "subscription_quota_unavailable" }));

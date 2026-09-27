@@ -33,4 +33,4 @@ jobs:
         env:
           CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-        run: node dist/subscription-quota-worker.js admit
+        run: node dist/subscription-quota-worker.js refresh
