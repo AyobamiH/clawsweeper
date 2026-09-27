@@ -52,3 +52,5 @@ jobs:
           done
           echo "Obsolete registration did not clear after cancellation" >&2
           exit 1
+
+# Complete registration retirement after GitHub cancellation has settled.
