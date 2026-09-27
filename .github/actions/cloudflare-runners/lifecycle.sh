@@ -26,6 +26,18 @@ for lane in plan execute; do
   fi
   curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 90 --max-time 180 --request "$verb" --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$scratch_dir/request.json" --output "$scratch_dir/response.json" "$endpoint/runner"
   jq -e --arg key "$([ "$verb" = POST ] && echo started || echo stopped)" '.[$key] == true' "$scratch_dir/response.json" >/dev/null
+  if [ "$RUNNER_OPERATION" = start ]; then
+    runner_status=offline
+    for attempt in $(seq 1 18); do
+      runner_status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runners" --jq ".runners[] | select(.name == \"$runner_name\") | .status")"
+      if [ "$runner_status" = online ]; then break; fi
+      sleep 5
+    done
+    if [ "$runner_status" != online ]; then
+      echo "Runner did not become online within the bounded startup window: $runner_name" >&2
+      exit 1
+    fi
+  fi
   if [ "$RUNNER_OPERATION" = stop ]; then
     gh api "repos/$GITHUB_REPOSITORY/actions/runners" --jq ".runners[] | select(.name == \"$runner_name\") | .id" > "$scratch_dir/runner-ids"
     while read -r runner_id; do

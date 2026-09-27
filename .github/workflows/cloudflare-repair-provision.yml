@@ -49,7 +49,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Mint bounded GitHub App credential
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         id: app
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
@@ -124,7 +124,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Mint bounded GitHub App credential
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         id: app
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
@@ -141,3 +141,58 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
+  review:
+    name: Fresh subscription-authenticated infrastructure review
+    needs:
+      - plan-proof
+      - execute-proof
+      - cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLAWSWEEPER_QUOTA_ENABLED: "1"
+      CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+      CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+      CLAWSWEEPER_RUNNER: codex
+      OPENAI_API_KEY: ""
+      CODEX_API_KEY: ""
+      PROXY_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          build-script: build:node
+      - uses: ./.github/actions/setup-codex
+        with:
+          auth-mode: chatgpt
+          login-status: "true"
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+      - name: Review actual branch against main without mutation
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {execFileSync} from 'node:child_process';
+          import {runCodexProcess} from './dist/codex-process.js';
+          import {codexSubprocessEnv} from './dist/repair/process-env.js';
+          const out=path.join(process.env.RUNNER_TEMP,'infra-review');fs.mkdirSync(out,{recursive:true});
+          const schema={type:'object',additionalProperties:false,required:['status','summary','findings'],properties:{status:{type:'string',enum:['clean','blocked']},summary:{type:'string'},findings:{type:'array',items:{type:'object',additionalProperties:false,required:['severity','file','description'],properties:{severity:{type:'string',enum:['high','medium','low']},file:{type:'string'},description:{type:'string'}}}}};
+          const schemaPath=path.join(out,'schema.json'),resultPath=path.join(out,'review.json');fs.writeFileSync(schemaPath,JSON.stringify(schema));
+          const head=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const base=execFileSync('git',['rev-parse','origin/main'],{encoding:'utf8'}).trim();
+          fs.writeFileSync(path.join(out,'binding.json'),JSON.stringify({head,base,run:process.env.GITHUB_RUN_ID}));
+          const result=runCodexProcess({args:['exec','--sandbox','read-only','-c','approval_policy="never"','-c','forced_login_method="chatgpt"','--output-schema',schemaPath,'--output-last-message',resultPath,'--json','-'],cwd:process.cwd(),env:codexSubprocessEnv(),timeoutMs:900000,input:`/review
+          Review the current infrastructure diff ${base}...${head}. Read AGENTS.md fully. Read-only code review: do not modify files, run target workflows or ask for merge approval. The owner authorised landing after proof and review; Cloudflare repair compute, GitHub-hosted ChatGPT review and deterministic orchestration are approved, no Blacksmith or API model fallback. The same workflow has just successfully deployed this image and Worker, run real containment on both unique Cloudflare runner roles, and cleaned them up. Review authority, credential isolation, failure cleanup, concurrency, existing caller compatibility, subscription fail-closed behaviour, and introduced regressions. Inspect actual source and diff. Report actionable defects honestly, not only syntax. Existing Work Mode /proc process-identity test failures require hosted CI verification, not weakened assertions. Return clean only with no actionable findings.`,stdoutPath:path.join(out,'review.jsonl'),stderrPath:path.join(out,'review.stderr.log')});
+          if(result.status!==0){console.error(result.stderr);process.exit(result.status||1);}
+          const review=JSON.parse(fs.readFileSync(resultPath,'utf8'));console.log(JSON.stringify(review));if(review.status!=='clean'||review.findings.length)process.exitCode=1;
+          JS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cloudflare-infrastructure-review
+          path: ${{ runner.temp }}/infra-review
+          if-no-files-found: error
