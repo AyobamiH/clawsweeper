@@ -1,0 +1,9 @@
+{
+  "name": "ayobamih-clawsweeper-compute",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [{"class_name":"Sandbox","image":"./Dockerfile","instance_type":"standard-1","max_instances":1}],
+  "durable_objects": {"bindings":[{"name":"Sandbox","class_name":"Sandbox"}]},
+  "migrations": [{"tag":"v1","new_sqlite_classes":["Sandbox"]}]
+}
