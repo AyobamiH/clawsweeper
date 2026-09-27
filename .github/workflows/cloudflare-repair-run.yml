@@ -51,9 +51,9 @@ jobs:
           for lane in plan execute; do
             runner_name="csw-$nonce-$lane"
             registration="$(gh api --method POST repos/AyobamiH/clawsweeper/actions/runners/generate-jitconfig -f name="$runner_name" -F runner_group_id=1 -f 'labels[]=self-hosted' -f 'labels[]=Linux' -f 'labels[]=X64' -f "labels[]=$runner_name" --jq .encoded_jit_config)"
-            echo "::add-mask::$registration"
+            printf '\n::add-mask::%s\n' "$registration"
             jq -n --arg name "$runner_name" --arg jit "$registration" '{name:$name,jit:$jit}' > "$payload"
-            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" --output "$RUNNER_TEMP/runner-start-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
           done
           for lane in plan execute; do
             runner_name="csw-$nonce-$lane"
