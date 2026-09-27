@@ -10,6 +10,14 @@ export default {
     if (!env.PROBE_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.PROBE_TOKEN}`) {
       return new Response('Unauthorized', {status:401});
     }
+    if (url.pathname === '/runner' && request.method === 'POST') {
+      const body = await request.json();
+      if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '') || !/^[A-Za-z0-9+/=]{100,50000}$/.test(body.jit ?? '')) return new Response('Invalid request', {status:400});
+      const runner = getSandbox(env.Sandbox, body.name, {sleepAfter:'3h'});
+      await runner.writeFile('/tmp/runner-jit', body.jit);
+      await runner.startProcess('/opt/start-runner.sh', {id:'github-runner'});
+      return Response.json({started:true,name:body.name});
+    }
     if (url.pathname !== '/probe' || request.method !== 'POST') {
       return new Response('Not found', {status:404});
     }
