@@ -120,8 +120,9 @@ env:
 
 concurrency:
   group: cloudflare-repair-compute
+  queue: max
   # Keep an active execute run alive so its temporary gate cleanup can finish;
-  # GitHub still coalesces pending runs in this group to the newest dispatch.
+  # Preserve pending durable jobs while the two-container fleet is occupied.
   cancel-in-progress: false
 
 jobs:

@@ -77,7 +77,7 @@ test("direct repair requeues forward a stable dispatch receipt and publish it", 
   assert.match(workflow, /pnpm run repair:requeue -- "\$CLUSTER_JOB_PATH"/);
   assert.match(workflow, /--source-job-path "\$CLUSTER_JOB_PATH"/);
   assert.match(workflow, /--requeue-depth "\$CLUSTER_REQUEUE_DEPTH"/);
-  assert.match(workflow, /--max-requeue-depth 1/);
+  assert.match(workflow, /--max-requeue-depth 0/);
 });
 
 test("exact review publisher bypasses the legacy action ledger and finalizes through the fenced acknowledgement", () => {

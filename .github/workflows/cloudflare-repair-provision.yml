@@ -10,6 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: cloudflare-repair-compute
+  queue: max
   cancel-in-progress: false
 env:
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
@@ -180,7 +181,7 @@ jobs:
           import {runCodexProcess} from './dist/codex-process.js';
           import {codexSubprocessEnv} from './dist/repair/process-env.js';
           const out=path.join(process.env.RUNNER_TEMP,'infra-review');fs.mkdirSync(out,{recursive:true});
-          const schema={type:'object',additionalProperties:false,required:['status','summary','findings'],properties:{status:{type:'string',enum:['clean','blocked']},summary:{type:'string'},findings:{type:'array',items:{type:'object',additionalProperties:false,required:['severity','file','description'],properties:{severity:{type:'string',enum:['high','medium','low']},file:{type:'string'},description:{type:'string'}}}}};
+          const schema={type:'object',additionalProperties:false,required:['status','summary','findings'],properties:{status:{type:'string',enum:['clean','blocked']},summary:{type:'string'},findings:{type:'array',items:{type:'object',additionalProperties:false,required:['severity','file','description'],properties:{severity:{type:'string',enum:['high','medium','low']},file:{type:'string'},description:{type:'string'}}}}}};
           const schemaPath=path.join(out,'schema.json'),resultPath=path.join(out,'review.json');fs.writeFileSync(schemaPath,JSON.stringify(schema));
           const head=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
           const base=execFileSync('git',['rev-parse','origin/main'],{encoding:'utf8'}).trim();

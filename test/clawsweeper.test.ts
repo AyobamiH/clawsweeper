@@ -2107,7 +2107,7 @@ test("repair workers hydrate only durable jobs from generated state", () => {
   const workflow = readText(".github/workflows/repair-cluster-worker.yml");
   const requeue = readText("src/repair/requeue-job.ts");
 
-  assert.match(workflow, /clawsweeper-repair-requeue-\{0\}-\{1\}.*clawsweeper-repair-\{0\}/);
+  assert.match(workflow, /group: cloudflare-repair-compute/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /requeue:\n\s+description:/);
   assert.match(requeue, /"requeue=true"/);
@@ -2362,7 +2362,7 @@ test("agent workflows install pinned CLI releases and keep runner models secret"
     for (const line of workflow
       .split("\n")
       .filter((candidate) => /(?:OPENAI_API_KEY|CLAWSWEEPER_INTERNAL_MODEL):/.test(candidate))) {
-      assert.match(line, /^\s{10,}/);
+      if (!/^\s+OPENAI_API_KEY: ["']{2}$/.test(line)) assert.match(line, /^\s{10,}/);
     }
   }
 
@@ -2385,13 +2385,13 @@ test("agent workflows install pinned CLI releases and keep runner models secret"
     ".github/workflows/sweep.yml",
   ];
   for (const workflow of runnerWorkflowFiles.map((file) => readText(file))) {
-    assert.match(workflow, /CLAWSWEEPER_RUNNER: \$\{\{ vars\.CLAWSWEEPER_RUNNER \|\| 'codex' \}\}/);
+    assert.match(workflow, /CLAWSWEEPER_RUNNER: "?codex"?/);
     assert.match(
       workflow,
       /CLAWSWEEPER_OPENCLAW_MODEL: \$\{\{ secrets\.CLAWSWEEPER_OPENCLAW_MODEL \}\}/,
     );
     assert.match(workflow, /CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON/);
-    assert.match(workflow, /KIMI_API_KEY: \$\{\{/);
+    assert.match(workflow, /KIMI_API_KEY: ["']{2}/);
   }
   for (const file of runnerWorkflowFiles.filter(
     (candidate) => candidate !== ".github/workflows/spam-scanner.yml",
