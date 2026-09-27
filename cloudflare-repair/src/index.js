@@ -16,6 +16,13 @@ export default {
       await getSandbox(env.Sandbox, body.name).destroy();
       return Response.json({stopped:true});
     }
+    if (url.pathname === '/runner-progress' && request.method === 'POST') {
+      const body = await request.json();
+      if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
+      const runner = getSandbox(env.Sandbox, body.name, {sleepAfter:'3h'});
+      const result = await runner.exec("python3 -c 'import glob,json,os,time\nrows=[]\nfor p in glob.glob('\"'\"'/opt/actions-runner/_work/clawsweeper/clawsweeper/.clawsweeper-repair/runs/*/fix-execution/*'\"'\"')[:80]:\n if not os.path.isfile(p) or not p.endswith(('\"'\"'.jsonl'\"'\"','\"'\"'.stderr.log'\"'\"')): continue\n stat=os.stat(p)\n row={'\"'\"'file'\"'\"':os.path.basename(p),'\"'\"'bytes'\"'\"':stat.st_size,'\"'\"'ageSeconds'\"'\"':round(time.time()-stat.st_mtime)}\n with open(p,'\"'\"'rb'\"'\"') as f:\n  f.seek(max(0,stat.st_size-65536)); tail=f.read(65536).decode('\"'\"'utf-8'\"'\"','\"'\"'replace'\"'\"')\n if p.endswith('\"'\"'.jsonl'\"'\"'):\n  events=[]\n  for line in tail.splitlines()[-30:]:\n   try:\n    e=json.loads(line); t=e.get('\"'\"'type'\"'\"','\"'\"''\"'\"'); item=e.get('\"'\"'item'\"'\"',{}).get('\"'\"'type'\"'\"','\"'\"''\"'\"')\n    if t in ['\"'\"'thread.started'\"'\"','\"'\"'turn.started'\"'\"','\"'\"'turn.completed'\"'\"','\"'\"'turn.failed'\"'\"','\"'\"'item.started'\"'\"','\"'\"'item.completed'\"'\"','\"'\"'error'\"'\"']: events.append({'\"'\"'type'\"'\"':t,'\"'\"'itemType'\"'\"':item if item in ['\"'\"'command_execution'\"'\"','\"'\"'agent_message'\"'\"','\"'\"'reasoning'\"'\"','\"'\"'file_change'\"'\"','\"'\"'mcp_tool_call'\"'\"','\"'\"'web_search'\"'\"','\"'\"'todo_list'\"'\"','\"'\"'error'\"'\"'] else '\"'\"'other'\"'\"'})\n   except Exception: pass\n  row['\"'\"'events'\"'\"']=events[-8:]\n row['\"'\"'usageLimitSignal'\"'\"']='\"'\"'usage limit'\"'\"' in tail.lower() or '\"'\"'usage_limit_reached'\"'\"' in tail.lower()\n row['\"'\"'authErrorSignal'\"'\"']='\"'\"'unauthorized'\"'\"' in tail.lower() or '\"'\"'401 unauthorized'\"'\"' in tail.lower()\n row['\"'\"'networkErrorSignal'\"'\"']='\"'\"'connection refused'\"'\"' in tail.lower() or '\"'\"'stream disconnected'\"'\"' in tail.lower()\n rows.append(row)\nprint(json.dumps({'\"'\"'files'\"'\"':rows}))\n'", {timeout:15000});
+      return Response.json({exitCode:result.exitCode, progress:result.stdout});
+    }
     if (url.pathname === '/runner-status' && request.method === 'POST') {
       const body = await request.json();
       if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
