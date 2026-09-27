@@ -33,13 +33,14 @@ new_sqlite_classes = ["ExactReviewQueue"]
 CLAWSWEEPER_REPO = "AyobamiH/clawsweeper"
 CLAWSWEEPER_APP_CLIENT_ID = "Iv23li7FTsSTorJDMkdQ"
 CLAWSWEEPER_CRABFLEET_URL = "https://crabfleet.openclaw.ai"
-TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops"
+TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops,AyobamiH/wagging-web-wins"
 # Explicit public-only allowlist for canonical repository + issue/PR references
 # rendered in the dashboard. Repositories must be verified public before addition.
 PUBLIC_BAY_REPOS = "AyobamiH/openclaw-operator"
 APPLY_TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops"
 APPLY_OPTIONAL_TARGET_REPOS = ""
 CLAWSWEEPER_ENABLE_CLAWHUB = "0"
+EXACT_REVIEW_ALLOWED_TARGET_REPOS = "AyobamiH/openclaw-operator,AyobamiH/openclaw-ops,AyobamiH/wagging-web-wins"
 WORKER_BUDGET = "128"
 EXACT_REVIEW_ACTIONS_BUDGET = "194"
 WORKER_DETAIL_RUN_LIMIT = "128"

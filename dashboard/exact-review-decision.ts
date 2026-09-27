@@ -853,6 +853,14 @@ export function isExactReviewQueueTargetEnabled(
   decision: ExactReviewDecision,
   env: Record<string, unknown>,
 ) {
+  const configured = env.EXACT_REVIEW_ALLOWED_TARGET_REPOS;
+  if (configured !== undefined) {
+    const allowed = String(configured)
+      .split(",")
+      .map((repo) => repo.trim().toLowerCase())
+      .filter(Boolean);
+    if (!allowed.includes(decision.targetRepo.trim().toLowerCase())) return false;
+  }
   return (
     decision.targetRepo !== "openclaw/clawhub" ||
     String(env.CLAWSWEEPER_ENABLE_CLAWHUB || "") === "1"

@@ -3994,9 +3994,24 @@ export class ExactReviewQueue {
       exactReviewPublicationDispatchLeaseMs(this.env),
       exactReviewHeartbeatGraceMs(this.env),
     );
+    // Scope reductions retire queued work before any target preflight. Historical
+    // records remain intact; already leased work keeps its completion fence.
+    let excludedPending = false;
+    for (const [key, item] of Object.entries(snapshot.items) as Array<
+      [string, ExactReviewQueueItem]
+    >) {
+      if (
+        (item.state === "pending" || item.state === "parked") &&
+        !isExactReviewQueueTargetEnabled(item.decision, this.env)
+      ) {
+        delete snapshot.items[key];
+        excludedPending = true;
+      }
+    }
     const recoveredParkedSnapshot = recoverParkedExactReviewItems(snapshot, startedAt);
     const expiredSnapshot = expireExactReviewPublicationItems(snapshot, startedAt, this.env);
-    let snapshotChanged = reclaimedSnapshot || recoveredParkedSnapshot > 0 || expiredSnapshot;
+    let snapshotChanged =
+      excludedPending || reclaimedSnapshot || recoveredParkedSnapshot > 0 || expiredSnapshot;
     if (
       snapshot.dispatcher?.publicationBatchTerminalProbe &&
       Number(snapshot.dispatcher.publicationBatchDispatchPendingUntil || 0) <= startedAt
