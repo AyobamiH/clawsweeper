@@ -2,7 +2,7 @@ name: Provision Cloudflare repair compute
 on:
   push:
     branches: [ops/cloudflare-compute-inventory]
-    paths: [cloudflare-repair/**, .github/workflows/cloudflare-repair-provision.yml]
+    paths: [.github/workflows/cloudflare-repair-provision.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -97,6 +97,7 @@ jobs:
     steps:
       - name: Prove Cloudflare runner execution and containment
         run: |
+          command -v gh rg bwrap
           test -f /sandbox
           node /opt/clawsweeper/dist/repair/containment-preflight.js
           echo 'Cloudflare ephemeral GitHub runner executed the real containment preflight.'

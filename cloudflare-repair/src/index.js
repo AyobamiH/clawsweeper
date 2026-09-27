@@ -10,6 +10,12 @@ export default {
     if (!env.PROBE_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.PROBE_TOKEN}`) {
       return new Response('Unauthorized', {status:401});
     }
+    if (url.pathname === '/runner' && request.method === 'DELETE') {
+      const body = await request.json();
+      if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
+      await getSandbox(env.Sandbox, body.name).destroy();
+      return Response.json({stopped:true});
+    }
     if (url.pathname === '/runner-status' && request.method === 'POST') {
       const body = await request.json();
       if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
