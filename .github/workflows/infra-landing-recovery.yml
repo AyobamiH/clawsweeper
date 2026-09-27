@@ -1,0 +1,44 @@
+name: Retire stalled pre-landing compute proof
+on:
+  push:
+    branches: [ops/infra-landing-recovery]
+    paths: [.github/workflows/infra-landing-recovery.yml]
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded recovery credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-actions: write
+          permission-administration: write
+      - name: Fence obsolete revisions, destroy their runners, then release the queue
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          gh api repos/AyobamiH/clawsweeper/actions/runs/36354651841 > "$RUNNER_TEMP/stalled.json"
+          jq -e '.head_branch == "ops/cloudflare-compute-inventory" and .head_sha == "21a9c07ac88400ef72e66fff7d8875094e55bc4e"' "$RUNNER_TEMP/stalled.json" >/dev/null
+          gh api repos/AyobamiH/clawsweeper/actions/runs/36354837886 > "$RUNNER_TEMP/obsolete.json"
+          jq -e '.head_branch == "ops/cloudflare-compute-inventory" and .head_sha == "15d0a5aed480db3b8973fd915ef587ed67858b51"' "$RUNNER_TEMP/obsolete.json" >/dev/null
+          if ! jq -e '.status == "completed"' "$RUNNER_TEMP/obsolete.json" >/dev/null; then
+            gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/36354837886/cancel
+          fi
+          if ! jq -e '.status == "completed"' "$RUNNER_TEMP/stalled.json" >/dev/null; then
+            GITHUB_RUN_ID=36354651841 GITHUB_RUN_ATTEMPT=1 RUNNER_OPERATION=stop bash .github/actions/cloudflare-runners/lifecycle.sh
+            gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/36354651841/force-cancel
+          fi
