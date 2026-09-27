@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: write
 concurrency:
   group: cloudflare-repair-provision
   cancel-in-progress: false
@@ -14,6 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Cancel obsolete Blacksmith repair attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state="$(gh api repos/AyobamiH/clawsweeper/actions/runs/36317975019 --jq .status)"
+          if [ "$state" != completed ]; then
+            gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/36317975019/cancel
+          fi
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -38,7 +47,7 @@ jobs:
           probe_token="$(openssl rand -hex 32)"
           echo "::add-mask::$probe_token"
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
-          curl --fail --silent --show-error --retry 3 --retry-delay 10 --max-time 180 \
+          curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 \
             --request POST --header "Authorization: Bearer $probe_token" \
             https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/probe \
             --output "$RUNNER_TEMP/cloudflare-containment-proof.json"
