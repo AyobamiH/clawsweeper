@@ -16,6 +16,13 @@ export default {
       await getSandbox(env.Sandbox, body.name).destroy();
       return Response.json({stopped:true});
     }
+    if (url.pathname === '/repair-proof' && request.method === 'POST') {
+      const body = await request.json();
+      if (body.name !== 'csw-72b73dc32d9b59b2-execute') return new Response('Invalid request', {status:400});
+      const result = await getSandbox(env.Sandbox, body.name).exec("python3 -c 'import glob,json,os,hashlib,subprocess\nfiles={}\nfor root in glob.glob('\"'\"'/tmp/pr10-*'\"'\"'):\n if os.path.realpath(root)!=root or not os.path.isdir(root): continue\n for name in ['\"'\"'instagram.json'\"'\"','\"'\"'instagram.log'\"'\"','\"'\"'graph-production-adapters.json'\"'\"','\"'\"'graph-production-adapters.log'\"'\"']:\n  p=os.path.join(root,name)\n  if os.path.realpath(p)!=p or not os.path.isfile(p) or os.path.getsize(p)>2000000: continue\n  data=open(p,'\"'\"'rb'\"'\"').read(); files[p]={'\"'\"'sha256'\"'\"':hashlib.sha256(data).hexdigest(),'\"'\"'content'\"'\"':data.decode('\"'\"'utf-8'\"'\"','\"'\"'replace'\"'\"')}\nbindings=[]\nfor root in glob.glob('\"'\"'/tmp/clawsweeper-repair-target-*/AyobamiH-openclaw-operator'\"'\"'):\n if os.path.realpath(root)!=root: continue\n b={'\"'\"'head'\"'\"':subprocess.check_output(['\"'\"'git'\"'\"','\"'\"'rev-parse'\"'\"','\"'\"'HEAD'\"'\"'],cwd=root,text=True).strip(),'\"'\"'inputs'\"'\"':{}}\n for p in ['\"'\"'orchestrator/src/graph/production-adapters.ts'\"'\"','\"'\"'orchestrator/test/graph-production-adapters.test.ts'\"'\"','\"'\"'orchestrator/package-lock.json'\"'\"']:\n  data=open(os.path.join(root,p),'\"'\"'rb'\"'\"').read();b['\"'\"'inputs'\"'\"'][p]=hashlib.sha256(data).hexdigest()\n bindings.append(b)\nprint(json.dumps({'\"'\"'bindings'\"'\"':bindings,'\"'\"'files'\"'\"':files}))\n'", {timeout:15000});
+      if (result.exitCode !== 0) return Response.json({error:'Proof collection failed'}, {status:500});
+      return new Response(result.stdout, {headers:{'Content-Type':'application/json'}});
+    }
     if (url.pathname === '/runner-progress' && request.method === 'POST') {
       const body = await request.json();
       if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
