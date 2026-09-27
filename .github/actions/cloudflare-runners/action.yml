@@ -1,0 +1,21 @@
+name: Bounded Cloudflare repair runners
+description: Start or destroy this workflow run's two ephemeral Cloudflare runners.
+inputs:
+  operation:
+    description: start or stop
+    required: true
+outputs:
+  plan:
+    description: Unique planning runner label
+    value: ${{ steps.lifecycle.outputs.plan }}
+  execute:
+    description: Unique execution runner label
+    value: ${{ steps.lifecycle.outputs.execute }}
+runs:
+  using: composite
+  steps:
+    - id: lifecycle
+      shell: bash
+      env:
+        RUNNER_OPERATION: ${{ inputs.operation }}
+      run: bash "${{ github.action_path }}/lifecycle.sh"

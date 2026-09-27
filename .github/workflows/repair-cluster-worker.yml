@@ -87,6 +87,9 @@ permissions:
 
 env:
   CLAWSWEEPER_REVIEW_REPO: ${{ github.repository }}
+  OPENAI_API_KEY: ""
+  CODEX_API_KEY: ""
+  PROXY_API_KEY: ""
   CLAWSWEEPER_QUOTA_ENABLED: "1"
   CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
   CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -116,7 +119,7 @@ env:
   CLUSTER_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 concurrency:
-  group: ${{ inputs.requeue && format('clawsweeper-repair-requeue-{0}-{1}', inputs.job, github.run_id) || format('clawsweeper-repair-{0}', inputs.job) }}
+  group: cloudflare-repair-compute
   # Keep an active execute run alive so its temporary gate cleanup can finish;
   # GitHub still coalesces pending runs in this group to the newest dispatch.
   cancel-in-progress: false
@@ -173,11 +176,43 @@ jobs:
           fi
           echo "proceed=true" >> "$GITHUB_OUTPUT"
 
-  cluster:
-    name: Plan and review cluster
+  provision:
+    name: Provision ephemeral Cloudflare repair compute
     needs: receipt
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.runners.outputs.plan }}
+      execute: ${{ steps.runners.outputs.execute }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+
+  cluster:
+    name: Plan and review cluster
+    needs: [receipt, provision]
+    if: ${{ needs.receipt.outputs.proceed == 'true' }}
+    runs-on: ${{ needs.provision.outputs.plan }}
     timeout-minutes: 90
     outputs:
       allow_execute: ${{ steps.capture_gates.outputs.allow_execute }}
@@ -467,9 +502,9 @@ jobs:
 
   execute:
     name: Execute and apply cluster actions
-    needs: cluster
+    needs: [cluster, provision]
     if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run }}
-    runs-on: ${{ inputs.execution_runner }}
+    runs-on: ${{ needs.provision.outputs.execute }}
     timeout-minutes: 120
     permissions:
       actions: read
@@ -985,3 +1020,32 @@ jobs:
             --session-id "$AUTOMERGE_SESSION_ID" \
             --run-url "$AUTOMERGE_RUN_URL" \
             --run-conclusion failure
+
+  cleanup:
+    name: Destroy ephemeral Cloudflare repair compute
+    needs: [receipt, provision, cluster, execute]
+    if: ${{ always() && needs.receipt.outputs.proceed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"

@@ -21,12 +21,12 @@ on:
       runner:
         description: "Runner label for repair planning/review work"
         required: false
-        default: blacksmith-4vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       execution_runner:
         description: "Runner label for fix/apply execution work"
         required: false
-        default: blacksmith-16vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       model:
         description: "Internal Codex model alias"
@@ -50,7 +50,7 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
-  CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+  CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
   CLAWSWEEPER_MODEL: internal
   CLAWSWEEPER_GIT_USER_NAME: ${{ vars.CLAWSWEEPER_GIT_USER_NAME || 'clawsweeper[bot]' }}
   CLAWSWEEPER_GIT_USER_EMAIL: ${{ vars.CLAWSWEEPER_GIT_USER_EMAIL || '274271284+clawsweeper[bot]@users.noreply.github.com' }}
@@ -62,7 +62,7 @@ concurrency:
 jobs:
   intake:
     if: ${{ github.event_name != 'schedule' || vars.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1' }}
-    runs-on: ${{ github.event.inputs.runner || vars.CLAWSWEEPER_CLUSTER_REPAIR_INTAKE_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Create central GitHub App token
@@ -71,7 +71,7 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
+          owner: AyobamiH
           repositories: clawsweeper
           permission-actions: write
           permission-contents: read
@@ -82,7 +82,7 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
+          owner: AyobamiH
           repositories: gitcrawl-store
           permission-contents: read
 
@@ -90,7 +90,7 @@ jobs:
         id: target
         env:
           TARGET_REPO: ${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_CLUSTER_REPAIR_TARGET_REPO || 'openclaw/openclaw' }}
-          ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+          ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
         run: |
           set -euo pipefail
           # CLAWSWEEPER_ALLOWED_OWNER is a comma- or whitespace-separated owner
@@ -182,8 +182,8 @@ jobs:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_REPO: openclaw/clawsweeper
           CLAWSWEEPER_DISPATCH_REF: ${{ github.ref_name }}
-          CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-          CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+          CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
+          CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}
         run: pnpm run repair:publish-cluster-intake -- --recover
 
       - uses: actions/checkout@v7
@@ -313,8 +313,8 @@ jobs:
           STORE_SHA: ${{ steps.prepare.outputs.store_sha }}
           EXPORTED_AT: ${{ steps.prepare.outputs.exported_at }}
           MANIFEST_PATH: ${{ steps.prepare.outputs.manifest_path }}
-          WORKER_RUNNER: ${{ github.event.inputs.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-          EXECUTION_RUNNER: ${{ github.event.inputs.execution_runner || vars.CLAWSWEEPER_EXECUTION_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+          WORKER_RUNNER: ${{ github.event.inputs.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
+          EXECUTION_RUNNER: ${{ github.event.inputs.execution_runner || vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}
           MODEL: internal
         run: |
           set -euo pipefail
@@ -378,8 +378,8 @@ jobs:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_REPO: openclaw/clawsweeper
           CLAWSWEEPER_DISPATCH_REF: ${{ github.ref_name }}
-          CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-          CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+          CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
+          CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}
         run: |
           set -euo pipefail
           pnpm run repair:publish-cluster-intake -- .artifacts/cluster-repair-intake/intent.json

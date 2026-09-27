@@ -4,11 +4,8 @@ import test from "node:test";
 
 const workflow = fs.readFileSync(".github/workflows/repair-containment-smoke.yml", "utf8");
 
-test("containment smoke uses two production-class runner samples", () => {
-  assert.match(
-    workflow,
-    /runs-on: \$\{\{ vars\.CLAWSWEEPER_E2E_RUNNER \|\| 'blacksmith-16vcpu-ubuntu-2404' \}\}/,
-  );
+test("containment smoke uses two GitHub-hosted regression samples; Cloudflare proof owns production compute", () => {
+  assert.match(workflow, /runs-on: ubuntu-latest/);
   assert.match(workflow, /max-parallel: 2/);
   assert.match(workflow, /sample: \[1, 2\]/);
   assert.match(workflow, /run: pnpm run repair:containment-smoke/);
