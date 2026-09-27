@@ -39,6 +39,16 @@ jobs:
             gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/36354837886/cancel
           fi
           if ! jq -e '.status == "completed"' "$RUNNER_TEMP/stalled.json" >/dev/null; then
-            GITHUB_RUN_ID=36354651841 GITHUB_RUN_ATTEMPT=1 RUNNER_OPERATION=stop bash .github/actions/cloudflare-runners/lifecycle.sh
+            GITHUB_RUN_ID=36354651841 GITHUB_RUN_ATTEMPT=1 RUNNER_OPERATION=stop bash .github/actions/cloudflare-runners/lifecycle.sh || echo 'Runner registration cleanup will finish after job cancellation'
             gh api --method POST repos/AyobamiH/clawsweeper/actions/runs/36354651841/force-cancel
           fi
+          for attempt in $(seq 1 12); do
+            ids="$(gh api repos/AyobamiH/clawsweeper/actions/runners --jq '.runners[] | select(.name == "csw-951e7a5db3fc2c53-execute" or .name == "csw-951e7a5db3fc2c53-plan") | .id')"
+            [ -n "$ids" ] || exit 0
+            while read -r runner_id; do
+              gh api --method DELETE "repos/AyobamiH/clawsweeper/actions/runners/$runner_id" || true
+            done <<< "$ids"
+            sleep 5
+          done
+          echo "Obsolete registration did not clear after cancellation" >&2
+          exit 1
