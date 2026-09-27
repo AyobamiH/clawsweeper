@@ -29,7 +29,7 @@ jobs:
         printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
         for fixture_runner_name in csw-a7503b890dd4358c-execute csw-81b7244144ef7dc0-execute; do
         jq -n --arg name "$fixture_runner_name" '{name:$name}' > "$RUNNER_TEMP/cleanup.json"
-        curl --fail-with-body --silent --show-error --retry 2 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+        curl --fail-with-body --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
 
         cat "$RUNNER_TEMP/cleanup-response.json"
         done
