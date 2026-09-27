@@ -72,6 +72,16 @@ jobs:
           payload="$RUNNER_TEMP/runner-start.json"
           jq -n --arg name "$runner_name" --arg jit "$registration" '{name:$name,jit:$jit}' > "$payload"
           curl --fail --silent --show-error --max-time 180 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+          for attempt in $(seq 1 12); do
+            runner_status="$(gh api repos/AyobamiH/clawsweeper/actions/runners --jq ".runners[] | select(.name == \"$runner_name\") | .status")"
+            if [ "$runner_status" = online ]; then break; fi
+            sleep 5
+          done
+          if [ "$runner_status" != online ]; then
+            jq -n --arg name "$runner_name" '{name:$name}' > "$payload"
+            curl --fail --silent --show-error --max-time 90 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner-status
+            exit 1
+          fi
           rm -f "$payload"
       - uses: actions/upload-artifact@v7
         if: always()

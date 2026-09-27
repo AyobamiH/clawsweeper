@@ -14,16 +14,15 @@ export default {
       const body = await request.json();
       if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '')) return new Response('Invalid request', {status:400});
       const runner = getSandbox(env.Sandbox, body.name, {sleepAfter:'3h'});
-      const process = await runner.getProcess('github-runner');
-      const logs = await runner.getProcessLogs('github-runner');
-      return Response.json({status:process?.status, exitCode:process?.exitCode, stdout:logs.stdout.slice(-4000), stderr:logs.stderr.slice(-4000)});
+      const logs = await runner.exec('tail -c 4000 /tmp/runner.log 2>/dev/null || true');
+      return Response.json({stdout:logs.stdout, stderr:logs.stderr});
     }
     if (url.pathname === '/runner' && request.method === 'POST') {
       const body = await request.json();
       if (!/^csw-[a-f0-9]{16}-(plan|execute)$/.test(body.name ?? '') || !/^[A-Za-z0-9+/=]{100,50000}$/.test(body.jit ?? '')) return new Response('Invalid request', {status:400});
       const runner = getSandbox(env.Sandbox, body.name, {sleepAfter:'3h'});
       await runner.writeFile('/tmp/runner-jit', body.jit);
-      await runner.startProcess('/opt/start-runner.sh', {id:'github-runner'});
+      await runner.startProcess('/opt/start-runner.sh', {processId:'github-runner',autoCleanup:false});
       return Response.json({started:true,name:body.name});
     }
     if (url.pathname !== '/probe' || request.method !== 'POST') {

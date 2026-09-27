@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+exec >>/tmp/runner.log 2>&1
 export RUNNER_ALLOW_RUNASROOT=1
 cd /opt/actions-runner
 trap 'rm -f /tmp/runner-jit' EXIT
