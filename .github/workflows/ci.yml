@@ -23,6 +23,10 @@ concurrency:
 jobs:
   hosted-review-scan:
     name: Hosted native review scan smoke
+    env:
+      CLAWSWEEPER_QUOTA_ENABLED: "1"
+      CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+      CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
     if: >-
       ${{ github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'pull_request' &&

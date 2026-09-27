@@ -6,6 +6,8 @@ name: Provision and prove Cloudflare repair compute
       - ops/cloudflare-compute-inventory
     paths:
       - .github/workflows/cloudflare-repair-provision.yml
+      - .github/actions/cloudflare-runners/**
+      - cloudflare-repair/**
 permissions:
   contents: read
 concurrency:
