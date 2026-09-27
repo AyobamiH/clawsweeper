@@ -66,58 +66,23 @@ The code defaults review/audit lanes on and mutation lanes off. An owner-level
 This means adding a repository to the inventory can safely give it review/audit
 coverage without silently granting write behaviour.
 
-The current self-hosted policy explicitly enables apply, comment sync, and
-failed-review retry for `AyobamiH/openclaw-operator` and
-`AyobamiH/openclaw-ops`. Idea-archive revival is enabled only for
-`AyobamiH/openclaw-operator`.
+The current self-hosted deployment has three active work targets:
+`AyobamiH/openclaw-operator`, `AyobamiH/openclaw-ops`, and
+`AyobamiH/wagging-web-wins`. All other scheduled inventory entries have been
+removed. The AyobamiH generic fallback matches only `wagging-web-wins`; other owner
+automation is disabled. Inactive compatibility profiles describe engine behaviour only; they
+are not enrolled targets and do not authorise work.
 
-### GTM vault fleet
-
-The owner's current Google Drive GTM vault resolves to 22 distinct source
-repositories. Twenty-one `AyobamiH/*` GTM repositories are currently enrolled
-in `target_inventory.allow_repositories`. The separate
-`OneClickPostFactory/social-agents` organisation repository is deliberately
-deferred until its ClawSweeper App installation is configured. The pre-existing
-private `AyobamiH/openclaw-ops` target remains enrolled, so the active managed
-allowlist contains 22 repositories.
-
-- Proof & State: `AyobamiH/proof-and-state`,
-  `AyobamiH/proof-and-state-website`, `AyobamiH/donestate`,
-  `AyobamiH/opstruth-chatgpt-plugin`, `AyobamiH/opstruth`,
-  `AyobamiH/agentproof`
-- post-once: `AyobamiH/post-once`
-- OneClickPostFactory: `AyobamiH/oneclickpostfactory`; the separate
-  `OneClickPostFactory/social-agents` worker is deferred from active fleet
-  membership until the ClawSweeper App is installed for that organisation
-- Tail Wagging Websites: `AyobamiH/wagging-web-wins`
-- Agent Shop Products: `AyobamiH/agent-shop-products`
-- Public Decision Intelligence: `AyobamiH/public-decision-intelligence`
-- Capability Intelligence: `AyobamiH/capability-intelligence`
-- Relay Live Business Engagement:
-  `AyobamiH/relay-live-business-engagement-connector`
-- OpenClaw Operator: `AyobamiH/openclaw-operator`
-- One Click for ChatGPT: `AyobamiH/oneclick-chatgpt-plugin`
-- Lovable Architecture Auditor:
-  `AyobamiH/founders-oneclickwebsitedesignfactory`
-- Global Bill Forge: `AyobamiH/global-bill-forge`
-- Coding Agent Skills: `AyobamiH/coding-agent-skills`
-- AgroLink Nigeria: `AyobamiH/ng-agro-connect`
-- PostSteward: `AyobamiH/poststeward`
-- ParcelBasis / Tax Lien Intelligence:
-  `AyobamiH/tax-lien-intelligence-platform`
-
-GTM fleet onboarding is deliberately conservative. The active `AyobamiH`
-generic profile enables hot intake, normal review and audit, but keeps apply,
-comment sync, failed-review retry and idea revival off. A dormant
-`OneClickPostFactory` generic profile remains available for the deferred
-organisation repo when it is later installed and enrolled.
-Generic live tests are also disabled. Before mutation lanes are enabled for a
-newly enrolled repo, give it an explicit profile with its verified native
-toolchain and live-test setup.
-
-The two existing full-automation OpenClaw targets are explicit profiles and use
-their observed npm lockfiles: `npm ci` is the live-test setup for both
-`AyobamiH/openclaw-operator` and `AyobamiH/openclaw-ops`.
+The Worker exact-review admission allowlist and dashboard targets contain the
+same three repositories. Apply remains enabled only for `openclaw-operator` and
+`openclaw-ops`; `wagging-web-wins` retains review/audit-only permissions. Previously queued excluded
+targets are retired before target preflight; already leased work may finish.
+Historical review records are retained. GitHub App installation access must be
+reduced separately in the account installation settings. Keep service repository
+access needed for dispatch (`AyobamiH/clawsweeper`) and operational state
+(`AyobamiH/clawsweeper-state`); access does not enrol either as a work target.
+The owner explicitly retains `clawsweeper-state` as the fourth repository in
+the service scope, with no review or repair work targeting that state store.
 
 Configuration is necessary but not sufficient authority: the ClawSweeper
 GitHub App must also be installed on every target repository. Config answers
@@ -130,6 +95,11 @@ that policy remains part of the review engine. Separately, the
 `openclaw/clawhub` source repository can itself be a ClawSweeper target when
 the operator has installed the App there and explicitly enrolled it. Fleet
 configuration must not conflate those two roles.
+
+`EXACT_REVIEW_ALLOWED_TARGET_REPOS` is the deployed exact-review allowlist.
+An explicitly empty value denies all targets; omitting it retains compatibility
+for other deployments. Admission and pending-queue retirement use this same
+policy. Keep it aligned with the scheduled inventory when reducing scope.
 
 `PUBLIC_BAY_REPOS` is a separate public-output allowlist for the minimal
 repository/item reference cards shown by OpenClaw Bay and Overview. Add a

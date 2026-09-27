@@ -246,7 +246,7 @@
     {
       "owner": "AyobamiH",
       "deny_repositories": ["AyobamiH/clawsweeper-state", "AyobamiH/.github"],
-      "allow_repo_name_pattern": "^[A-Za-z0-9_.-]+$",
+      "allow_repo_name_pattern": "^wagging-web-wins$",
       "prompt_note": "Use the {target_repo} source tree and current default branch. This repository is using John's generic ClawSweeper onboarding profile, so keep review conservative: issues and pull requests may be auto-closed only when the exact change is certainly already implemented on the default branch; pull requests may also be age-gated mostly implemented there. Before making product-direction, architecture, ownership, or scope judgments, read the target repository root VISION.md when present. Treat VISION.md as durable intent; use code, runtime configuration, tests, and evidence for implementation truth, and surface conflicts instead of guessing. Relationship notes are context, not cross-repository authority: ClawSweeper remains a repository-level specialist and must not coordinate or mutate sibling repositories merely because VISION.md names them.",
       "apply_close_rules": {
         "issue": ["implemented_on_main"],
@@ -292,9 +292,9 @@
         "max_recording_seconds": 90
       },
       "automation": {
-        "hot_intake": true,
-        "normal_review": true,
-        "audit": true,
+        "hot_intake": false,
+        "normal_review": false,
+        "audit": false,
         "apply": false,
         "failed_review_retry": false,
         "idea_archive_revival": false,
@@ -366,26 +366,7 @@
     "allow_repositories": [
       "AyobamiH/openclaw-operator",
       "AyobamiH/openclaw-ops",
-      "AyobamiH/proof-and-state",
-      "AyobamiH/proof-and-state-website",
-      "AyobamiH/donestate",
-      "AyobamiH/opstruth-chatgpt-plugin",
-      "AyobamiH/opstruth",
-      "AyobamiH/agentproof",
-      "AyobamiH/post-once",
-      "AyobamiH/oneclickpostfactory",
-      "AyobamiH/wagging-web-wins",
-      "AyobamiH/agent-shop-products",
-      "AyobamiH/public-decision-intelligence",
-      "AyobamiH/capability-intelligence",
-      "AyobamiH/relay-live-business-engagement-connector",
-      "AyobamiH/oneclick-chatgpt-plugin",
-      "AyobamiH/founders-oneclickwebsitedesignfactory",
-      "AyobamiH/global-bill-forge",
-      "AyobamiH/coding-agent-skills",
-      "AyobamiH/ng-agro-connect",
-      "AyobamiH/poststeward",
-      "AyobamiH/tax-lien-intelligence-platform"
+      "AyobamiH/wagging-web-wins"
     ],
     "deny_repositories": ["AyobamiH/clawsweeper-state", "AyobamiH/.github"],
     "include_private": true,

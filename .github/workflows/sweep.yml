@@ -677,8 +677,9 @@ jobs:
           const targetSlug = targetRepo.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-");
           const checkoutDir = targetRepo === process.env.GITHUB_REPOSITORY ? `${name}-target` : name;
           const hasCommandContext = Boolean(decision.commandStatusMarker || decision.statusCommentId);
-          const targetEnabled =
-            targetRepo !== "openclaw/clawhub" || process.env.CLAWHUB_ENABLED === "1";
+          const inventory = JSON.parse(fs.readFileSync("config/target-repositories.json", "utf8")).target_inventory;
+          const targetEnabled = inventory.allow_repositories.some((repo) => repo.toLowerCase() === targetRepo.toLowerCase()) &&
+            (targetRepo !== "openclaw/clawhub" || process.env.CLAWHUB_ENABLED === "1");
           const output = {
             target_repo: targetRepo,
             target_repo_owner: owner,

@@ -108,11 +108,53 @@ try {
   const recovered = await invoke();
   assert.equal(recovered.status, 0);
   assert.equal(readFileSync(calls, "utf8"), "1111");
+  // A changed/restored subscription must not remain trapped behind an old
+  // weekly reset. Exercise the real observer client during that cooldown.
+  clock += 16 * 60_000;
+  const staleProbe = quotaRequest(storage, { action: "refresh", sentAt: clock }, clock);
+  quotaRequest(
+    storage,
+    {
+      action: "observe",
+      probeId: staleProbe.probeId,
+      windows: [{ remainingPercent: 0, windowMinutes: 10080, resetsAt: clock + 7 * 86400_000 }],
+      sentAt: clock,
+    },
+    clock,
+  );
+  const oldReset = readQuota(storage).blockedUntil;
+  clock += 16 * 60_000;
+  assert.equal((await invoke()).status, 75);
+  const refresh = await new Promise((resolvePromise, reject) => {
+    const moduleUrl = process.env.CLAWSWEEPER_PROOF_DIST
+      ? pathToFileURL(join(process.env.CLAWSWEEPER_PROOF_DIST, "subscription-quota-client.js")).href
+      : new URL("../dist/subscription-quota-client.js", import.meta.url).href;
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import {admitSubscription} from ${JSON.stringify(moduleUrl)}; console.log(JSON.stringify(await admitSubscription(process.env,true)));`,
+      ],
+      { env },
+    );
+    let output = "";
+    child.stdout.on("data", (c) => (output += c));
+    child.stderr.on("data", () => {});
+    child.on("error", reject);
+    child.on("close", () => resolvePromise(JSON.parse(output)));
+  });
+  assert.equal(refresh, true);
+  assert.ok(clock < oldReset);
+  assert.equal(readFileSync(calls, "utf8"), "1111");
+  assert.equal(readQuota(storage).blockedUntil, 0);
   const report = {
     scenario: "two repository processes, shared persistent SQLite quota",
     healthyConcurrentStarts: 3,
     blockedConcurrentStarts: 0,
     afterResetStarts: 1,
+    staleCooldownReplacedBeforeOldReset: true,
+    observerRefreshModelStarts: 0,
     state: quotaView(readQuota(storage), clock),
     limits:
       "Real HTTP/HMAC, SQLite, app-server protocol and native process guard. Synthetic allowance/model executables and controlled clock; no live quota exhaustion or production queue mutation.",
