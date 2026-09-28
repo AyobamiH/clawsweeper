@@ -1,0 +1,17 @@
+name: PR51 format probe
+on:
+  push:
+    branches: [fix/fallback-aware-exact-review-admission-20260928]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pnpm
+      - name: Format fallback regression and print diff
+        run: |
+          pnpm exec oxfmt test/subscription-quota.test.ts
+          echo '===DIFF==='
+          git diff -- test/subscription-quota.test.ts
