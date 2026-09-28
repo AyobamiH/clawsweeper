@@ -215,7 +215,12 @@ jobs:
       # The label endpoint is served under /issues but still requires
       # pull-requests write when the item is a pull request; issues write alone
       # escalates issues and 403s every pull-request escalation.
+      # This cleanup lane is specifically for upstream openclaw/openclaw placeholders.
+      # Keep it out of the core lease reconciler unless upstream maintenance is
+      # explicitly authorised; otherwise an un-enrolled external repository can
+      # turn healthy AyobamiH exact-review reconciliation red.
       - name: Create target write token
+        if: ${{ vars.CLAWSWEEPER_ENABLE_UPSTREAM_OPENCLAW_PLACEHOLDER_RECOVERY == '1' }}
         id: target-write-token
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -228,6 +233,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Recover orphaned review placeholders
+        if: ${{ vars.CLAWSWEEPER_ENABLE_UPSTREAM_OPENCLAW_PLACEHOLDER_RECOVERY == '1' }}
         env:
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           GH_TOKEN: ${{ github.token }}
