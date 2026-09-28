@@ -129,6 +129,8 @@ test("result publication mints its reader token from resolved targets, not a fix
   // The ClawSweeper app token needs read access only; state publication uses
   // the state credential, and the target reader is minted per validated target.
   assert.doesNotMatch(workflow, /permission-contents: write/);
+  assert.match(workflow, /--root jobs\s*\\/);
+  assert.doesNotMatch(workflow, /--root jobs\/AyobamiH/);
 });
 
 test("intake owns its remaining git-backed jobs and results publication", () => {

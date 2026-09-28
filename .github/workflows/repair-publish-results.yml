@@ -294,7 +294,7 @@ jobs:
             --state-root "$CLAWSWEEPER_STATE_DIR" \
             --out "$paths_file" \
             --root results \
-            --root jobs/AyobamiH \
+            --root jobs \
             --root repair-apply-report.json \
             --root notifications
           if [ ! -s "$paths_file" ]; then
