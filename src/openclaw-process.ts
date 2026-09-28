@@ -58,21 +58,39 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
     );
     writeFileSync(promptPath, options.prompt, { encoding: "utf8", mode: 0o600 });
     const sessionId = openclawSessionId(options.label);
-    const args = [
-      "agent",
-      "--local",
-      "--agent",
-      "main",
-      "--session-id",
-      sessionId,
-      "--model",
-      options.model,
-      "--message-file",
-      promptPath,
-      "--timeout",
-      String(timeoutSeconds),
-      "--json",
-    ];
+    const args = options.checkoutInspection
+      ? [
+          "agent",
+          "--local",
+          "--agent",
+          "main",
+          "--session-id",
+          sessionId,
+          "--model",
+          options.model,
+          "--message-file",
+          promptPath,
+          "--timeout",
+          String(timeoutSeconds),
+          "--json",
+        ]
+      : [
+          "agent",
+          "exec",
+          "--message-file",
+          promptPath,
+          "--cwd",
+          options.cwd,
+          "--state-dir",
+          stateDir,
+          "--config",
+          configPath,
+          "--model",
+          options.model,
+          "--timeout",
+          String(timeoutSeconds),
+          "--json",
+        ];
     const thinking = options.reasoningEffort?.trim();
     if (thinking) args.splice(args.length - 1, 0, "--thinking", thinking);
     // Deny-by-default: the embedded agent runs untrusted repository content
