@@ -51,6 +51,7 @@ jobs:
           owner: AyobamiH
           repositories: clawsweeper
           permission-administration: write
+          permission-pages: write
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
