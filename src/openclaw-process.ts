@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_CODEX_OUTPUT_FILE_BYTES,
   DEFAULT_CODEX_OUTPUT_TAIL_BYTES,
@@ -57,41 +58,26 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
       },
     );
     writeFileSync(promptPath, options.prompt, { encoding: "utf8", mode: 0o600 });
-    const sessionId = openclawSessionId(options.label);
-    // Use the stable headless exec contract for normal automation; retain local mode only for checkout attestation receipts.
-    const args = options.checkoutInspection
-      ? [
-          "agent",
-          "--local",
-          "--agent",
-          "main",
-          "--session-id",
-          sessionId,
-          "--model",
-          options.model,
-          "--message-file",
-          promptPath,
-          "--timeout",
-          String(timeoutSeconds),
-          "--json",
-        ]
-      : [
-          "agent",
-          "exec",
-          "--message-file",
-          promptPath,
-          "--cwd",
-          options.cwd,
-          "--state-dir",
-          stateDir,
-          "--config",
-          configPath,
-          "--model",
-          options.model,
-          "--timeout",
-          String(timeoutSeconds),
-          "--json",
-        ];
+    // OpenClaw 2026.9+ owns headless automation through agent exec. Keep
+    // attestation on that same supported surface and retain its ephemeral state
+    // only until ClawSweeper verifies the exact read receipt.
+    const args = [
+      "agent",
+      "exec",
+      "--message-file",
+      promptPath,
+      "--cwd",
+      options.cwd,
+      "--state-dir",
+      stateDir,
+      "--config",
+      configPath,
+      "--model",
+      options.model,
+      "--timeout",
+      String(timeoutSeconds),
+      "--json",
+    ];
     const thinking = options.reasoningEffort?.trim();
     if (thinking) args.splice(args.length - 1, 0, "--thinking", thinking);
     // Deny-by-default: the embedded agent runs untrusted repository content
@@ -147,9 +133,7 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
       options.checkoutInspection,
       {
         cwd: options.cwd,
-        // OpenClaw persists an explicit local session under this agent-owned
-        // path; inspect it before the isolated state directory is removed.
-        transcriptPath: join(stateDir, "agents", "main", "sessions", `${sessionId}.jsonl`),
+        stateDir,
       },
     );
   } catch (error) {
@@ -162,7 +146,7 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
 export function parseOpenclawJsonEnvelope(
   stdout: string,
   stderr = "",
-): { text: string; failure?: Error } {
+): { text: string; sessionId?: string; failure?: Error } {
   let envelope: unknown;
   try {
     envelope = parseOpenclawJsonOutput(stdout);
@@ -179,14 +163,29 @@ export function parseOpenclawJsonEnvelope(
   }
   const result = isRecord(envelope.result) ? envelope.result : envelope;
   const payloads = Array.isArray(result.payloads) ? result.payloads : [];
-  const text = payloads
+  const payloadText = payloads
     .filter(isRecord)
     .map((payload) => (typeof payload.text === "string" ? payload.text : ""))
     .filter(Boolean)
     .join("\n");
+  const finalText =
+    typeof result.final === "string"
+      ? result.final
+      : typeof envelope.final === "string"
+        ? envelope.final
+        : "";
+  const text = payloadText || finalText;
+  const sessionIdCandidate =
+    typeof result.sessionId === "string"
+      ? result.sessionId
+      : typeof envelope.sessionId === "string"
+        ? envelope.sessionId
+        : "";
+  const sessionId = sessionIdCandidate.trim();
   const failureDetail = openclawFailureDetail(envelope, result, payloads);
   return {
     text,
+    ...(sessionId ? { sessionId } : {}),
     ...(failureDetail ? { failure: new Error(`OpenClaw agent failed: ${failureDetail}`) } : {}),
   };
 }
@@ -249,27 +248,27 @@ function normalizeOpenclawResult(
   processResult: CodexProcessResult,
   completeStdout: string,
   checkoutInspection?: { expectedText: string; expectedPath: string },
-  receipt?: { cwd: string; transcriptPath: string },
+  receipt?: { cwd: string; stateDir: string },
 ): CodexProcessResult {
   if (processResult.error || processResult.status !== 0) return processResult;
   const parsed = parseOpenclawJsonEnvelope(completeStdout, processResult.stderr);
-  const transcriptText =
-    parsed.failure && receipt ? finalAssistantTextFromTranscript(receipt.transcriptPath) : null;
-  if (!parsed.failure || transcriptText !== null) {
-    const text = transcriptText ?? parsed.text;
-    if (!checkoutInspection) return { ...processResult, stdout: text };
-    if (text.trim() !== checkoutInspection.expectedText) {
+  if (!parsed.failure) {
+    if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
+    if (parsed.text.trim() !== checkoutInspection.expectedText) {
       return failedInspectionResult(
         processResult,
         "OpenClaw checkout inspection did not return the runner challenge.",
       );
     }
-    // The runtime-owned session receipt binds the successful read to the
-    // host-selected tracked path, whose expected line never enters the prompt.
+    // The supported agent-exec state owns both exact tool-call arguments in the
+    // per-agent transcript DB and redaction-safe completion status in the shared
+    // audit DB. Require both before accepting the unpredictable line challenge.
     if (
       !receipt ||
+      !parsed.sessionId ||
       !hasSuccessfulReadReceipt({
         ...receipt,
+        sessionId: parsed.sessionId,
         expectedPath: checkoutInspection.expectedPath,
       })
     ) {
@@ -286,67 +285,43 @@ function normalizeOpenclawResult(
   return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
 }
 
-function finalAssistantTextFromTranscript(transcriptPath: string): string | null {
-  let transcript: string;
-  try {
-    transcript = readFileSync(transcriptPath, "utf8");
-  } catch {
-    return null;
-  }
-  let finalText: string | null = null;
-  for (const line of transcript.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: unknown;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      return null;
-    }
-    if (!isRecord(entry) || !isRecord(entry.message) || entry.message.role !== "assistant") {
-      continue;
-    }
-    const content = entry.message.content;
-    if (typeof content === "string" && content.trim()) {
-      finalText = content;
-      continue;
-    }
-    if (!Array.isArray(content)) continue;
-    const blocks = content.filter(isRecord);
-    if (blocks.some((block) => block.type === "toolCall")) continue;
-    const text = blocks
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => String(block.text))
-      .join("\n")
-      .trim();
-    if (text) finalText = text;
-  }
-  return finalText;
-}
-
 function hasSuccessfulReadReceipt(options: {
   cwd: string;
-  transcriptPath: string;
+  stateDir: string;
+  sessionId: string;
   expectedPath: string;
 }): boolean {
-  let transcript: string;
+  const agentDatabasePath = join(
+    options.stateDir,
+    "agents",
+    "main",
+    "agent",
+    "openclaw-agent.sqlite",
+  );
+  const auditDatabasePath = join(options.stateDir, "state", "openclaw.sqlite");
+  let agentDb: DatabaseSync | undefined;
+  let auditDb: DatabaseSync | undefined;
   try {
-    transcript = readFileSync(options.transcriptPath, "utf8");
-  } catch {
-    return false;
-  }
-  const readCalls = new Map<string, { matchesExpectedPath: boolean; resolved: boolean }>();
-  let challengedReadSucceeded = false;
-  for (const line of transcript.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: unknown;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      return false;
-    }
-    if (!isRecord(entry) || !isRecord(entry.message)) continue;
-    const message = entry.message;
-    if (message.role === "assistant" && Array.isArray(message.content)) {
+    agentDb = new DatabaseSync(agentDatabasePath, { readOnly: true });
+    auditDb = new DatabaseSync(auditDatabasePath, { readOnly: true });
+
+    const transcriptRows = agentDb
+      .prepare(
+        "SELECT event_json FROM transcript_events WHERE session_id = ? AND event_json IS NOT NULL ORDER BY seq ASC",
+      )
+      .all(options.sessionId) as Array<{ event_json: string }>;
+
+    const readCalls = new Map<string, boolean>();
+    for (const row of transcriptRows) {
+      let entry: unknown;
+      try {
+        entry = JSON.parse(row.event_json);
+      } catch {
+        return false;
+      }
+      if (!isRecord(entry) || !isRecord(entry.message)) continue;
+      const message = entry.message;
+      if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
       for (const block of message.content) {
         if (!isRecord(block) || block.type !== "toolCall") continue;
         if (
@@ -358,23 +333,52 @@ function hasSuccessfulReadReceipt(options: {
         ) {
           return false;
         }
-        readCalls.set(block.id, {
-          matchesExpectedPath:
-            resolve(options.cwd, block.arguments.path) ===
-            resolve(options.cwd, options.expectedPath),
-          resolved: false,
-        });
+        readCalls.set(
+          block.id,
+          resolve(options.cwd, block.arguments.path) === resolve(options.cwd, options.expectedPath),
+        );
       }
-      continue;
     }
-    if (message.role !== "toolResult") continue;
-    if (message.toolName !== "read" || typeof message.toolCallId !== "string") return false;
-    const call = readCalls.get(message.toolCallId);
-    if (!call || call.resolved || message.isError !== false) return false;
-    call.resolved = true;
-    if (call.matchesExpectedPath) challengedReadSucceeded = true;
+    if (readCalls.size !== 1 || ![...readCalls.values()].every(Boolean)) return false;
+
+    const auditRows = auditDb
+      .prepare(
+        "SELECT tool_call_id, tool_name, action, status FROM audit_events WHERE session_id = ? AND kind = 'tool_action' ORDER BY sequence ASC",
+      )
+      .all(options.sessionId) as Array<{
+      tool_call_id: string | null;
+      tool_name: string | null;
+      action: string;
+      status: string;
+    }>;
+    if (auditRows.length === 0) return false;
+
+    const expectedCallId = [...readCalls.keys()][0]!;
+    let succeeded = false;
+    for (const row of auditRows) {
+      if (row.tool_name !== "read" || row.tool_call_id !== expectedCallId) return false;
+      if (row.action === "tool.action.finished") {
+        if (row.status !== "succeeded" || succeeded) return false;
+        succeeded = true;
+      } else if (row.action !== "tool.action.started" || row.status !== "started") {
+        return false;
+      }
+    }
+    return succeeded;
+  } catch {
+    return false;
+  } finally {
+    try {
+      agentDb?.close();
+    } catch {
+      // Read-only ephemeral state is removed by the caller.
+    }
+    try {
+      auditDb?.close();
+    } catch {
+      // Read-only ephemeral state is removed by the caller.
+    }
   }
-  return challengedReadSucceeded && [...readCalls.values()].every((call) => call.resolved);
 }
 
 function failedInspectionResult(
