@@ -416,6 +416,9 @@ const OPENCLAW_CHILD_ENV_ALLOWLIST = [
   "ZAI_API_KEY",
   "DEEPSEEK_API_KEY",
   "MISTRAL_API_KEY",
+  // A Workers-AI-only token is intentionally separate from CLOUDFLARE_API_TOKEN.
+  // The broad deployment/container credential must never enter the agent process.
+  "CLOUDFLARE_WORKERS_AI_TOKEN",
 ] as const;
 
 function pickEnv(env: NodeJS.ProcessEnv, names: readonly string[]): NodeJS.ProcessEnv {
