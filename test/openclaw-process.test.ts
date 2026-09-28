@@ -327,6 +327,45 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
   }
 });
 
+test("OpenClaw process recovers final assistant output from its session transcript", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-transcript-test-"));
+  const binary = join(root, "fake-openclaw");
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const sessionId = args[args.indexOf("--session-id") + 1];
+const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
+fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+fs.writeFileSync(sessionFile, JSON.stringify({
+  type: "message",
+  message: { role: "assistant", content: [{ type: "text", text: "transcript-ok" }] }
+}) + "\\n");
+process.stdout.write("[provider-transport-fetch] status=200\\nnot-json");
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runOpenclawProcess({
+      label: "transcript-fallback",
+      prompt: "Return transcript-ok.",
+      model: "workersai/@cf/zai-org/glm-5.3",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+      },
+      timeoutMs: 10_000,
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    assert.equal(result.stdout, "transcript-ok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw JSON parser accepts a complete envelope after diagnostic stdout", () => {
   const parsed = parseOpenclawJsonEnvelope(
     [
