@@ -235,7 +235,7 @@ test("fallback-enabled exact reviews ignore a persisted Codex admission hold", a
       dispatcher?: { reviewAdmissionNextAt?: number };
     };
     state.dispatcher = {
-      ...(state.dispatcher || {}),
+      ...state.dispatcher,
       reviewAdmissionNextAt: Date.now() + 7 * 24 * 60 * 60_000,
     };
     await harness.storage.put("exact-review-queue", state);
