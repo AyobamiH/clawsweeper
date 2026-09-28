@@ -350,6 +350,73 @@ process.stdout.write(JSON.stringify({
   }
 });
 
+test("OpenClaw checkout inspection uses its provider-aware timeout budget", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-timeout-test-"));
+  const binary = join(root, "fake-openclaw");
+  const argsPath = join(root, "args.json");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  writeFileSync(join(root, "tracked.txt"), "tracked checkout content for timeout proof\n");
+  execFileSync("git", ["add", "tracked.txt"], { cwd: root });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-q",
+      "-m",
+      "tracked text",
+    ],
+    { cwd: root },
+  );
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
+const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
+const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
+const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
+const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
+const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
+const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
+fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+const toolCallId = "read-checkout";
+fs.writeFileSync(sessionFile, [
+  JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } }),
+  JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } }),
+].join("\\n") + "\\n");
+process.stdout.write(JSON.stringify({ payloads: [{ text: challenged }], meta: { stopReason: "stop" } }));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentCheckoutInspection({
+      scanSource: { kind: "prompt" },
+      initialPrompt: "Inspect checkout.",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "openai/test",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        CLAWSWEEPER_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS: "75000",
+        OPENCLAW_TEST_ARGS: argsPath,
+      },
+      timeoutMs: 120_000,
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    const args = JSON.parse(readFileSync(argsPath, "utf8"));
+    assert.equal(args[args.indexOf("--timeout") + 1], "75");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw checkout inspection reports challenge setup failures", (t) => {
   useFakeScanner(t);
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-missing-test-"));
