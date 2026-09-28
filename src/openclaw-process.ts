@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -568,15 +567,6 @@ function builtinProviderBlock(model: string): Record<string, unknown> | undefine
 function boundedStderrDetail(stderr: string): string {
   const tail = Buffer.from(stderr).subarray(-STDERR_FAILURE_TAIL_BYTES).toString("utf8").trim();
   return tail ? ` OpenClaw stderr: ${tail}` : "";
-}
-
-function openclawSessionId(label: string): string {
-  const safeLabel = label
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .slice(0, 48);
-  return `${safeLabel || "clawsweeper"}-${randomUUID()}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
