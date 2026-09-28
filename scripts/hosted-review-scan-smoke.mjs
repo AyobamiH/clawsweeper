@@ -22,6 +22,7 @@ assert.equal(process.platform, "linux");
 const originalPath = process.env.PATH;
 const originalToolsDir = process.env.CLAWSWEEPER_REVIEW_TOOLS_DIR;
 const artifact = process.argv[2];
+const refusalOnly = process.argv.slice(3).includes("--refusal-only");
 assert.ok(artifact, "pass a proof JSON destination");
 const sourceHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const gitExecutable = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
@@ -154,30 +155,40 @@ ${live ? `const child = require('node:child_process').spawnSync(${JSON.stringify
   process.env.PATH = originalPath;
   if (originalToolsDir === undefined) delete process.env.CLAWSWEEPER_REVIEW_TOOLS_DIR;
   else process.env.CLAWSWEEPER_REVIEW_TOOLS_DIR = originalToolsDir;
-  writeProvider(true);
-  const result = run();
-  // Raw model output/diagnostics and configured model identity never enter proof artifacts.
-  assert.ok(!result.error, "native runner failed");
-  assert.equal(result.status, 0, "native runner exited unsuccessfully");
-  let parsed;
-  try {
-    parsed = JSON.parse(readFileSync(output, "utf8"));
-  } catch {
-    throw new Error("Native review did not produce valid JSON; diagnostics withheld.");
+
+  let decision;
+  let cleanProviderStarts = 0;
+  let diagnosticPromptMode = null;
+  if (refusalOnly) {
+    assert.equal(existsSync(calls), false);
+    assertCheckout();
+    decision = { status: "deferred", reason: "subscription_exhausted" };
+  } else {
+    writeProvider(true);
+    const result = run();
+    assert.ok(!result.error, "native runner failed");
+    assert.equal(result.status, 0, "native runner exited unsuccessfully");
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(output, "utf8"));
+    } catch {
+      throw new Error("Native review did not produce valid JSON; diagnostics withheld.");
+    }
+    assert.ok(
+      parsed?.status === "clean" && parsed.marker === marker && Object.keys(parsed).length === 2,
+      "Native structured response did not match the fixture; diagnostics withheld.",
+    );
+    decision = { status: "clean", marker };
+    assertCheckout();
+    assert.equal(readFileSync(calls, "utf8"), "1");
+    cleanProviderStarts = 1;
+    assert.ok(
+      readFileSync(diagnosticPromptPath, "utf8") === prompt,
+      "Admitted prompt diagnostic did not match; contents withheld.",
+    );
+    diagnosticPromptMode = statSync(diagnosticPromptPath).mode & 0o777;
+    assert.equal(diagnosticPromptMode, 0o600);
   }
-  assert.ok(
-    parsed?.status === "clean" && parsed.marker === marker && Object.keys(parsed).length === 2,
-    "Native structured response did not match the fixture; diagnostics withheld.",
-  );
-  const decision = { status: "clean", marker };
-  assertCheckout();
-  assert.equal(readFileSync(calls, "utf8"), "1");
-  assert.ok(
-    readFileSync(diagnosticPromptPath, "utf8") === prompt,
-    "Admitted prompt diagnostic did not match; contents withheld.",
-  );
-  const diagnosticPromptMode = statSync(diagnosticPromptPath).mode & 0o777;
-  assert.equal(diagnosticPromptMode, 0o600);
   writeFileSync(
     artifact,
     JSON.stringify(
@@ -193,9 +204,10 @@ ${live ? `const child = require('node:child_process').spawnSync(${JSON.stringify
         baseSha,
         headSha,
         refusalProviderStarts: 0,
-        cleanProviderStarts: 1,
+        cleanProviderStarts,
         refusalPromptArtifacts: 0,
-        diagnosticPromptMode: `0${diagnosticPromptMode.toString(8)}`,
+        diagnosticPromptMode:
+          diagnosticPromptMode === null ? null : `0${diagnosticPromptMode.toString(8)}`,
         decision,
         model: "configured model (redacted)",
         limits:
