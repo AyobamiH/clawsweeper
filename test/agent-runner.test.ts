@@ -169,6 +169,45 @@ process.stdout.write("ok");
   }
 });
 
+test("Workers AI OpenClaw models omit unsupported thinking levels", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-workers-ai-thinking-test-"));
+  const binary = join(root, "fake-openclaw");
+  const argsPath = join(root, "args.json");
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({ payloads: [{ text: "ok" }], meta: { stopReason: "stop" } }));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "workers-ai-thinking",
+      scanSource: { kind: "prompt" },
+      prompt: "Return ok.",
+      model: "internal",
+      reasoningEffort: "low",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        OPENCLAW_TEST_ARGS: argsPath,
+      },
+      timeoutMs: 10_000,
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    const args = JSON.parse(readFileSync(argsPath, "utf8"));
+    assert.equal(args.includes("--thinking"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw runner accepts provider model ids with nested path segments", (t) => {
   useFakeScanner(t);
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-workers-ai-test-"));
