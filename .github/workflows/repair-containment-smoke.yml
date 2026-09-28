@@ -51,21 +51,66 @@ permissions:
   contents: read
 
 concurrency:
-  group: repair-containment-smoke-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: cloudflare-repair-compute
+  queue: max
+  cancel-in-progress: false
+
+env:
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
 
 jobs:
+  provision:
+    name: Provision containment smoke compute
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.runners.outputs.plan }}
+      execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+
   containment-smoke:
     name: containment smoke (sample ${{ matrix.sample }})
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ${{ vars.CLAWSWEEPER_E2E_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    needs: provision
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs[matrix.lane] || 'ubuntu-latest' }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        sample: [1, 2]
+        include:
+          - sample: 1
+            lane: plan
+          - sample: 2
+            lane: execute
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so containment smoke receives fresh Cloudflare compute." >&2
+          exit 1
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
@@ -76,3 +121,31 @@ jobs:
 
       - name: Run compiled containment preflight
         run: pnpm run repair:containment-smoke
+
+  cleanup:
+    name: Destroy containment smoke compute
+    needs: [provision, containment-smoke]
+    if: ${{ always() && needs.provision.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"

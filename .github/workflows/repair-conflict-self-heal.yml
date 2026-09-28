@@ -21,12 +21,12 @@ on:
       runner:
         description: "Runner label for repair workers"
         required: true
-        default: blacksmith-4vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       execution_runner:
         description: "Runner label for fix/apply execution work"
         required: true
-        default: blacksmith-16vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
   schedule:
     - cron: "27 * * * *"
@@ -47,7 +47,7 @@ concurrency:
 
 jobs:
   self-heal:
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Create GitHub App token
@@ -111,8 +111,8 @@ jobs:
           execute="false"
           target_repo="${{ github.event_name == 'workflow_dispatch' && inputs.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'openclaw/openclaw' }}"
           max_prs="${{ github.event_name == 'workflow_dispatch' && inputs.max_prs || vars.CLAWSWEEPER_CONFLICT_SELF_HEAL_MAX_PRS || '5' }}"
-          runner="${{ github.event_name == 'workflow_dispatch' && inputs.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}"
-          execution_runner="${{ github.event_name == 'workflow_dispatch' && inputs.execution_runner || vars.CLAWSWEEPER_EXECUTION_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}"
+          runner="${{ github.event_name == 'workflow_dispatch' && inputs.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}"
+          execution_runner="${{ github.event_name == 'workflow_dispatch' && inputs.execution_runner || vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}"
           if { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute }}" = "true" ]; } ||
              { [ "${{ github.event_name }}" = "schedule" ] && [ "${{ vars.CLAWSWEEPER_CONFLICT_SELF_HEAL_EXECUTE || '0' }}" = "1" ]; }; then
             execute="true"

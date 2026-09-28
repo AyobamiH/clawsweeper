@@ -59,7 +59,7 @@ try {
       wrapper,
       `#!${process.execPath}
 const fs = require('node:fs');
-fs.appendFileSync(${JSON.stringify(calls)}, '1');
+if (process.argv.slice(2).includes('exec')) fs.appendFileSync(${JSON.stringify(calls)}, '1');
 ${live ? `const child = require('node:child_process').spawnSync(${JSON.stringify(codex)}, process.argv.slice(2), {stdio:'inherit', env:process.env}); process.exit(child.status ?? 1);` : "process.exit(86);"}
 `,
       { mode: 0o700 },

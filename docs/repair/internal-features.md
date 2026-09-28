@@ -584,11 +584,16 @@ Important gates:
   dispatch commands are not blocked by this variable; they keep the existing
   repair execution gates. A model compares the live evidence for each offered
   cluster and selects one useful candidate or rejects the batch.
+- `CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY`,
+  `CLAWSWEEPER_GITCRAWL_STORE_OWNER`, and
+  `CLAWSWEEPER_GITCRAWL_STORE_NAME`: explicit App-accessible portable-store
+  identity. The scheduled lane remains skipped when these are absent; it never
+  expands the App installation to an upstream store implicitly.
 - `CLAWSWEEPER_CLUSTER_REPAIR_CANDIDATE_BATCH`: number of unprocessed clusters
   offered to the scheduled selector model; default `8`. The selector emits at
   most one cluster per daily `repair-cluster-intake.yml` run.
-  The upstream `openclaw/gitcrawl-store` refreshes `openclaw/openclaw` every 15
-  minutes. Intake first appends the selected job, store identity, model
+  The configured store owns its refresh cadence. Intake first appends the
+  selected job, store identity, model
   rationale and per-cluster decisions, and stable dispatch key to the
   Cloudflare durable window. Decisions project through a separately versioned
   sidecar so older strict-v2 dispatch-ledger readers remain compatible. Rejected

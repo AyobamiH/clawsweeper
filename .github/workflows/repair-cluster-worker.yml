@@ -46,12 +46,12 @@ on:
       runner:
         description: "Runner label for cluster planning/review work"
         required: true
-        default: blacksmith-4vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       execution_runner:
         description: "Linux runner label for fix/apply execution work with delegated namespaces, recursive mount hardening, and optional Landlock defense in depth"
         required: true
-        default: blacksmith-16vcpu-ubuntu-2404
+        default: clawsweeper-cloudflare
         type: string
       planner_sandbox:
         description: "Codex planning sandbox; danger-full-access is for trusted ephemeral runner fallback only"
@@ -86,20 +86,24 @@ permissions:
   contents: read
 
 env:
+  CLAWSWEEPER_REVIEW_REPO: ${{ github.repository }}
+  OPENAI_API_KEY: ""
+  CODEX_API_KEY: ""
+  PROXY_API_KEY: ""
   CLAWSWEEPER_QUOTA_ENABLED: "1"
   CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
   CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
   CLAWSWEEPER_MODEL: internal
-  CLAWSWEEPER_RUNNER: ${{ vars.CLAWSWEEPER_RUNNER || 'codex' }}
+  CLAWSWEEPER_RUNNER: codex
   CLAWSWEEPER_OPENCLAW_MODEL: ${{ secrets.CLAWSWEEPER_OPENCLAW_MODEL }}
-  CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON: ${{ secrets.CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON }}
-  CLAWSWEEPER_OPENCLAW_OPENAI_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.OPENAI_API_KEY || '' }}
-  ANTHROPIC_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.ANTHROPIC_API_KEY || '' }}
-  GEMINI_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.GEMINI_API_KEY || '' }}
-  KIMI_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.KIMI_API_KEY || '' }}
-  OPENROUTER_API_KEY: ${{ vars.CLAWSWEEPER_RUNNER == 'openclaw' && secrets.OPENROUTER_API_KEY || '' }}
+  CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON: ""
+  CLAWSWEEPER_OPENCLAW_OPENAI_KEY: ""
+  ANTHROPIC_API_KEY: ""
+  GEMINI_API_KEY: ""
+  KIMI_API_KEY: ""
+  OPENROUTER_API_KEY: ""
   CLUSTER_JOB_PATH: ${{ inputs.job }}
   CLUSTER_DISPATCH_KEY: ${{ inputs.dispatch_key }}
   CLUSTER_JOB_PAYLOAD: ${{ inputs.job_payload }}
@@ -115,9 +119,10 @@ env:
   CLUSTER_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 concurrency:
-  group: ${{ inputs.requeue && format('clawsweeper-repair-requeue-{0}-{1}', inputs.job, github.run_id) || format('clawsweeper-repair-{0}', inputs.job) }}
+  group: cloudflare-repair-compute
+  queue: max
   # Keep an active execute run alive so its temporary gate cleanup can finish;
-  # GitHub still coalesces pending runs in this group to the newest dispatch.
+  # Preserve pending durable jobs while the two-container fleet is occupied.
   cancel-in-progress: false
 
 jobs:
@@ -142,7 +147,7 @@ jobs:
       - name: Authenticate durable intake before credentials
         if: ${{ inputs.job_payload != '' }}
         env:
-          CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+          CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: pnpm run repair:restore-cluster-intake-job
 
@@ -172,11 +177,44 @@ jobs:
           fi
           echo "proceed=true" >> "$GITHUB_OUTPUT"
 
-  cluster:
-    name: Plan and review cluster
+  provision:
+    name: Provision ephemeral Cloudflare repair compute
     needs: receipt
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.runners.outputs.plan }}
+      execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+
+  cluster:
+    name: Plan and review cluster
+    needs: [receipt, provision]
+    if: ${{ needs.receipt.outputs.proceed == 'true' }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
     timeout-minutes: 90
     outputs:
       allow_execute: ${{ steps.capture_gates.outputs.allow_execute }}
@@ -185,7 +223,7 @@ jobs:
       job_exists: ${{ steps.check_job.outputs.job_exists }}
       effective_mode: ${{ steps.run_worker.outputs.effective_mode }}
     env:
-      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
       CLAWSWEEPER_ALLOW_EXECUTE: ${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && vars.CLAWSWEEPER_ALLOW_EXECUTE == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_FIX_PR: ${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && vars.CLAWSWEEPER_ALLOW_FIX_PR == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_MERGE: "0"
@@ -202,9 +240,24 @@ jobs:
       CLAWSWEEPER_CRABFLEET_URL: ${{ vars.CLAWSWEEPER_CRABFLEET_URL || 'https://crabfleet.openclaw.ai' }}
       OPENCLAW_LOCAL_CHECK: "0"
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "A failed-jobs-only rerun cannot reuse destroyed Cloudflare compute. Rerun all jobs to provision a fresh pair." >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           filter: blob:none
+
+      - name: Install pinned GitHub CLI for repair APIs
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz --output "$archive"
+          printf '9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8  %s\n' "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_2.101.0_linux_amd64/bin" >> "$GITHUB_PATH"
 
       - name: Resolve target owner
         id: target
@@ -457,15 +510,15 @@ jobs:
 
   execute:
     name: Execute and apply cluster actions
-    needs: cluster
+    needs: [cluster, provision]
     if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run }}
-    runs-on: ${{ inputs.execution_runner }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
     timeout-minutes: 120
     permissions:
       actions: read
       contents: read
     env:
-      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'openclaw' }}
+      CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
       CLAWSWEEPER_ALLOW_EXECUTE: ${{ needs.cluster.outputs.allow_execute == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_FIX_PR: ${{ needs.cluster.outputs.allow_fix_pr == '1' && '1' || '0' }}
       CLAWSWEEPER_ALLOW_MERGE: ${{ !contains(inputs.job, '/inbox/issue-') && needs.cluster.outputs.allow_merge || '0' }}
@@ -479,16 +532,31 @@ jobs:
       CLAWSWEEPER_TARGET_VALIDATION_MODE: ${{ vars.CLAWSWEEPER_TARGET_VALIDATION_MODE || 'changed-only' }}
       CLAWSWEEPER_POST_FLIGHT_IGNORE_CHECKS: ${{ vars.CLAWSWEEPER_POST_FLIGHT_IGNORE_CHECKS || 'auto-response,Labeler,Stale' }}
       CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA: ${{ vars.CLAWSWEEPER_MAX_ACTIVE_PRS_PER_AREA || '50' }}
-      CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS: ${{ vars.CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS || '1' }}
+      CLAWSWEEPER_CLOSE_SUPERSEDED_SOURCE_PRS: "0"
       CLAWSWEEPER_GIT_USER_NAME: ${{ vars.CLAWSWEEPER_GIT_USER_NAME || 'clawsweeper[bot]' }}
       CLAWSWEEPER_GIT_USER_EMAIL: ${{ vars.CLAWSWEEPER_GIT_USER_EMAIL || '274271284+clawsweeper[bot]@users.noreply.github.com' }}
       CLAWSWEEPER_STEERABLE_CODEX: ${{ vars.CLAWSWEEPER_STEERABLE_CODEX || '0' }}
       CLAWSWEEPER_CRABFLEET_URL: ${{ vars.CLAWSWEEPER_CRABFLEET_URL || 'https://crabfleet.openclaw.ai' }}
       OPENCLAW_LOCAL_CHECK: "0"
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "A failed-jobs-only rerun cannot reuse destroyed Cloudflare compute. Rerun all jobs to provision a fresh pair." >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           filter: blob:none
+
+      - name: Install pinned GitHub CLI for repair APIs
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz --output "$archive"
+          printf '9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8  %s\n' "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_2.101.0_linux_amd64/bin" >> "$GITHUB_PATH"
 
       - name: Resolve target owner
         id: target
@@ -515,7 +583,7 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: openclaw
+          owner: AyobamiH
           repositories: clawsweeper
           permission-actions: write
           permission-contents: write
@@ -852,7 +920,7 @@ jobs:
             --wait-for-capacity \
             --source-job-path "$CLUSTER_JOB_PATH" \
             --requeue-depth "$CLUSTER_REQUEUE_DEPTH" \
-            --max-requeue-depth 1 \
+            --max-requeue-depth 0 \
             --runner "$CLUSTER_WORKER_RUNNER" \
             --execution-runner "$CLUSTER_EXECUTION_RUNNER" \
             --model "$CLUSTER_WORKER_MODEL"
@@ -966,3 +1034,32 @@ jobs:
             --session-id "$AUTOMERGE_SESSION_ID" \
             --run-url "$AUTOMERGE_RUN_URL" \
             --run-conclusion failure
+
+  cleanup:
+    name: Destroy ephemeral Cloudflare repair compute
+    needs: [receipt, provision, cluster, execute]
+    if: ${{ always() && needs.receipt.outputs.proceed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"

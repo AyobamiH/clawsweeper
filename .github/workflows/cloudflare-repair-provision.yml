@@ -1,0 +1,214 @@
+name: Provision and prove Cloudflare repair compute
+"on":
+  workflow_dispatch: {}
+  push:
+    branches:
+      - ops/cloudflare-compute-inventory
+    paths:
+      - .github/workflows/cloudflare-repair-provision.yml
+      - .github/actions/cloudflare-runners/**
+      - cloudflare-repair/**
+permissions:
+  contents: read
+concurrency:
+  # One shared fleet gate covers deployment, proof, cleanup, and the review that
+  # binds its verdict to this exact head.
+  group: cloudflare-repair-compute
+  queue: max
+  cancel-in-progress: false
+env:
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          build-script: build:node
+      - name: Build and deploy pinned Cloudflare runtime
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          mkdir -p cloudflare-repair/runtime
+          cp -R dist cloudflare-repair/runtime/dist
+          printf '{"type":"module"}\n' > cloudflare-repair/runtime/package.json
+          npm ci --prefix cloudflare-repair --no-audit --no-fund
+          cd cloudflare-repair
+          npx wrangler deploy
+  provision:
+    name: Provision ephemeral Cloudflare repair compute
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.runners.outputs.plan }}
+      execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+    needs: deploy
+  plan-proof:
+    needs: provision
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
+    timeout-minutes: 8
+    steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so this proof receives fresh Cloudflare compute." >&2
+          exit 1
+      - name: Run real Linux containment preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/compute-proof"
+          command -v gh rg bwrap
+          node --version
+          node /opt/clawsweeper/dist/repair/containment-preflight.js | tee "$RUNNER_TEMP/compute-proof/containment.log"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/compute-proof/source-head.txt"
+          printf '%s\n' "$RUNNER_NAME" > "$RUNNER_TEMP/compute-proof/runner.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cloudflare-plan-proof
+          path: ${{ runner.temp }}/compute-proof
+          if-no-files-found: error
+  execute-proof:
+    needs: provision
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
+    timeout-minutes: 8
+    steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so this proof receives fresh Cloudflare compute." >&2
+          exit 1
+      - name: Run real Linux containment preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/compute-proof"
+          command -v gh rg bwrap
+          node --version
+          node /opt/clawsweeper/dist/repair/containment-preflight.js | tee "$RUNNER_TEMP/compute-proof/containment.log"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/compute-proof/source-head.txt"
+          printf '%s\n' "$RUNNER_NAME" > "$RUNNER_TEMP/compute-proof/runner.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cloudflare-execute-proof
+          path: ${{ runner.temp }}/compute-proof
+          if-no-files-found: error
+  cleanup:
+    name: Destroy ephemeral Cloudflare repair compute
+    needs:
+      - deploy
+      - provision
+      - plan-proof
+      - execute-proof
+    if: ${{ always() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded GitHub App credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+  review:
+    name: Fresh subscription-authenticated infrastructure review
+    needs:
+      - plan-proof
+      - execute-proof
+      - cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLAWSWEEPER_QUOTA_ENABLED: "1"
+      CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+      CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+      CLAWSWEEPER_RUNNER: codex
+      OPENAI_API_KEY: ""
+      CODEX_API_KEY: ""
+      PROXY_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          build-script: build:node
+      - uses: ./.github/actions/setup-codex
+        with:
+          auth-mode: chatgpt
+          login-status: "true"
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+      - name: Review actual branch against main without mutation
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {execFileSync} from 'node:child_process';
+          import {runCodexProcess} from './dist/codex-process.js';
+          import {codexSubprocessEnv} from './dist/repair/process-env.js';
+          const out=path.join(process.env.RUNNER_TEMP,'infra-review');fs.mkdirSync(out,{recursive:true});
+          const schema={type:'object',additionalProperties:false,required:['status','summary','findings'],properties:{status:{type:'string',enum:['clean','blocked']},summary:{type:'string'},findings:{type:'array',items:{type:'object',additionalProperties:false,required:['severity','file','description'],properties:{severity:{type:'string',enum:['high','medium','low']},file:{type:'string'},description:{type:'string'}}}}}};
+          const schemaPath=path.join(out,'schema.json'),resultPath=path.join(out,'review.json');fs.writeFileSync(schemaPath,JSON.stringify(schema));
+          const head=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const base=execFileSync('git',['rev-parse','origin/main'],{encoding:'utf8'}).trim();
+          fs.writeFileSync(path.join(out,'binding.json'),JSON.stringify({head,base,run:process.env.GITHUB_RUN_ID}));
+          const result=runCodexProcess({args:['exec','--sandbox','read-only','-c','approval_policy="never"','-c','forced_login_method="chatgpt"','--output-schema',schemaPath,'--output-last-message',resultPath,'--json','-'],cwd:process.cwd(),env:codexSubprocessEnv(),timeoutMs:900000,input:`/review
+          Review the current infrastructure diff ${base}...${head}. Read AGENTS.md fully. Read-only code review: do not modify files, run target workflows or ask for merge approval. The owner authorised landing after proof and review; Cloudflare repair compute, GitHub-hosted ChatGPT review and deterministic orchestration are approved, no Blacksmith or API model fallback. The same workflow has just successfully deployed this image and Worker, run real containment on both unique Cloudflare runner roles, and cleaned them up. Review authority, credential isolation, failure cleanup, concurrency, existing caller compatibility, subscription fail-closed behaviour, and introduced regressions. Inspect actual source and diff. Report actionable defects honestly, not only syntax. Existing Work Mode /proc process-identity test failures require hosted CI verification, not weakened assertions. Return clean only with no actionable findings.`,stdoutPath:path.join(out,'review.jsonl'),stderrPath:path.join(out,'review.stderr.log')});
+          if(result.status!==0){console.error(result.stderr);process.exit(result.status||1);}
+          const review=JSON.parse(fs.readFileSync(resultPath,'utf8'));console.log(JSON.stringify(review));if(review.status!=='clean'||review.findings.length)process.exitCode=1;
+          JS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cloudflare-infrastructure-review
+          path: ${{ runner.temp }}/infra-review
+          if-no-files-found: error

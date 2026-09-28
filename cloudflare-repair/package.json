@@ -1,0 +1,1 @@
+{"name":"clawsweeper-cloudflare-repair","private":true,"type":"module","dependencies":{"@cloudflare/sandbox":"0.12.10"},"devDependencies":{"wrangler":"4.141.0"}}

@@ -113,6 +113,8 @@ const e2eRun = runResult("docker", [
   "seccomp=unconfined",
   "--security-opt",
   "systempaths=unconfined",
+  "--security-opt",
+  "apparmor=unconfined",
   // The production validator creates its own user/mount namespace and drops
   // every capability before the target starts. Mapping a non-root host UID
   // into this outer container prevents that nested namespace from remounting

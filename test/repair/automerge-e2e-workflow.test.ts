@@ -4,12 +4,14 @@ import test from "node:test";
 
 const workflow = fs.readFileSync(".github/workflows/automerge-e2e.yml", "utf8");
 
-test("automerge E2E uses the production containment runner and container entrypoint", () => {
-  assert.match(
-    workflow,
-    /runs-on: \$\{\{ vars\.CLAWSWEEPER_E2E_RUNNER \|\| 'blacksmith-16vcpu-ubuntu-2404' \}\}/,
-  );
+test("automerge E2E uses a hosted CI runner and the containment container entrypoint", () => {
+  assert.match(workflow, /runs-on: ubuntu-latest/);
   assert.match(workflow, /node scripts\/e2e\/automerge-container\.mjs/);
+  assert.match(workflow, /kernel\.apparmor_restrict_unprivileged_userns=0/);
+  assert.match(
+    fs.readFileSync("scripts/e2e/automerge-container.mjs", "utf8"),
+    /apparmor=unconfined/,
+  );
   assert.match(workflow, /--scenario all/);
   assert.match(workflow, /--fixture all/);
   assert.match(workflow, /--output test-results\/automerge/);
