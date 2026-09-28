@@ -170,6 +170,42 @@ test("populated coordinator preserves pending reviews and publishes during coold
   }
 });
 
+test("fallback-enabled exact reviews dispatch while the Codex subscription is exhausted", async () => {
+  const { createExactReviewAdmissionHarness, buildExactReviewQueueRequest, jsonResponse } =
+    await import("./dashboard-worker-harness.ts");
+  const { quotaRequest } = await import("../dashboard/subscription-quota.ts");
+  const harness = createExactReviewAdmissionHarness(() => jsonResponse({ state: "open" }), {
+    maxConcurrent: "16",
+    inferenceFallback: true,
+  });
+  try {
+    assert.equal(
+      (
+        await harness.queue.fetch(
+          buildExactReviewQueueRequest(
+            "fallback-review",
+            9220,
+            "opened",
+            "issue",
+            "openclaw/gogcli",
+          ),
+        )
+      ).status,
+      202,
+    );
+    quotaRequest(harness.storage, { action: "exhausted", sentAt: Date.now() });
+    await harness.queue.alarm();
+
+    const stats = await (await harness.queue.fetch(new Request("https://queue/stats"))).json();
+    assert.equal(harness.dispatched.length, 1);
+    assert.equal(stats.pending, 0);
+    assert.equal(stats.dispatching, 1);
+    assert.equal(harness.dispatched[0]?.event_type, "clawsweeper_item");
+  } finally {
+    harness.restore();
+  }
+});
+
 test("observer refresh replaces stale exhaustion without permitting model admission", () => {
   const probe = apply(emptyQuota(), { action: "admit" });
   const exhausted = apply(probe.state, {
