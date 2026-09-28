@@ -58,6 +58,7 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
     );
     writeFileSync(promptPath, options.prompt, { encoding: "utf8", mode: 0o600 });
     const sessionId = openclawSessionId(options.label);
+    // Use the stable headless exec contract for normal automation; retain local mode only for checkout attestation receipts.
     const args = options.checkoutInspection
       ? [
           "agent",
