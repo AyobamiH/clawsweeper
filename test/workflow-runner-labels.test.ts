@@ -47,6 +47,7 @@ test("operator fixture cleanup derives its identity and runs after partial launc
     /failed-jobs-only rerun cannot reuse destroyed Cloudflare fixture compute/,
   );
   assert.match(source, /continuing GitHub runner deregistration/);
+  assert.match(source, /--retry-max-time 180 --max-time (?:45|60)/);
 });
 
 test("hosted review smoke counts only inference starts", () => {

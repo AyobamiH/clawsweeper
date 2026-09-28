@@ -50,7 +50,7 @@ jobs:
             registration="$(gh api --method POST repos/AyobamiH/clawsweeper/actions/runners/generate-jitconfig -f name="$runner_name" -F runner_group_id=1 -f 'labels[]=self-hosted' -f 'labels[]=Linux' -f 'labels[]=X64' -f "labels[]=$runner_name" --jq .encoded_jit_config)"
             printf '\n::add-mask::%s\n' "$registration"
             jq -n --arg name "$runner_name" --arg jit "$registration" '{name:$name,jit:$jit}' > "$payload"
-            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --max-time 180 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" --output "$RUNNER_TEMP/runner-start-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --retry-delay 10 --retry-max-time 180 --max-time 60 --request POST --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$payload" --output "$RUNNER_TEMP/runner-start-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
           done
           for lane in execute; do
             runner_name="csw-$nonce-$lane"
@@ -178,7 +178,7 @@ jobs:
           fi
           if [ "$cloudflare_ready" = 1 ]; then
             jq -n --arg name "$FIXTURE_RUNNER_NAME" '{name:$name}' > "$RUNNER_TEMP/cleanup.json"
-            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner || cleanup_failed=1
+            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 180 --max-time 45 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner || cleanup_failed=1
           fi
           gh api repos/AyobamiH/clawsweeper/actions/runners \
             --jq ".runners[] | select(.name == \"$FIXTURE_RUNNER_NAME\") | .id" > "$RUNNER_TEMP/fixture-runner-ids" || cleanup_failed=1

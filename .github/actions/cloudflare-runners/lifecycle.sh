@@ -50,7 +50,7 @@ for lane in plan execute; do
     verb=DELETE
   fi
   response_ok=0
-  if [ "$cloudflare_ready" = 1 ] && curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 120 --request "$verb" --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$scratch_dir/request.json" --output "$scratch_dir/response.json" "$endpoint/runner"; then
+  if [ "$cloudflare_ready" = 1 ] && curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 180 --max-time 45 --request "$verb" --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$scratch_dir/request.json" --output "$scratch_dir/response.json" "$endpoint/runner"; then
     if jq -e --arg key "$([ "$verb" = POST ] && echo started || echo stopped)" '.[$key] == true' "$scratch_dir/response.json" >/dev/null; then response_ok=1; fi
   fi
   if [ "$response_ok" != 1 ]; then

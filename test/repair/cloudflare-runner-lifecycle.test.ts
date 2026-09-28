@@ -89,6 +89,7 @@ test("Cloudflare cleanup attempts both containers and deregistration after the f
   assert.match(result.stderr, /continuing remaining cleanup/);
   assert.equal(result.calls.match(/--request DELETE/g)?.length, 2);
   assert.equal(result.calls.match(/--method DELETE/g)?.length, 2);
+  assert.match(result.calls, /--retry-max-time 180 --max-time 45/);
 });
 
 test("Cloudflare cleanup still deregisters both runners when dependency preparation fails", () => {
