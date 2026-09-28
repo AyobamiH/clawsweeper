@@ -11,6 +11,9 @@ import {
 import { runOpenclawProcess } from "./openclaw-process.js";
 import { AgentInputScanError, scanAgentInput, type AgentScanSource } from "./agent-input-scan.js";
 
+const DEFAULT_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS = 120_000;
+const MAX_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS = 180_000;
+
 export type AgentRunner = "codex" | "openclaw";
 
 export interface RunAgentProcessOptions {
@@ -165,7 +168,7 @@ export function runAgentCheckoutInspection(options: {
       model: openclawModel(env),
       cwd: options.cwd,
       env,
-      timeoutMs: Math.min(remainingMs(), 30_000),
+      timeoutMs: openclawCheckoutInspectionTimeoutMs(env, remainingMs()),
       checkoutInspection: { expectedText: challenge.text, expectedPath: challenge.path },
     });
   }
@@ -222,6 +225,21 @@ export function runAgentCheckoutInspection(options: {
       timeoutMs: Math.min(remainingMs(), 30_000),
     }),
     fingerprint,
+  );
+}
+
+function openclawCheckoutInspectionTimeoutMs(
+  env: NodeJS.ProcessEnv,
+  remainingMs: number,
+): number {
+  const configured = Number(env.CLAWSWEEPER_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS);
+  const requested =
+    Number.isFinite(configured) && configured > 0
+      ? configured
+      : DEFAULT_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS;
+  return Math.min(
+    remainingMs,
+    Math.max(10_000, Math.min(MAX_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS, requested)),
   );
 }
 
