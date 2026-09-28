@@ -56,8 +56,7 @@ export async function selectInferenceRoute(
     return {
       available: true,
       runner: "openclaw",
-      reason:
-        policy === "workers-ai" ? "forced_workers_ai" : "codex_subscription_unavailable",
+      reason: policy === "workers-ai" ? "forced_workers_ai" : "codex_subscription_unavailable",
       model: `workersai/${modelId}`,
       providersJson: JSON.stringify(provider),
     };
