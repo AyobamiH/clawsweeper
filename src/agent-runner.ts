@@ -228,10 +228,7 @@ export function runAgentCheckoutInspection(options: {
   );
 }
 
-function openclawCheckoutInspectionTimeoutMs(
-  env: NodeJS.ProcessEnv,
-  remainingMs: number,
-): number {
+function openclawCheckoutInspectionTimeoutMs(env: NodeJS.ProcessEnv, remainingMs: number): number {
   const configured = Number(env.CLAWSWEEPER_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS);
   const requested =
     Number.isFinite(configured) && configured > 0
