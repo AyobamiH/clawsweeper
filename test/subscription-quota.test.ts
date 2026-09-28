@@ -185,7 +185,13 @@ test("fallback-enabled exact reviews dispatch while the Codex subscription is ex
     assert.equal(
       (
         await harness.queue.fetch(
-          buildExactReviewQueueRequest("fallback-review", 9220, "opened", "issue", "openclaw/gogcli"),
+          buildExactReviewQueueRequest(
+            "fallback-review",
+            9220,
+            "opened",
+            "issue",
+            "openclaw/gogcli",
+          ),
         )
       ).status,
       202,
@@ -199,10 +205,7 @@ test("fallback-enabled exact reviews dispatch while the Codex subscription is ex
     assert.equal(harness.dispatched.length, 1);
     assert.equal(stats.pending, 0);
     assert.equal(stats.dispatching, 1);
-    assert.equal(
-      harness.dispatched[0]?.event_type,
-      "clawsweeper_item",
-    );
+    assert.equal(harness.dispatched[0]?.event_type, "clawsweeper_item");
   } finally {
     harness.restore();
   }
