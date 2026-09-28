@@ -206,6 +206,51 @@ test("fallback-enabled exact reviews dispatch while the Codex subscription is ex
   }
 });
 
+test("fallback-enabled exact reviews ignore a persisted Codex admission hold", async () => {
+  const { createExactReviewAdmissionHarness, buildExactReviewQueueRequest, jsonResponse } =
+    await import("./dashboard-worker-harness.ts");
+  const { quotaRequest } = await import("../dashboard/subscription-quota.ts");
+  const harness = createExactReviewAdmissionHarness(() => jsonResponse({ state: "open" }), {
+    maxConcurrent: "16",
+    inferenceFallback: true,
+  });
+  try {
+    assert.equal(
+      (
+        await harness.queue.fetch(
+          buildExactReviewQueueRequest(
+            "fallback-persisted-hold",
+            9221,
+            "opened",
+            "issue",
+            "openclaw/gogcli",
+          ),
+        )
+      ).status,
+      202,
+    );
+    quotaRequest(harness.storage, { action: "exhausted", sentAt: Date.now() });
+
+    const state = (await harness.storage.get("exact-review-queue")) as {
+      dispatcher?: { reviewAdmissionNextAt?: number };
+    };
+    state.dispatcher = {
+      ...(state.dispatcher || {}),
+      reviewAdmissionNextAt: Date.now() + 7 * 24 * 60 * 60_000,
+    };
+    await harness.storage.put("exact-review-queue", state);
+
+    await harness.queue.alarm();
+
+    const stats = await (await harness.queue.fetch(new Request("https://queue/stats"))).json();
+    assert.equal(harness.dispatched.length, 1);
+    assert.equal(stats.pending, 0);
+    assert.equal(stats.dispatching, 1);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("observer refresh replaces stale exhaustion without permitting model admission", () => {
   const probe = apply(emptyQuota(), { action: "admit" });
   const exhausted = apply(probe.state, {
