@@ -11,6 +11,9 @@ outputs:
   execute:
     description: Unique execution runner label
     value: ${{ steps.lifecycle.outputs.execute }}
+  attempt:
+    description: Workflow attempt that provisioned these runners
+    value: ${{ steps.lifecycle.outputs.attempt }}
 runs:
   using: composite
   steps:

@@ -2491,7 +2491,7 @@ test("repair workflows preserve existing dispatch while scheduled cluster intake
   );
   assert.match(
     intakeJobHeader,
-    /if: \$\{\{ github\.event_name != 'schedule' \|\| vars\.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1' \}\}/,
+    /CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY != ''[\s\S]*CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1'/,
   );
   assert.ok(
     clusterIntake.indexOf("vars.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED") <

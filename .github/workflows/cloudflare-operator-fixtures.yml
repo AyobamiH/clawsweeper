@@ -40,7 +40,8 @@ jobs:
           probe_token="$(openssl rand -hex 32)"
           echo "::add-mask::$probe_token"
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
-          nonce="$(openssl rand -hex 8)"
+          nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
+          echo "runner=csw-$nonce-execute" >> "$GITHUB_OUTPUT"
           payload="$RUNNER_TEMP/runner-start.json"
           trap 'rm -f "$payload"' EXIT
           for lane in execute; do
@@ -62,7 +63,6 @@ jobs:
               exit 1
             fi
           done
-          echo "runner=csw-$nonce-execute" >> "$GITHUB_OUTPUT"
     outputs:
       runner: ${{ steps.launch.outputs.runner }}
   validate:
@@ -128,25 +128,43 @@ jobs:
     needs:
       - launch
       - validate
-    if: ${{ always() && needs.launch.outputs.runner != '' }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Create scoped cleanup credential
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
       - name: Destroy isolated fixture container
         env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
-          FIXTURE_RUNNER_NAME: ${{ needs.launch.outputs.runner }}
         run: |
           set -euo pipefail
+          nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
+          FIXTURE_RUNNER_NAME="csw-$nonce-execute"
           cd cloudflare-repair
           npm ci --no-audit --no-fund
           probe_token="$(openssl rand -hex 32)"
           echo "::add-mask::$probe_token"
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
           jq -n --arg name "$FIXTURE_RUNNER_NAME" '{name:$name}' > "$RUNNER_TEMP/cleanup.json"
-          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner
+          cleanup_failed=0
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner || cleanup_failed=1
+          gh api repos/AyobamiH/clawsweeper/actions/runners \
+            --jq ".runners[] | select(.name == \"$FIXTURE_RUNNER_NAME\") | .id" > "$RUNNER_TEMP/fixture-runner-ids" || cleanup_failed=1
+          while read -r runner_id; do
+            [ -z "$runner_id" ] || gh api --method DELETE "repos/AyobamiH/clawsweeper/actions/runners/$runner_id" || cleanup_failed=1
+          done < "$RUNNER_TEMP/fixture-runner-ids"
+          exit "$cleanup_failed"

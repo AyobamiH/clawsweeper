@@ -11,7 +11,7 @@ on:
       target_repo:
         description: "Target repository"
         required: true
-        default: "openclaw/openclaw"
+        default: "AyobamiH/openclaw-operator"
         type: string
       limit:
         description: "Number of unprocessed clusters offered to the selector model"
@@ -39,9 +39,8 @@ on:
         default: false
         type: boolean
   schedule:
-    # gitcrawl-store refreshes openclaw/openclaw every 15 minutes. This intake
-    # runs daily and records the processed portable DB SHA so a
-    # delayed or duplicate tick does not enqueue work from the same store twice.
+    # Imported cluster intake is opt-in in this fork. It runs only when the
+    # feature flag and an explicitly accessible store repository are configured.
     - cron: "8 8 * * *"
 
 permissions:
@@ -56,12 +55,12 @@ env:
   CLAWSWEEPER_GIT_USER_EMAIL: ${{ vars.CLAWSWEEPER_GIT_USER_EMAIL || '274271284+clawsweeper[bot]@users.noreply.github.com' }}
 
 concurrency:
-  group: cluster-repair-intake-${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_CLUSTER_REPAIR_TARGET_REPO || 'openclaw/openclaw' }}
+  group: cluster-repair-intake-${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_CLUSTER_REPAIR_TARGET_REPO || 'AyobamiH/openclaw-operator' }}
   cancel-in-progress: false
 
 jobs:
   intake:
-    if: ${{ github.event_name != 'schedule' || vars.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1' }}
+    if: ${{ vars.CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY != '' && (github.event_name != 'schedule' || vars.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -82,14 +81,14 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
-          owner: AyobamiH
-          repositories: gitcrawl-store
+          owner: ${{ vars.CLAWSWEEPER_GITCRAWL_STORE_OWNER }}
+          repositories: ${{ vars.CLAWSWEEPER_GITCRAWL_STORE_NAME }}
           permission-contents: read
 
       - name: Resolve target repository
         id: target
         env:
-          TARGET_REPO: ${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_CLUSTER_REPAIR_TARGET_REPO || 'openclaw/openclaw' }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo || vars.CLAWSWEEPER_CLUSTER_REPAIR_TARGET_REPO || 'AyobamiH/openclaw-operator' }}
           ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
         run: |
           set -euo pipefail
@@ -180,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ steps.central-token.outputs.token }}
           CLAWSWEEPER_STATE_COORDINATOR_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          CLAWSWEEPER_REPO: openclaw/clawsweeper
+          CLAWSWEEPER_REPO: ${{ github.repository }}
           CLAWSWEEPER_DISPATCH_REF: ${{ github.ref_name }}
           CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
           CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}
@@ -188,7 +187,7 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
-          repository: openclaw/gitcrawl-store
+          repository: ${{ vars.CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY }}
           token: ${{ steps.store-token.outputs.token }}
           path: gitcrawl-store
           fetch-depth: 1
@@ -376,7 +375,7 @@ jobs:
           GH_TOKEN: ${{ steps.central-token.outputs.token }}
           CLAWSWEEPER_STATE_COORDINATOR_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
-          CLAWSWEEPER_REPO: openclaw/clawsweeper
+          CLAWSWEEPER_REPO: ${{ github.repository }}
           CLAWSWEEPER_DISPATCH_REF: ${{ github.ref_name }}
           CLAWSWEEPER_WORKER_RUNNER: ${{ vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
           CLAWSWEEPER_EXECUTION_RUNNER: ${{ vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}

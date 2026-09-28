@@ -47,6 +47,7 @@ jobs:
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
       execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -72,9 +73,14 @@ jobs:
     needs: deploy
   plan-proof:
     needs: provision
-    runs-on: ${{ needs.provision.outputs.plan }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
     timeout-minutes: 8
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so this proof receives fresh Cloudflare compute." >&2
+          exit 1
       - name: Run real Linux containment preflight
         shell: bash
         run: |
@@ -93,9 +99,14 @@ jobs:
           if-no-files-found: error
   execute-proof:
     needs: provision
-    runs-on: ${{ needs.provision.outputs.execute }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
     timeout-minutes: 8
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so this proof receives fresh Cloudflare compute." >&2
+          exit 1
       - name: Run real Linux containment preflight
         shell: bash
         run: |

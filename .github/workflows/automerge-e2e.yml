@@ -42,6 +42,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Enable nested unprivileged namespaces on the disposable CI host
+        run: |
+          set -euo pipefail
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Restore repository-built base image
         id: base-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6

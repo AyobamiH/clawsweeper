@@ -412,10 +412,15 @@ and hot intake `14`. Existing repair lanes keep their
   repair execution gates. The selector model compares live evidence for a batch
   of unprocessed clusters and chooses one cluster or rejects the batch. Candidate
   quality is not decided by word lists, scores, or semantic thresholds.
+- `CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY`,
+  `CLAWSWEEPER_GITCRAWL_STORE_OWNER`, and
+  `CLAWSWEEPER_GITCRAWL_STORE_NAME` must also identify a store already
+  accessible to the installed App. Missing configuration skips scheduled intake
+  without expanding repository access.
 - `CLAWSWEEPER_CLUSTER_REPAIR_CANDIDATE_BATCH` controls how many unprocessed
   clusters the scheduled selector model compares. The default is `8`; the model
-  still selects at most one cluster. The upstream gitcrawl-store refreshes every
-  15 minutes. Intake durably publishes the selected job, store identity, the
+  still selects at most one cluster. The configured store owns its refresh
+  cadence. Intake durably publishes the selected job, store identity, the
   model's per-cluster decisions and rationale, and stable dispatch key before
   dispatch. Decisions persist in a versioned sidecar so the
   strict v2 dispatch ledger remains backward-compatible with in-flight readers.

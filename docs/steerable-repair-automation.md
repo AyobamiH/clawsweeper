@@ -98,11 +98,11 @@ Ownership boundaries:
 Every steerable repair job is presented in the dashboards as one of three work
 types.
 
-| Work kind | Durable job intent | Purpose |
-| --- | --- | --- |
-| `issue_to_pr` | `implement_issue` | Verify one issue and open or update one focused implementation PR. |
-| `pr_repair` | `automerge_pr` | Repair, rebase, validate, re-review, and optionally merge an opted-in PR. |
-| `repair_cluster` | `repair_cluster` or another repair intent | Review and repair related issues and PRs, including GitCrawl imports. |
+| Work kind        | Durable job intent                        | Purpose                                                                   |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
+| `issue_to_pr`    | `implement_issue`                         | Verify one issue and open or update one focused implementation PR.        |
+| `pr_repair`      | `automerge_pr`                            | Repair, rebase, validate, re-review, and optionally merge an opted-in PR. |
+| `repair_cluster` | `repair_cluster` or another repair intent | Review and repair related issues and PRs, including GitCrawl imports.     |
 
 The work kind affects dashboard grouping and operator context. It does not
 bypass repair policy or mutation gates.
@@ -188,7 +188,9 @@ GitCrawl data is consumed in GitHub Actions, not from a maintainer laptop.
 
 The `repair-cluster-intake.yml` workflow:
 
-1. Mints a read-only GitHub App token for `openclaw/gitcrawl-store`.
+1. Requires explicit store repository, owner, and name variables, then mints a
+   read-only token only for that already-installed repository. Without those
+   variables, the fork skips scheduled intake.
 2. Checks out the current portable store snapshot.
 3. Reads `data/<owner>__<repo>.sync.db` and its adjacent manifest.
 4. Compares the manifest SHA-256 with
@@ -500,12 +502,12 @@ The Codex turn ending is not the completion signal.
 Work is complete only when the workflow emits a terminal work state with an
 explicit completion reason:
 
-| State | Completion reason | Meaning |
-| --- | --- | --- |
-| `completed` | `plan_complete` | Planning and deterministic result review passed; no mutation was requested. |
-| `completed` | `gates_passed` | Repair, validation, review, push, and post-flight gates passed. |
-| `blocked` | `action_failed` | The Action ended before all required gates passed. |
-| `canceled` | `stopped from Crabfleet` | An authorized operator canceled the action session. |
+| State       | Completion reason        | Meaning                                                                     |
+| ----------- | ------------------------ | --------------------------------------------------------------------------- |
+| `completed` | `plan_complete`          | Planning and deterministic result review passed; no mutation was requested. |
+| `completed` | `gates_passed`           | Repair, validation, review, push, and post-flight gates passed.             |
+| `blocked`   | `action_failed`          | The Action ended before all required gates passed.                          |
+| `canceled`  | `stopped from Crabfleet` | An authorized operator canceled the action session.                         |
 
 For execute or autonomous work, `gates_passed` means the relevant deterministic
 steps finished. Depending on job policy, the result may be a repaired source
@@ -569,15 +571,15 @@ The checked-in source of truth is `config/automation-limits.json`.
 
 Current global and key lane limits:
 
-| Limit | Value |
-| --- | ---: |
-| Global Codex worker budget | 128 |
-| Interactive reserve | 16 |
-| Expansion reserve | 8 |
-| Existing repair, PR repair, and issue implementation default | 51 |
-| Imported GitCrawl cluster repair | 2 |
-| Quiet normal-review ceiling | 89 |
-| Quiet hot-intake ceiling | 44 |
+| Limit                                                        | Value |
+| ------------------------------------------------------------ | ----: |
+| Global Codex worker budget                                   |   128 |
+| Interactive reserve                                          |    16 |
+| Expansion reserve                                            |     8 |
+| Existing repair, PR repair, and issue implementation default |    51 |
+| Imported GitCrawl cluster repair                             |     2 |
+| Quiet normal-review ceiling                                  |    89 |
+| Quiet hot-intake ceiling                                     |    44 |
 
 Important behavior:
 
@@ -793,40 +795,40 @@ Codex thread when the cache remains available.
 
 Core steerable-session configuration:
 
-| Name | Purpose |
-| --- | --- |
-| `CLAWSWEEPER_STEERABLE_CODEX` | Enables app-server threads, cache persistence, and CrabFleet steering. |
-| `CLAWSWEEPER_CRABFLEET_SERVICE_TOKEN` | Registers or resumes the logical action session. |
-| `CLAWSWEEPER_CRABFLEET_URL` | CrabFleet API and dashboard base URL. |
-| `CLAWSWEEPER_CRABFLEET_OWNER` | Active CrabFleet user principal for new action sessions. |
-| `CLAWSWEEPER_CODEX_TIMEOUT_MS` | Planning Codex call timeout. |
-| `CLAWSWEEPER_FIX_CODEX_TIMEOUT_MS` | Per-call execution Codex timeout. |
-| `CLAWSWEEPER_FIX_STEP_TIMEOUT_MS` | Overall fix executor step budget. |
+| Name                                  | Purpose                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `CLAWSWEEPER_STEERABLE_CODEX`         | Enables app-server threads, cache persistence, and CrabFleet steering. |
+| `CLAWSWEEPER_CRABFLEET_SERVICE_TOKEN` | Registers or resumes the logical action session.                       |
+| `CLAWSWEEPER_CRABFLEET_URL`           | CrabFleet API and dashboard base URL.                                  |
+| `CLAWSWEEPER_CRABFLEET_OWNER`         | Active CrabFleet user principal for new action sessions.               |
+| `CLAWSWEEPER_CODEX_TIMEOUT_MS`        | Planning Codex call timeout.                                           |
+| `CLAWSWEEPER_FIX_CODEX_TIMEOUT_MS`    | Per-call execution Codex timeout.                                      |
+| `CLAWSWEEPER_FIX_STEP_TIMEOUT_MS`     | Overall fix executor step budget.                                      |
 
 Issue implementation controls:
 
-| Name | Purpose |
-| --- | --- |
-| `CLAWSWEEPER_AUTO_IMPLEMENT_ISSUES` | Master automatic issue-to-PR gate; default off. |
-| `CLAWSWEEPER_AUTO_IMPLEMENT_VISION_FIT` | Small vision-aligned automatic lane. |
-| `CLAWSWEEPER_AUTO_IMPLEMENT_MAX_LIVE_WORKERS` | Issue implementation live-worker override. |
-| `CLAWSWEEPER_AUTO_IMPLEMENT_MAX_DISPATCH_PER_SWEEP` | Per-publish dispatch cap. |
+| Name                                                | Purpose                                         |
+| --------------------------------------------------- | ----------------------------------------------- |
+| `CLAWSWEEPER_AUTO_IMPLEMENT_ISSUES`                 | Master automatic issue-to-PR gate; default off. |
+| `CLAWSWEEPER_AUTO_IMPLEMENT_VISION_FIT`             | Small vision-aligned automatic lane.            |
+| `CLAWSWEEPER_AUTO_IMPLEMENT_MAX_LIVE_WORKERS`       | Issue implementation live-worker override.      |
+| `CLAWSWEEPER_AUTO_IMPLEMENT_MAX_DISPATCH_PER_SWEEP` | Per-publish dispatch cap.                       |
 
 GitCrawl controls:
 
-| Name | Purpose |
-| --- | --- |
-| `CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED` | Enables scheduled GitCrawl cluster intake. |
+| Name                                         | Purpose                                                                      |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED` | Enables scheduled GitCrawl cluster intake.                                   |
 | `CLAWSWEEPER_CLUSTER_REPAIR_CANDIDATE_BATCH` | Unprocessed clusters compared by the selector model; it selects at most one. |
-| `CLAWSWEEPER_MAX_LIVE_WORKERS` | Optional explicit repair dispatch override. |
+| `CLAWSWEEPER_MAX_LIVE_WORKERS`               | Optional explicit repair dispatch override.                                  |
 
 Mutation controls:
 
-| Name | Purpose |
-| --- | --- |
-| `CLAWSWEEPER_ALLOW_EXECUTE` | Enables deterministic execute or autonomous mutation steps. |
-| `CLAWSWEEPER_ALLOW_FIX_PR` | Enables branch repair or replacement and generated PR creation. |
-| `CLAWSWEEPER_ALLOW_MERGE` | Enables final guarded merge. |
+| Name                        | Purpose                                                         |
+| --------------------------- | --------------------------------------------------------------- |
+| `CLAWSWEEPER_ALLOW_EXECUTE` | Enables deterministic execute or autonomous mutation steps.     |
+| `CLAWSWEEPER_ALLOW_FIX_PR`  | Enables branch repair or replacement and generated PR creation. |
+| `CLAWSWEEPER_ALLOW_MERGE`   | Enables final guarded merge.                                    |
 
 ## Invariants
 

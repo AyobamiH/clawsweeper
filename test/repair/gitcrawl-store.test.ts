@@ -86,7 +86,9 @@ test("scheduled cluster repair intake follows gitcrawl-store freshness cadence",
   const internalDocs = readFileSync("docs/repair/internal-features.md", "utf8");
 
   assert.match(workflow, /cron: "8 8 \* \* \*"/);
-  assert.match(workflow, /gitcrawl-store refreshes openclaw\/openclaw every 15 minutes/);
+  assert.match(workflow, /CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY != ''/);
+  assert.match(workflow, /repository: \$\{\{ vars\.CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY \}\}/);
+  assert.match(workflow, /CLAWSWEEPER_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(workflow, /last_processed_store_sha256/);
   assert.match(workflow, /CLAWSWEEPER_CLUSTER_REPAIR_CANDIDATE_BATCH \|\| '8'/);
   assert.match(workflow, /repair:select-cluster-candidate/);
@@ -99,8 +101,8 @@ test("scheduled cluster repair intake follows gitcrawl-store freshness cadence",
   assert.doesNotMatch(workflow, /pnpm run repair:dispatch/);
   assert.doesNotMatch(workflow, /git pull --rebase origin main/);
   assert.match(limitsDocs, /one cluster or rejects the batch/);
-  assert.match(repairDocs, /intake runs daily/);
-  assert.match(internalDocs, /refreshes `openclaw\/openclaw` every 15\s+minutes/);
+  assert.match(repairDocs, /When configured, intake runs[\s\S]*daily/);
+  assert.match(internalDocs, /never\s+expands the App installation/);
 });
 
 test("cluster intake skips unrelated ledger and asset blob hydration", () => {

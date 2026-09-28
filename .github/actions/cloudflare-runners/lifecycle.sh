@@ -2,9 +2,10 @@
 set -euo pipefail
 case "${RUNNER_OPERATION:?}" in start|stop) ;; *) exit 2;; esac
 : "${GH_TOKEN:?}" "${CLOUDFLARE_API_TOKEN:?}" "${CLOUDFLARE_ACCOUNT_ID:?}"
-# Stable across jobs, distinct across retries. Cleanup does not depend on outputs
-# from a partially failed start job.
-nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" | sha256sum | cut -c1-16)"
+# Stable across jobs and attempts. A cleanup-only rerun must target the runners
+# created by the original attempt instead of deriving new, orphan-prone names.
+nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
+echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 endpoint=https://ayobamih-clawsweeper-compute.woeinvests.workers.dev
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT

@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-function exercise(operation: string, scenario: string) {
+function exercise(operation: string, scenario: string, runAttempt = "1") {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "cf-lifecycle-"));
   try {
     const bin = path.join(temp, "bin");
@@ -43,13 +43,18 @@ printf '{"started":true,"stopped":true}' > "$output"`,
         CLOUDFLARE_ACCOUNT_ID: "fixture",
         GITHUB_REPOSITORY: "fixture/repo",
         GITHUB_RUN_ID: "123",
-        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_RUN_ATTEMPT: runAttempt,
         GITHUB_OUTPUT: path.join(temp, "output"),
         TEST_LOG: log,
         TEST_SCENARIO: scenario,
       },
     });
-    return { status: result.status, stderr: result.stderr, calls: fs.readFileSync(log, "utf8") };
+    return {
+      status: result.status,
+      stderr: result.stderr,
+      calls: fs.readFileSync(log, "utf8"),
+      outputs: fs.readFileSync(path.join(temp, "output"), "utf8"),
+    };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -61,6 +66,18 @@ test("Cloudflare startup fails within its bounded window when the first runner r
   assert.match(result.stderr, /bounded startup window/);
   assert.equal(result.calls.match(/generate-jitconfig/g)?.length, 1);
   assert.equal(result.calls.match(/\.status/g)?.length, 18);
+});
+
+test("Cloudflare cleanup reuses stable runner identities across workflow attempts", () => {
+  const first = exercise("stop", "healthy", "1");
+  const retry = exercise("stop", "healthy", "3");
+  assert.equal(first.status, 0);
+  assert.equal(retry.status, 0);
+  const names = (calls: string) =>
+    [...calls.matchAll(/csw-[a-f0-9]{16}-(?:plan|execute)/g)].map(([name]) => name);
+  assert.deepEqual([...new Set(names(first.calls))], [...new Set(names(retry.calls))]);
+  assert.match(first.outputs, /^attempt=1$/m);
+  assert.match(retry.outputs, /^attempt=3$/m);
 });
 
 test("Cloudflare cleanup attempts both containers and deregistration after the first deletion fails", () => {

@@ -186,6 +186,7 @@ jobs:
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
       execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -213,7 +214,7 @@ jobs:
     name: Plan and review cluster
     needs: [receipt, provision]
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ needs.provision.outputs.plan }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
     timeout-minutes: 90
     outputs:
       allow_execute: ${{ steps.capture_gates.outputs.allow_execute }}
@@ -239,6 +240,12 @@ jobs:
       CLAWSWEEPER_CRABFLEET_URL: ${{ vars.CLAWSWEEPER_CRABFLEET_URL || 'https://crabfleet.openclaw.ai' }}
       OPENCLAW_LOCAL_CHECK: "0"
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "A failed-jobs-only rerun cannot reuse destroyed Cloudflare compute. Rerun all jobs to provision a fresh pair." >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           filter: blob:none
@@ -505,7 +512,7 @@ jobs:
     name: Execute and apply cluster actions
     needs: [cluster, provision]
     if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run }}
-    runs-on: ${{ needs.provision.outputs.execute }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
     timeout-minutes: 120
     permissions:
       actions: read
@@ -532,6 +539,12 @@ jobs:
       CLAWSWEEPER_CRABFLEET_URL: ${{ vars.CLAWSWEEPER_CRABFLEET_URL || 'https://crabfleet.openclaw.ai' }}
       OPENCLAW_LOCAL_CHECK: "0"
     steps:
+      - name: Require fresh compute provisioning for this attempt
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "A failed-jobs-only rerun cannot reuse destroyed Cloudflare compute. Rerun all jobs to provision a fresh pair." >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           filter: blob:none

@@ -12,13 +12,13 @@
 
 ## Use the right repair document
 
-| Need | Canonical page |
-| --- | --- |
-| Understand repair concepts, modes, artifacts, or local CLI entry points | This page |
-| Run or recover live repair work | [Operations](operations.md) |
-| Change implementation objects, stages, ledgers, or extension points | [Internal feature map](internal-features.md) |
-| Change trusted PR autofix/automerge behavior | [Auto-updating PRs](auto-update-prs.md) |
-| Understand the end-to-end steerable session protocol | [Steerable repair automation](../steerable-repair-automation.md) |
+| Need                                                                    | Canonical page                                                   |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Understand repair concepts, modes, artifacts, or local CLI entry points | This page                                                        |
+| Run or recover live repair work                                         | [Operations](operations.md)                                      |
+| Change implementation objects, stages, ledgers, or extension points     | [Internal feature map](internal-features.md)                     |
+| Change trusted PR autofix/automerge behavior                            | [Auto-updating PRs](auto-update-prs.md)                          |
+| Understand the end-to-end steerable session protocol                    | [Steerable repair automation](../steerable-repair-automation.md) |
 
 The operations runbook is the single source for live command trust, mutation
 gates, runner selection, token boundaries, routing, recovery, and promotion.
@@ -231,9 +231,11 @@ pnpm run repair:import-gitcrawl-low-signal -- --limit 20 --batch-size 5 --mode a
 # live evidence to the selector model, which chooses one useful cluster or none.
 pnpm run repair:import-gitcrawl -- --from-gitcrawl --limit 40 --mode autonomous --suffix autonomous-smoke --allow-instant-close --allow-merge --allow-fix-pr --allow-post-merge-close
 
-# Automatic imported-cluster intake runs through repair-cluster-intake.yml.
-# gitcrawl-store refreshes openclaw/openclaw every 15 minutes; the ClawSweeper
-# intake runs daily, records the processed portable DB SHA in
+# Optional imported-cluster intake runs through repair-cluster-intake.yml.
+# This fork leaves it disabled unless CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY,
+# CLAWSWEEPER_GITCRAWL_STORE_OWNER and CLAWSWEEPER_GITCRAWL_STORE_NAME identify
+# a store already accessible to the installed App. When configured, intake runs
+# daily and records the processed portable DB SHA in
 # results/cluster-repair-intake/<repo>.json, and skips repeated ticks for the
 # same store snapshot. The selector model compares the candidate batch without
 # word lists, scores, or semantic thresholds, and dispatches at most one cluster
