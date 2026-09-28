@@ -4,7 +4,6 @@ import test from "node:test";
 
 test("exact-review workflow resolves inference before setup and keeps broad Cloudflare token out", () => {
   const source = readFileSync(".github/workflows/sweep.yml", "utf8");
-  const exactJob = source.slice(source.indexOf("\n  review-event:"), source.indexOf("\n  ", source.indexOf("\n  review-event:") + 3) > 0 ? source.length : source.length);
   assert.match(source, /name: Resolve inference route/);
   assert.match(source, /CLAWSWEEPER_INFERENCE_POLICY: \$\{\{ vars\.CLAWSWEEPER_INFERENCE_POLICY \|\| 'auto' \}\}/);
   assert.match(source, /CLAWSWEEPER_WORKERS_AI_MODEL: \$\{\{ vars\.CLAWSWEEPER_WORKERS_AI_MODEL \|\| '@cf\/zai-org\/glm-5\.3' \}\}/);
