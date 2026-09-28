@@ -169,6 +169,40 @@ process.stdout.write("ok");
   }
 });
 
+test("OpenClaw runner accepts provider model ids with nested path segments", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-workers-ai-test-"));
+  const binary = join(root, "fake-openclaw");
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const result = { payloads: [{ text: "ok" }], meta: { stopReason: "stop" } };
+process.stdout.write(JSON.stringify(result));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "workers-ai-model-id",
+      scanSource: { kind: "prompt" },
+      prompt: "Return ok.",
+      model: "internal",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+      },
+      timeoutMs: 10_000,
+    });
+    assert.equal(result.status, 0, result.error?.message);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw runner requires a provider/model override", () => {
   assert.throws(
     () =>
