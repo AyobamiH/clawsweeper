@@ -27,9 +27,9 @@ jobs:
               item_number: 89,
               item_kind: "issue",
               source_event: "acceptance_probe",
-              source_action: "automatic_inference_fallback",
+              source_action: "automatic_inference_fallback_attestation_retry",
               supersedes_in_progress: true
             }
           }')"
           gh api repos/AyobamiH/clawsweeper/dispatches             --method POST             --input - <<< "$payload"
-          echo "Dispatched wagging-web-wins#89 through the production exact-review ingress."
+          echo "Re-dispatched wagging-web-wins#89 through the production exact-review ingress after attestation-budget fix."
