@@ -11,6 +11,8 @@ name: Provision and prove Cloudflare repair compute
 permissions:
   contents: read
 concurrency:
+  # One shared fleet gate covers deployment, proof, cleanup, and the review that
+  # binds its verdict to this exact head.
   group: cloudflare-repair-compute
   queue: max
   cancel-in-progress: false
