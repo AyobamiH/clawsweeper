@@ -128,7 +128,10 @@ test("OpenClaw process emits isolated config and invocation, joins payloads, and
       },
     });
     assert.deepEqual(record.args.slice(0, 2), ["agent", "exec"]);
-    assert.equal(record.args[record.args.indexOf("--message-file") + 1].endsWith("/prompt.md"), true);
+    assert.equal(
+      record.args[record.args.indexOf("--message-file") + 1].endsWith("/prompt.md"),
+      true,
+    );
     assert.equal(record.args[record.args.indexOf("--cwd") + 1], root);
     assert.equal(record.args[record.args.indexOf("--state-dir") + 1], record.stateDir);
     assert.equal(record.args[record.args.indexOf("--config") + 1], record.configPath);
