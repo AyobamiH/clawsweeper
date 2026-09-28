@@ -42,9 +42,20 @@ jobs:
       - name: Build site
         run: node scripts/build-docs-site.mjs
 
+      - name: Create Pages administration token
+        id: pages-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+
       - name: Configure Pages
         uses: actions/configure-pages@v6
         with:
+          token: ${{ steps.pages-token.outputs.token }}
           enablement: true
 
       - name: Upload artifact
