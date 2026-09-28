@@ -744,6 +744,7 @@ function createExactReviewAdmissionHarness(
     publicationBatchSize?: string;
     publicationFreshLane?: boolean;
     captureBatchDispatch?: boolean;
+    inferenceFallback?: boolean;
     workflow?: () => Response | Promise<Response>;
     targetInstallation?: (targetRepo: string) => Response | Promise<Response>;
     targetRepository?: (targetRepo: string) => Response | Promise<Response>;
@@ -843,6 +844,7 @@ function createExactReviewAdmissionHarness(
       CLAWSWEEPER_APP_PRIVATE_KEY: privateKey,
       EXACT_REVIEW_DISPATCH_DEBOUNCE_MS: "0",
       EXACT_REVIEW_QUEUE_MAX_CONCURRENT: options.maxConcurrent ?? "1",
+      ...(options.inferenceFallback ? { CLAWSWEEPER_INFERENCE_FALLBACK_ENABLED: "1" } : {}),
       ...(options.publicationBatching
         ? {
             EXACT_REVIEW_PUBLICATION_BATCHING_ENABLED: "1",
