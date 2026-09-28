@@ -146,7 +146,7 @@ export function parseOpenclawJsonEnvelope(
 ): { text: string; failure?: Error } {
   let envelope: unknown;
   try {
-    envelope = JSON.parse(stdout);
+    envelope = parseOpenclawJsonOutput(stdout);
   } catch {
     return {
       text: "",
@@ -323,6 +323,31 @@ function failedInspectionResult(
   message: string,
 ): CodexProcessResult {
   return { ...processResult, status: 1, error: new Error(message), stdout: "" };
+}
+
+function parseOpenclawJsonOutput(stdout: string): unknown {
+  const trimmed = stdout.trim();
+  if (!trimmed) throw new Error("empty OpenClaw stdout");
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Newer OpenClaw releases can emit bounded diagnostic lines before the
+    // final --json envelope. Preserve strict JSON semantics by accepting only
+    // a complete JSON suffix; never scrape arbitrary text for an answer.
+    const lines = stdout.split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const candidateStart = lines[index]?.trimStart() ?? "";
+      if (!candidateStart.startsWith("{") && !candidateStart.startsWith("[")) continue;
+      const candidate = lines.slice(index).join("\n").trim();
+      if (!candidate) continue;
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // Keep scanning earlier candidate boundaries.
+      }
+    }
+  }
+  throw new Error("no complete JSON envelope found");
 }
 
 function openclawFailureDetail(
