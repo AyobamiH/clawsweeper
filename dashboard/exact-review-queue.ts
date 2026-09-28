@@ -4211,6 +4211,7 @@ export class ExactReviewQueue {
     }
     const snapshotReviewAdmissionNextAt = Number(snapshot.dispatcher?.reviewAdmissionNextAt || 0);
     if (
+      !exactReviewInferenceFallbackEnabled(this.env) &&
       snapshotReviewAdmissionNextAt > startedAt &&
       snapshotAdmission.some((item) => !exactReviewQueueIsPublication(item)) &&
       !snapshotAdmission.some(exactReviewQueueIsPublication)
@@ -4287,7 +4288,9 @@ export class ExactReviewQueue {
     );
     const reviewAdmissionNextAt = Number(state.dispatcher?.reviewAdmissionNextAt || 0);
     const admission =
-      reviewAdmissionNextAt > now ? admitted.filter(exactReviewQueueIsPublication) : admitted;
+      !exactReviewInferenceFallbackEnabled(this.env) && reviewAdmissionNextAt > now
+        ? admitted.filter(exactReviewQueueIsPublication)
+        : admitted;
     if (!preflight.ok) {
       const retryAt = now + exactReviewWorkflowPausedRetryMs(this.env);
       state.dispatcher = {
