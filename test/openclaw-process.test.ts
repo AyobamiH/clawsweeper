@@ -327,6 +327,27 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
   }
 });
 
+test("OpenClaw JSON parser accepts a complete envelope after diagnostic stdout", () => {
+  const parsed = parseOpenclawJsonEnvelope(
+    [
+      "[session-sqlite] maintenance completed",
+      "[provider-transport-fetch] status=200",
+      JSON.stringify({
+        payloads: [{ text: "CLAWSWEEPER_WORKERS_AI_OK" }],
+        meta: { stopReason: "stop" },
+      }),
+    ].join("\n"),
+  );
+  assert.equal(parsed.failure, undefined);
+  assert.equal(parsed.text, "CLAWSWEEPER_WORKERS_AI_OK");
+});
+
+test("OpenClaw JSON parser still rejects diagnostic-only stdout", () => {
+  const parsed = parseOpenclawJsonEnvelope("[provider] status=200\nnot-json");
+  assert.match(parsed.failure?.message ?? "", /invalid JSON/);
+  assert.equal(parsed.text, "");
+});
+
 test("OpenClaw exit-zero error envelopes synthesize process failures", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-test-"));
   const binary = fakeOpenclaw(root);
