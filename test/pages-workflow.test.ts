@@ -17,6 +17,7 @@ test("Pages reruns upload and deploy a run-attempt-scoped artifact", () => {
   assert.match(appTokenStep, /owner: AyobamiH/);
   assert.match(appTokenStep, /repositories: clawsweeper/);
   assert.match(appTokenStep, /permission-administration: write/);
+  assert.match(appTokenStep, /permission-pages: write/);
   assert.match(
     workflow,
     /uses: actions\/configure-pages@v6\n\s+with:\n\s+token: \$\{\{ steps\.pages-token\.outputs\.token \}\}\n\s+enablement: true/,
