@@ -171,11 +171,8 @@ test("populated coordinator preserves pending reviews and publishes during coold
 });
 
 test("fallback-enabled exact reviews dispatch while the Codex subscription is exhausted", async () => {
-  const {
-    createExactReviewAdmissionHarness,
-    buildExactReviewQueueRequest,
-    jsonResponse,
-  } = await import("./dashboard-worker-harness.ts");
+  const { createExactReviewAdmissionHarness, buildExactReviewQueueRequest, jsonResponse } =
+    await import("./dashboard-worker-harness.ts");
   const { quotaRequest } = await import("../dashboard/subscription-quota.ts");
   const harness = createExactReviewAdmissionHarness(() => jsonResponse({ state: "open" }), {
     maxConcurrent: "16",
@@ -199,9 +196,7 @@ test("fallback-enabled exact reviews dispatch while the Codex subscription is ex
     quotaRequest(harness.storage, { action: "exhausted", sentAt: Date.now() });
     await harness.queue.alarm();
 
-    const stats = await (
-      await harness.queue.fetch(new Request("https://queue/stats"))
-    ).json();
+    const stats = await (await harness.queue.fetch(new Request("https://queue/stats"))).json();
     assert.equal(harness.dispatched.length, 1);
     assert.equal(stats.pending, 0);
     assert.equal(stats.dispatching, 1);
