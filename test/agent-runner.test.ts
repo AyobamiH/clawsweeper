@@ -13,6 +13,88 @@ import {
   runAgentProcess,
 } from "../dist/agent-runner.js";
 
+function fakeOpenclawAttestationScript(): string {
+  return `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const { DatabaseSync } = require("node:sqlite");
+if (process.env.OPENCLAW_TEST_ARGS) {
+  fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
+}
+const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
+const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
+const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
+const challenged = fs
+  .readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8")
+  .split(/\\r?\\n/)[lineNumber - 1]
+  .trim();
+const sessionId = "fake-agent-exec-session";
+if (process.env.OPENCLAW_TEST_NO_RECEIPT !== "1") {
+  const agentDbPath = path.join(
+    process.env.OPENCLAW_STATE_DIR,
+    "agents",
+    "main",
+    "agent",
+    "openclaw-agent.sqlite",
+  );
+  const auditDbPath = path.join(process.env.OPENCLAW_STATE_DIR, "state", "openclaw.sqlite");
+  fs.mkdirSync(path.dirname(agentDbPath), { recursive: true });
+  fs.mkdirSync(path.dirname(auditDbPath), { recursive: true });
+  const agentDb = new DatabaseSync(agentDbPath);
+  const auditDb = new DatabaseSync(auditDbPath);
+  agentDb.exec("CREATE TABLE transcript_events (session_id TEXT, seq INTEGER, event_json TEXT)");
+  auditDb.exec(
+    "CREATE TABLE audit_events (sequence INTEGER, session_id TEXT, kind TEXT, tool_call_id TEXT, tool_name TEXT, action TEXT, status TEXT)",
+  );
+  const toolCallId = "read-checkout";
+  const readPath =
+    process.env.OPENCLAW_TEST_DIFFERENT_PATH === "1" ? "different.txt" : relativePath;
+  agentDb
+    .prepare("INSERT INTO transcript_events VALUES (?, 1, ?)")
+    .run(
+      sessionId,
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: toolCallId,
+              name: "read",
+              arguments: { path: readPath },
+            },
+          ],
+        },
+      }),
+    );
+  auditDb
+    .prepare(
+      "INSERT INTO audit_events VALUES (1, ?, 'tool_action', ?, 'read', 'tool.action.started', 'started')",
+    )
+    .run(sessionId, toolCallId);
+  auditDb
+    .prepare(
+      "INSERT INTO audit_events VALUES (2, ?, 'tool_action', ?, 'read', 'tool.action.finished', ?)",
+    )
+    .run(
+      sessionId,
+      toolCallId,
+      process.env.OPENCLAW_TEST_FAILED_READ === "1" ? "failed" : "succeeded",
+    );
+  agentDb.close();
+  auditDb.close();
+}
+process.stdout.write(
+  JSON.stringify({
+    sessionId,
+    payloads: [{ text: challenged }],
+    meta: { stopReason: "stop" },
+  }),
+);
+`;
+}
+
 test("agent runner defaults to Codex and fails closed on unknown values", () => {
   assert.equal(agentRunner({}), "codex");
   assert.equal(agentRunner({ CLAWSWEEPER_RUNNER: "codex" }), "codex");
@@ -280,33 +362,7 @@ test("OpenClaw checkout inspection attests the exact tracked path without checko
     ],
     { cwd: root },
   );
-  writeFileSync(
-    binary,
-    `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
-const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
-const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
-const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-if (process.env.OPENCLAW_TEST_NO_RECEIPT !== "1") {
-  const toolCallId = "read-checkout";
-  const readPath = process.env.OPENCLAW_TEST_DIFFERENT_PATH === "1" ? "different.txt" : relativePath;
-  const entries = [
-    { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: readPath } }] } },
-    { type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } },
-  ];
-  fs.writeFileSync(sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\\n") + "\\n");
-}
-process.stdout.write(JSON.stringify({
-  payloads: [{ text: challenged }],
-  meta: { stopReason: "stop" },
-}));
-`,
-  );
+  writeFileSync(binary, fakeOpenclawAttestationScript());
   chmodSync(binary, 0o755);
   const baseEnv = {
     ...process.env,
@@ -363,27 +419,7 @@ test("OpenClaw checkout inspection gets a bounded remote-provider latency budget
     ["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "tracked"],
     { cwd: root },
   );
-  writeFileSync(
-    binary,
-    `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
-const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
-const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
-const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
-const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-const toolCallId = "read-checkout";
-fs.writeFileSync(sessionFile, [
-  JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } }),
-  JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } })
-].join("\\n") + "\\n");
-process.stdout.write(JSON.stringify({ payloads: [{ text: challenged }], meta: { stopReason: "stop" } }));
-`,
-  );
+  writeFileSync(binary, fakeOpenclawAttestationScript());
   chmodSync(binary, 0o755);
   try {
     const result = runAgentCheckoutInspection({
@@ -420,27 +456,7 @@ test("OpenClaw checkout inspection latency budget is capped", (t) => {
     ["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "tracked"],
     { cwd: root },
   );
-  writeFileSync(
-    binary,
-    `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
-const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
-const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
-const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
-const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-const toolCallId = "read-checkout";
-fs.writeFileSync(sessionFile, [
-  JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } }),
-  JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } })
-].join("\\n") + "\\n");
-process.stdout.write(JSON.stringify({ payloads: [{ text: challenged }], meta: { stopReason: "stop" } }));
-`,
-  );
+  writeFileSync(binary, fakeOpenclawAttestationScript());
   chmodSync(binary, 0o755);
   try {
     const result = runAgentCheckoutInspection({
