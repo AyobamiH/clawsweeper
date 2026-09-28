@@ -32,10 +32,18 @@ const record = {
   },
 };
 fs.writeFileSync(process.env.OPENCLAW_TEST_RECORD, JSON.stringify(record));
+const sessionId = "fake-agent-exec-session";
 if (process.env.OPENCLAW_TEST_READ_PATH) {
-  const sessionId = record.args[record.args.indexOf("--session-id") + 1];
-  const sessionFile = require("node:path").join(record.stateDir, "agents", "main", "sessions", sessionId + ".jsonl");
-  fs.mkdirSync(require("node:path").dirname(sessionFile), { recursive: true });
+  const path = require("node:path");
+  const { DatabaseSync } = require("node:sqlite");
+  const agentDbPath = path.join(record.stateDir, "agents", "main", "agent", "openclaw-agent.sqlite");
+  const auditDbPath = path.join(record.stateDir, "state", "openclaw.sqlite");
+  fs.mkdirSync(path.dirname(agentDbPath), { recursive: true });
+  fs.mkdirSync(path.dirname(auditDbPath), { recursive: true });
+  const agentDb = new DatabaseSync(agentDbPath);
+  const auditDb = new DatabaseSync(auditDbPath);
+  agentDb.exec("CREATE TABLE transcript_events (session_id TEXT, seq INTEGER, event_json TEXT)");
+  auditDb.exec("CREATE TABLE audit_events (sequence INTEGER, session_id TEXT, kind TEXT, tool_call_id TEXT, tool_name TEXT, action TEXT, status TEXT)");
   const toolCallId = "read-checkout";
   const entries = [
     {
@@ -59,10 +67,46 @@ if (process.env.OPENCLAW_TEST_READ_PATH) {
   if (process.env.OPENCLAW_TEST_RECEIPT_EXTRA) {
     entries.push(...JSON.parse(process.env.OPENCLAW_TEST_RECEIPT_EXTRA));
   }
-  fs.writeFileSync(sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\\n") + "\\n");
+  let transcriptSeq = 0;
+  let auditSeq = 0;
+  for (const entry of entries) {
+    if (entry?.message?.role === "assistant" && Array.isArray(entry.message.content)) {
+      agentDb.prepare("INSERT INTO transcript_events VALUES (?, ?, ?)").run(
+        sessionId,
+        ++transcriptSeq,
+        JSON.stringify(entry),
+      );
+      for (const block of entry.message.content) {
+        if (block?.type !== "toolCall") continue;
+        auditDb.prepare("INSERT INTO audit_events VALUES (?, ?, 'tool_action', ?, ?, 'tool.action.started', 'started')").run(
+          ++auditSeq,
+          sessionId,
+          block.id,
+          block.name,
+        );
+      }
+    }
+    if (entry?.message?.role === "toolResult") {
+      auditDb.prepare("INSERT INTO audit_events VALUES (?, ?, 'tool_action', ?, ?, 'tool.action.finished', ?)").run(
+        ++auditSeq,
+        sessionId,
+        entry.message.toolCallId,
+        entry.message.toolName,
+        entry.message.isError === false ? "succeeded" : "failed",
+      );
+    }
+  }
+  agentDb.close();
+  auditDb.close();
 }
 process.stderr.write(process.env.OPENCLAW_TEST_STDERR || "");
-process.stdout.write(process.env.OPENCLAW_TEST_STDOUT || JSON.stringify({ payloads: [{ text: "done" }], meta: { stopReason: "stop" } }));
+let output = process.env.OPENCLAW_TEST_STDOUT || JSON.stringify({ payloads: [{ text: "done" }], meta: { stopReason: "stop" } });
+if (process.env.OPENCLAW_TEST_READ_PATH) {
+  const parsed = JSON.parse(output);
+  parsed.sessionId = sessionId;
+  output = JSON.stringify(parsed);
+}
+process.stdout.write(output);
 `,
   );
   chmodSync(binary, 0o755);
@@ -146,7 +190,7 @@ test("OpenClaw process emits isolated config and invocation, joins payloads, and
   }
 });
 
-test("OpenClaw checkout inspection retains local session mode for read receipts", () => {
+test("OpenClaw checkout inspection uses agent exec with retained SQLite state", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-checkout-mode-test-"));
   const recordPath = join(root, "record.json");
   const binary = fakeOpenclaw(root);
@@ -174,8 +218,9 @@ test("OpenClaw checkout inspection retains local session mode for read receipts"
     });
     assert.equal(result.status, 0, result.error?.message);
     const record = JSON.parse(readFileSync(recordPath, "utf8"));
-    assert.deepEqual(record.args.slice(0, 4), ["agent", "--local", "--agent", "main"]);
-    assert.ok(record.args.includes("--session-id"));
+    assert.deepEqual(record.args.slice(0, 2), ["agent", "exec"]);
+    assert.equal(record.args[record.args.indexOf("--state-dir") + 1], record.stateDir);
+    assert.equal(record.args.includes("--session-id"), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
