@@ -56,11 +56,20 @@ jobs:
           pnpm exec tsc -p tsconfig.repair.json --outDir "$RUNNER_TEMP/quota-repair-dist"
           CLAWSWEEPER_PROOF_DIST="$RUNNER_TEMP/quota-repair-dist" node scripts/prove-subscription-cooldown.mjs "$RUNNER_TEMP/subscription-repair-cooldown-proof.json"
       - name: Read ChatGPT allowance without inference
-        run: node dist/subscription-quota-worker.js read > "$RUNNER_TEMP/chatgpt-allowance.json"
+        id: allowance
+        run: |
+          node dist/subscription-quota-worker.js read > "$RUNNER_TEMP/chatgpt-allowance.json"
+          available="$(jq -r 'if (.windows | type) == "array" and (.windows | length) > 0 and ([.windows[].remainingPercent] | all(. > 0)) then "true" else "false" end' "$RUNNER_TEMP/chatgpt-allowance.json")"
+          echo "available=$available" >> "$GITHUB_OUTPUT"
       - name: Prove subscription fail-closed boundaries
         run: node scripts/prove-subscription-fail-closed.mjs "$RUNNER_TEMP/subscription-boundary-proof.json"
       - name: Prove refusal then clean structured review
+        if: ${{ steps.allowance.outputs.available == 'true' }}
         run: node scripts/hosted-review-scan-smoke.mjs "$RUNNER_TEMP/hosted-review-scan-proof.json"
+
+      - name: Prove refusal boundaries while Codex live proof is deferred
+        if: ${{ steps.allowance.outputs.available != 'true' }}
+        run: node scripts/hosted-review-scan-smoke.mjs "$RUNNER_TEMP/hosted-review-scan-proof.json" --refusal-only
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:

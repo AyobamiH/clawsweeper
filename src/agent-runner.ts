@@ -80,11 +80,12 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
   }
 
   const model = openclawModel(options.env);
+  const reasoningEffort = openclawReasoningEffort(model, options.reasoningEffort);
   const rawResult = runOpenclawProcess({
     label: options.label,
     prompt: options.prompt,
     model,
-    ...(options.reasoningEffort?.trim() ? { reasoningEffort: options.reasoningEffort.trim() } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     cwd: options.cwd,
     env: options.env,
     timeoutMs: options.timeoutMs,
@@ -335,12 +336,26 @@ export function codexAgentArgs(options: RunAgentProcessOptions): string[] {
   ];
 }
 
+function openclawReasoningEffort(
+  model: string,
+  reasoningEffort: string | undefined,
+): string | undefined {
+  const value = reasoningEffort?.trim();
+  if (!value) return undefined;
+  // Cloudflare Workers AI custom-provider models do not advertise OpenClaw's
+  // thinking-level capability. Passing Codex-style low/medium/high makes the
+  // CLI reject the run before inference; omit the flag and let the model use
+  // its native reasoning behavior.
+  if (model.startsWith("workersai/")) return undefined;
+  return value;
+}
+
 function openclawModel(env: NodeJS.ProcessEnv): string {
   const model = env.CLAWSWEEPER_OPENCLAW_MODEL?.trim();
   if (!model) {
     throw new Error("CLAWSWEEPER_OPENCLAW_MODEL is required when CLAWSWEEPER_RUNNER=openclaw.");
   }
-  if (!/^[^\s/]+\/[^\s/]+$/.test(model)) {
+  if (!/^[^\s/]+\/[^\s]+$/.test(model)) {
     throw new Error(
       "CLAWSWEEPER_OPENCLAW_MODEL must use provider/model form when CLAWSWEEPER_RUNNER=openclaw.",
     );

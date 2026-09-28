@@ -127,21 +127,55 @@ test("OpenClaw process emits isolated config and invocation, joins payloads, and
         },
       },
     });
-    assert.deepEqual(record.args.slice(0, 6), [
-      "agent",
-      "--local",
-      "--agent",
-      "main",
-      "--session-id",
-      record.args[5],
-    ]);
-    assert.match(record.args[5], /^review-42-/);
+    assert.deepEqual(record.args.slice(0, 2), ["agent", "exec"]);
+    assert.equal(
+      record.args[record.args.indexOf("--message-file") + 1].endsWith("/prompt.md"),
+      true,
+    );
+    assert.equal(record.args[record.args.indexOf("--cwd") + 1], root);
+    assert.equal(record.args[record.args.indexOf("--state-dir") + 1], record.stateDir);
+    assert.equal(record.args[record.args.indexOf("--config") + 1], record.configPath);
     assert.equal(record.args[record.args.indexOf("--model") + 1], "kimi/kimi-for-coding");
     assert.equal(record.args[record.args.indexOf("--timeout") + 1], "13");
     assert.equal(record.args[record.args.indexOf("--thinking") + 1], "high");
     assert.equal(record.args.at(-1), "--json");
     assert.equal(existsSync(record.stateDir), false);
     assert.equal(existsSync(record.configPath), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw checkout inspection retains local session mode for read receipts", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-checkout-mode-test-"));
+  const recordPath = join(root, "record.json");
+  const binary = fakeOpenclaw(root);
+  try {
+    const result = runOpenclawProcess({
+      label: "checkout-mode",
+      prompt: "Read the challenged line.",
+      model: "openai/test",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        OPENCLAW_TEST_RECORD: recordPath,
+        OPENCLAW_TEST_READ_PATH: "tracked.txt",
+        OPENCLAW_TEST_STDOUT: JSON.stringify({
+          payloads: [{ text: "tracked checkout content" }],
+          meta: { stopReason: "stop" },
+        }),
+      },
+      timeoutMs: 10_000,
+      checkoutInspection: {
+        expectedText: "tracked checkout content",
+        expectedPath: "tracked.txt",
+      },
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    const record = JSON.parse(readFileSync(recordPath, "utf8"));
+    assert.deepEqual(record.args.slice(0, 4), ["agent", "--local", "--agent", "main"]);
+    assert.ok(record.args.includes("--session-id"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -325,6 +359,27 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("OpenClaw JSON parser accepts a complete envelope after diagnostic stdout", () => {
+  const parsed = parseOpenclawJsonEnvelope(
+    [
+      "[session-sqlite] maintenance completed",
+      "[provider-transport-fetch] status=200",
+      JSON.stringify({
+        payloads: [{ text: "CLAWSWEEPER_WORKERS_AI_OK" }],
+        meta: { stopReason: "stop" },
+      }),
+    ].join("\n"),
+  );
+  assert.equal(parsed.failure, undefined);
+  assert.equal(parsed.text, "CLAWSWEEPER_WORKERS_AI_OK");
+});
+
+test("OpenClaw JSON parser still rejects diagnostic-only stdout", () => {
+  const parsed = parseOpenclawJsonEnvelope("[provider] status=200\nnot-json");
+  assert.match(parsed.failure?.message ?? "", /invalid JSON/);
+  assert.equal(parsed.text, "");
 });
 
 test("OpenClaw exit-zero error envelopes synthesize process failures", () => {

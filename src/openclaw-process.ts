@@ -58,21 +58,40 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
     );
     writeFileSync(promptPath, options.prompt, { encoding: "utf8", mode: 0o600 });
     const sessionId = openclawSessionId(options.label);
-    const args = [
-      "agent",
-      "--local",
-      "--agent",
-      "main",
-      "--session-id",
-      sessionId,
-      "--model",
-      options.model,
-      "--message-file",
-      promptPath,
-      "--timeout",
-      String(timeoutSeconds),
-      "--json",
-    ];
+    // Use the stable headless exec contract for normal automation; retain local mode only for checkout attestation receipts.
+    const args = options.checkoutInspection
+      ? [
+          "agent",
+          "--local",
+          "--agent",
+          "main",
+          "--session-id",
+          sessionId,
+          "--model",
+          options.model,
+          "--message-file",
+          promptPath,
+          "--timeout",
+          String(timeoutSeconds),
+          "--json",
+        ]
+      : [
+          "agent",
+          "exec",
+          "--message-file",
+          promptPath,
+          "--cwd",
+          options.cwd,
+          "--state-dir",
+          stateDir,
+          "--config",
+          configPath,
+          "--model",
+          options.model,
+          "--timeout",
+          String(timeoutSeconds),
+          "--json",
+        ];
     const thinking = options.reasoningEffort?.trim();
     if (thinking) args.splice(args.length - 1, 0, "--thinking", thinking);
     // Deny-by-default: the embedded agent runs untrusted repository content
@@ -146,7 +165,7 @@ export function parseOpenclawJsonEnvelope(
 ): { text: string; failure?: Error } {
   let envelope: unknown;
   try {
-    envelope = JSON.parse(stdout);
+    envelope = parseOpenclawJsonOutput(stdout);
   } catch {
     return {
       text: "",
@@ -234,9 +253,12 @@ function normalizeOpenclawResult(
 ): CodexProcessResult {
   if (processResult.error || processResult.status !== 0) return processResult;
   const parsed = parseOpenclawJsonEnvelope(completeStdout, processResult.stderr);
-  if (!parsed.failure) {
-    if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
-    if (parsed.text.trim() !== checkoutInspection.expectedText) {
+  const transcriptText =
+    parsed.failure && receipt ? finalAssistantTextFromTranscript(receipt.transcriptPath) : null;
+  if (!parsed.failure || transcriptText !== null) {
+    const text = transcriptText ?? parsed.text;
+    if (!checkoutInspection) return { ...processResult, stdout: text };
+    if (text.trim() !== checkoutInspection.expectedText) {
       return failedInspectionResult(
         processResult,
         "OpenClaw checkout inspection did not return the runner challenge.",
@@ -262,6 +284,43 @@ function normalizeOpenclawResult(
     (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
   }
   return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
+}
+
+function finalAssistantTextFromTranscript(transcriptPath: string): string | null {
+  let transcript: string;
+  try {
+    transcript = readFileSync(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  let finalText: string | null = null;
+  for (const line of transcript.split("\n")) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (!isRecord(entry) || !isRecord(entry.message) || entry.message.role !== "assistant") {
+      continue;
+    }
+    const content = entry.message.content;
+    if (typeof content === "string" && content.trim()) {
+      finalText = content;
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    const blocks = content.filter(isRecord);
+    if (blocks.some((block) => block.type === "toolCall")) continue;
+    const text = blocks
+      .filter((block) => block.type === "text" && typeof block.text === "string")
+      .map((block) => String(block.text))
+      .join("\n")
+      .trim();
+    if (text) finalText = text;
+  }
+  return finalText;
 }
 
 function hasSuccessfulReadReceipt(options: {
@@ -323,6 +382,31 @@ function failedInspectionResult(
   message: string,
 ): CodexProcessResult {
   return { ...processResult, status: 1, error: new Error(message), stdout: "" };
+}
+
+function parseOpenclawJsonOutput(stdout: string): unknown {
+  const trimmed = stdout.trim();
+  if (!trimmed) throw new Error("empty OpenClaw stdout");
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Newer OpenClaw releases can emit bounded diagnostic lines before the
+    // final --json envelope. Preserve strict JSON semantics by accepting only
+    // a complete JSON suffix; never scrape arbitrary text for an answer.
+    const lines = stdout.split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const candidateStart = lines[index]?.trimStart() ?? "";
+      if (!candidateStart.startsWith("{") && !candidateStart.startsWith("[")) continue;
+      const candidate = lines.slice(index).join("\n").trim();
+      if (!candidate) continue;
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // Keep scanning earlier candidate boundaries.
+      }
+    }
+  }
+  throw new Error("no complete JSON envelope found");
 }
 
 function openclawFailureDetail(
@@ -416,6 +500,9 @@ const OPENCLAW_CHILD_ENV_ALLOWLIST = [
   "ZAI_API_KEY",
   "DEEPSEEK_API_KEY",
   "MISTRAL_API_KEY",
+  // A Workers-AI-only token is intentionally separate from CLOUDFLARE_API_TOKEN.
+  // The broad deployment/container credential must never enter the agent process.
+  "CLOUDFLARE_WORKERS_AI_TOKEN",
 ] as const;
 
 function pickEnv(env: NodeJS.ProcessEnv, names: readonly string[]): NodeJS.ProcessEnv {
