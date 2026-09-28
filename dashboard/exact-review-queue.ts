@@ -4587,6 +4587,7 @@ export class ExactReviewQueue {
       return;
     }
     const subscriptionQuota = readQuota(this.storage);
+    const inferenceFallbackEnabled = exactReviewInferenceFallbackEnabled(this.env);
     const dispatchable = admission.flatMap((candidate) => {
       const item = checkedState.items[candidate.key];
       if (!item || item.revision !== candidate.revision || item.state !== "pending") return [];
@@ -4598,7 +4599,7 @@ export class ExactReviewQueue {
         const livePublication = livePublicationStateByCandidate.get(candidate.key);
         return !livePublication || livePublication.state.state !== "terminal" ? [item] : [];
       }
-      if (subscriptionQuota?.blockedUntil > Date.now()) return [];
+      if (!inferenceFallbackEnabled && subscriptionQuota?.blockedUntil > Date.now()) return [];
       const live = liveStateByCandidate.get(candidate.key);
       // A command acknowledgement needs the workflow's terminal completion
       // path even when the target is already closed. Unprobed reviews wait for
@@ -4619,7 +4620,7 @@ export class ExactReviewQueue {
       liveCandidates.length === EXACT_REVIEW_ADMISSION_LIVE_CHECK_MAX_ITEMS ||
       (terminalCompleted > 0 && hasReadyPendingReview);
     const nextReviewAdmissionAt = Math.max(
-      Number(subscriptionQuota?.blockedUntil || 0),
+      inferenceFallbackEnabled ? 0 : Number(subscriptionQuota?.blockedUntil || 0),
       shouldThrottleReviewAdmission
         ? checkedAt + EXACT_REVIEW_ADMISSION_INTERVAL_MS
         : Number(checkedState.dispatcher?.reviewAdmissionNextAt || 0),
@@ -13142,6 +13143,10 @@ function exactReviewPublicationBatchingEnabled(env) {
 
 function exactReviewDirectPublicationEnabled(env) {
   return String(env.EXACT_REVIEW_DIRECT_PUBLICATION_ENABLED ?? "1").trim() === "1";
+}
+
+function exactReviewInferenceFallbackEnabled(env) {
+  return String(env.CLAWSWEEPER_INFERENCE_FALLBACK_ENABLED || "").trim() === "1";
 }
 
 function exactReviewPublicationBatchSize(env) {
