@@ -8,27 +8,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
 
 jobs:
   dispatch-private-auto-fallback:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch private exact review through automatic inference policy
+      - name: Dispatch private exact review through normal repository event
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           payload="$(jq -nc '{
-            ref: "main",
-            inputs: {
+            event_type: "clawsweeper_item",
+            client_payload: {
               target_repo: "AyobamiH/wagging-web-wins",
               target_branch: "main",
-              item_number: "89",
-              hot_intake: "false",
-              apply_after_review: "false"
+              item_number: 89,
+              item_kind: "issue",
+              source_event: "acceptance_probe",
+              source_action: "automatic_inference_fallback",
+              supersedes_in_progress: true
             }
           }')"
-          gh api repos/AyobamiH/clawsweeper/actions/workflows/sweep.yml/dispatches             --method POST             --input - <<< "$payload"
-          echo "Dispatched wagging-web-wins#89 through ClawSweeper inference policy=auto."
+          gh api repos/AyobamiH/clawsweeper/dispatches             --method POST             --input - <<< "$payload"
+          echo "Dispatched wagging-web-wins#89 through the production exact-review ingress."
