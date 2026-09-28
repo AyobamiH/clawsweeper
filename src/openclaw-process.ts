@@ -234,9 +234,12 @@ function normalizeOpenclawResult(
 ): CodexProcessResult {
   if (processResult.error || processResult.status !== 0) return processResult;
   const parsed = parseOpenclawJsonEnvelope(completeStdout, processResult.stderr);
-  if (!parsed.failure) {
-    if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
-    if (parsed.text.trim() !== checkoutInspection.expectedText) {
+  const transcriptText =
+    parsed.failure && receipt ? finalAssistantTextFromTranscript(receipt.transcriptPath) : null;
+  if (!parsed.failure || transcriptText !== null) {
+    const text = transcriptText ?? parsed.text;
+    if (!checkoutInspection) return { ...processResult, stdout: text };
+    if (text.trim() !== checkoutInspection.expectedText) {
       return failedInspectionResult(
         processResult,
         "OpenClaw checkout inspection did not return the runner challenge.",
@@ -262,6 +265,43 @@ function normalizeOpenclawResult(
     (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
   }
   return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
+}
+
+function finalAssistantTextFromTranscript(transcriptPath: string): string | null {
+  let transcript: string;
+  try {
+    transcript = readFileSync(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  let finalText: string | null = null;
+  for (const line of transcript.split("\n")) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (!isRecord(entry) || !isRecord(entry.message) || entry.message.role !== "assistant") {
+      continue;
+    }
+    const content = entry.message.content;
+    if (typeof content === "string" && content.trim()) {
+      finalText = content;
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    const blocks = content.filter(isRecord);
+    if (blocks.some((block) => block.type === "toolCall")) continue;
+    const text = blocks
+      .filter((block) => block.type === "text" && typeof block.text === "string")
+      .map((block) => String(block.text))
+      .join("\n")
+      .trim();
+    if (text) finalText = text;
+  }
+  return finalText;
 }
 
 function hasSuccessfulReadReceipt(options: {
