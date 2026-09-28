@@ -11,8 +11,11 @@ function exercise(operation: string, scenario: string, runAttempt = "1") {
     const bin = path.join(temp, "bin");
     fs.mkdirSync(bin);
     const scripts = {
-      npm: "exit 0",
-      npx: "cat >/dev/null",
+      npm: `echo "npm $*" >> "$TEST_LOG"
+if [ "$TEST_SCENARIO" = preparation-failure ]; then exit 42; fi
+exit 0`,
+      npx: `echo "npx $*" >> "$TEST_LOG"
+cat >/dev/null`,
       sleep: "exit 0",
       gh: `echo "$*" >> "$TEST_LOG"
 case "$*" in
@@ -85,5 +88,13 @@ test("Cloudflare cleanup attempts both containers and deregistration after the f
   assert.equal(result.status, 1);
   assert.match(result.stderr, /continuing remaining cleanup/);
   assert.equal(result.calls.match(/--request DELETE/g)?.length, 2);
+  assert.equal(result.calls.match(/--method DELETE/g)?.length, 2);
+});
+
+test("Cloudflare cleanup still deregisters both runners when dependency preparation fails", () => {
+  const result = exercise("stop", "preparation-failure");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /continuing GitHub runner deregistration/);
+  assert.equal(result.calls.match(/--request DELETE/g)?.length ?? 0, 0);
   assert.equal(result.calls.match(/--method DELETE/g)?.length, 2);
 });

@@ -40,6 +40,13 @@ test("operator fixture cleanup derives its identity and runs after partial launc
   assert.match(source, /GITHUB_REPOSITORY:\$GITHUB_RUN_ID/);
   assert.match(source, /permission-administration: write/);
   assert.match(source, /actions\/runners\/\$runner_id/);
+  assert.equal(workflow.jobs.launch.outputs.attempt, "${{ steps.launch.outputs.attempt }}");
+  assert.match(workflow.jobs.validate["runs-on"], /needs\.launch\.outputs\.attempt/);
+  assert.match(
+    workflow.jobs.validate.steps[0].run,
+    /failed-jobs-only rerun cannot reuse destroyed Cloudflare fixture compute/,
+  );
+  assert.match(source, /continuing GitHub runner deregistration/);
 });
 
 test("hosted review smoke counts only inference starts", () => {

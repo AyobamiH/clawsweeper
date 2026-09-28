@@ -42,6 +42,7 @@ jobs:
           printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
           nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
           echo "runner=csw-$nonce-execute" >> "$GITHUB_OUTPUT"
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           payload="$RUNNER_TEMP/runner-start.json"
           trap 'rm -f "$payload"' EXIT
           for lane in execute; do
@@ -65,11 +66,17 @@ jobs:
           done
     outputs:
       runner: ${{ steps.launch.outputs.runner }}
+      attempt: ${{ steps.launch.outputs.attempt }}
   validate:
     needs: launch
-    runs-on: ${{ needs.launch.outputs.runner }}
+    runs-on: ${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
+      - name: Require fresh fixture compute for this attempt
+        if: ${{ needs.launch.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "A failed-jobs-only rerun cannot reuse destroyed Cloudflare fixture compute; rerun all jobs." >&2
+          exit 1
       - uses: actions/setup-node@v6
         with:
           node-version: 24.18.1
@@ -154,14 +161,25 @@ jobs:
           set -euo pipefail
           nonce="$(printf '%s' "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
           FIXTURE_RUNNER_NAME="csw-$nonce-execute"
-          cd cloudflare-repair
-          npm ci --no-audit --no-fund
-          probe_token="$(openssl rand -hex 32)"
-          echo "::add-mask::$probe_token"
-          printf '%s' "$probe_token" | npx wrangler secret put PROBE_TOKEN
-          jq -n --arg name "$FIXTURE_RUNNER_NAME" '{name:$name}' > "$RUNNER_TEMP/cleanup.json"
           cleanup_failed=0
-          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner || cleanup_failed=1
+          cloudflare_ready=1
+          if ! npm ci --prefix cloudflare-repair --no-audit --no-fund; then
+            echo "Fixture cleanup dependencies could not be installed; continuing GitHub runner deregistration" >&2
+            cloudflare_ready=0
+            cleanup_failed=1
+          else
+            probe_token="$(openssl rand -hex 32)"
+            echo "::add-mask::$probe_token"
+            if ! printf '%s' "$probe_token" | (cd cloudflare-repair && npx wrangler secret put PROBE_TOKEN); then
+              echo "Fixture cleanup credential rotation failed; continuing GitHub runner deregistration" >&2
+              cloudflare_ready=0
+              cleanup_failed=1
+            fi
+          fi
+          if [ "$cloudflare_ready" = 1 ]; then
+            jq -n --arg name "$FIXTURE_RUNNER_NAME" '{name:$name}' > "$RUNNER_TEMP/cleanup.json"
+            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 60 --max-time 90 --request DELETE --header "Authorization: Bearer $probe_token" --header 'Content-Type: application/json' --data-binary @"$RUNNER_TEMP/cleanup.json" --output "$RUNNER_TEMP/cleanup-response.json" https://ayobamih-clawsweeper-compute.woeinvests.workers.dev/runner || cleanup_failed=1
+          fi
           gh api repos/AyobamiH/clawsweeper/actions/runners \
             --jq ".runners[] | select(.name == \"$FIXTURE_RUNNER_NAME\") | .id" > "$RUNNER_TEMP/fixture-runner-ids" || cleanup_failed=1
           while read -r runner_id; do
