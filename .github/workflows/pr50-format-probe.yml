@@ -1,0 +1,19 @@
+name: PR50 format probe
+on:
+  push:
+    branches: [feat/inference-auto-routing-20260928]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pnpm
+      - name: Format inference router and print canonical file
+        run: |
+          pnpm exec oxfmt src/inference-router.ts
+          echo '===CANONICAL==='
+          cat src/inference-router.ts
+          echo '===DIFF==='
+          git diff -- src/inference-router.ts
