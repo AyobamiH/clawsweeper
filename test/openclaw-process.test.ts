@@ -146,6 +146,31 @@ test("OpenClaw process emits isolated config and invocation, joins payloads, and
   }
 });
 
+test("Workers AI headless reviews force OpenClaw code mode", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-workers-ai-code-mode-test-"));
+  const recordPath = join(root, "record.json");
+  const binary = fakeOpenclaw(root);
+  try {
+    const result = runOpenclawProcess({
+      label: "workers-ai-code-mode",
+      prompt: "Inspect this repository.",
+      model: "workersai/@cf/zai-org/glm-5.3",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        OPENCLAW_TEST_RECORD: recordPath,
+      },
+      timeoutMs: 10_000,
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    const record = JSON.parse(readFileSync(recordPath, "utf8"));
+    assert.equal(record.args[record.args.indexOf("--code-mode") + 1], "code");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw checkout inspection retains local session mode for read receipts", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-checkout-mode-test-"));
   const recordPath = join(root, "record.json");
