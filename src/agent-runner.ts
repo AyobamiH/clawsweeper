@@ -361,7 +361,7 @@ function normalizeOpenclawStructuredOutput(text: string): string {
   }
 
   const candidates: string[] = [];
-  for (let start = 0; start < trimmed.length; ) {
+  for (let start = 0; start < trimmed.length;) {
     const opener = trimmed[start];
     if (opener !== "{" && opener !== "[") {
       start += 1;
