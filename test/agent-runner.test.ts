@@ -229,7 +229,7 @@ test("OpenClaw structured output normalization extracts one schema candidate fro
   writeFileSync(
     binary,
     `#!/usr/bin/env node
-const final = 'Here is the structured result:\\n\\n\\`\\`\\`json\\n{"decision":"keep_open","summary":"ok"}\\n\\`\\`\\`';
+const final = 'Here is the structured result:\\n{"decision":"keep_open","summary":"ok"}\\nEnd of result.';
 process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [{ text: final }] }));
 `,
   );
