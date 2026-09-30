@@ -1,4 +1,4 @@
-# acceptance-rerun: structured-output-normalization
+# acceptance-rerun: top-level-structured-decision-20260930
 name: Automatic inference fallback private acceptance
 # acceptance-retrigger: openclaw-schema-contract-20260930
 
@@ -29,9 +29,9 @@ jobs:
               item_number: 89,
               item_kind: "issue",
               source_event: "acceptance_probe",
-              source_action: "automatic_inference_fallback_attestation_retry",
+              source_action: "automatic_inference_fallback_structured_decision_retry",
               supersedes_in_progress: true
             }
           }')"
           gh api repos/AyobamiH/clawsweeper/dispatches             --method POST             --input - <<< "$payload"
-          echo "Re-dispatched wagging-web-wins#89 through the production exact-review ingress after Workers AI code-mode fix."
+          echo "Re-dispatched wagging-web-wins#89 through the production exact-review ingress after top-level Workers AI structured-decision fix."
