@@ -103,7 +103,9 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
   });
   const result = redactOpenclawFailure(rawResult, model);
   if (!result.error && outputPath && result.stdout.trim()) {
-    writeFileSync(outputPath, result.stdout, "utf8");
+    const structuredOutput =
+      schemaPath === undefined ? result.stdout : normalizeOpenclawStructuredOutput(result.stdout);
+    writeFileSync(outputPath, structuredOutput, "utf8");
   }
   if (!options.appServer) return result;
   const note =
@@ -333,6 +335,62 @@ function openclawPromptWithSchema(prompt: string, schemaPath: string): string {
     "",
     schemaText,
   ].join("\n");
+}
+
+function normalizeOpenclawStructuredOutput(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // Provider-backed agents may wrap an otherwise valid structured result in
+    // Markdown or brief prose. Extract exactly one JSON value and let the
+    // existing schema/decision validator remain the authority on its contents.
+  }
+
+  const candidates: string[] = [];
+  const fenced = /^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i.exec(trimmed);
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+
+  for (let start = 0; start < trimmed.length; start += 1) {
+    const opener = trimmed[start];
+    if (opener !== "{" && opener !== "[") continue;
+    const closer = opener === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < trimmed.length; index += 1) {
+      const ch = trimmed[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === opener) depth += 1;
+      else if (ch === closer) depth -= 1;
+      if (depth === 0) {
+        candidates.push(trimmed.slice(start, index + 1));
+        break;
+      }
+    }
+  }
+
+  const valid = [...new Set(candidates)].filter((candidate) => {
+    try {
+      JSON.parse(candidate);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (valid.length === 1) return valid[0]!;
+  return trimmed;
 }
 
 function redactOpenclawFailure(result: CodexProcessResult, model: string): CodexProcessResult {
