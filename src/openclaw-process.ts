@@ -250,7 +250,12 @@ function normalizeOpenclawResult(
     if (/\btimeout\b/i.test(parsed.failure.message)) {
       (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
     }
-    return { ...processResult, status: processResult.status ?? 1, error: parsed.failure, stdout: parsed.text };
+    return {
+      ...processResult,
+      status: processResult.status ?? 1,
+      error: parsed.failure,
+      stdout: parsed.text,
+    };
   }
   if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
   if (parsed.text.trim() !== checkoutInspection.expectedText) {
