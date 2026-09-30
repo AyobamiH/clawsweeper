@@ -289,21 +289,14 @@ const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file
 const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
 const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
 const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-if (process.env.OPENCLAW_TEST_NO_RECEIPT !== "1") {
-  const toolCallId = "read-checkout";
-  const readPath = process.env.OPENCLAW_TEST_DIFFERENT_PATH === "1" ? "different.txt" : relativePath;
-  const entries = [
-    { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: readPath } }] } },
-    { type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } },
-  ];
-  fs.writeFileSync(sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\\n") + "\\n");
-}
 process.stdout.write(JSON.stringify({
+  ok: true,
+  status: "ok",
+  final: challenged,
   payloads: [{ text: challenged }],
-  meta: { stopReason: "stop" },
+  ...(process.env.OPENCLAW_TEST_NO_RECEIPT === "1"
+    ? {}
+    : { toolSummary: { calls: 1, tools: ["read"], failures: 0, totalToolTimeMs: 1 } }),
 }));
 `,
   );
@@ -326,23 +319,14 @@ process.stdout.write(JSON.stringify({
     });
     assert.equal(verified.status, 0, verified.error?.message);
 
-    const wrongPath = runAgentCheckoutInspection({
-      ...scan,
-      cwd: root,
-      env: { ...baseEnv, OPENCLAW_TEST_DIFFERENT_PATH: "1" },
-      timeoutMs: 10_000,
-    });
-    assert.equal(wrongPath.status, 1);
-    assert.match(wrongPath.error?.message ?? "", /exact challenged path/);
-
-    const missingReceipt = runAgentCheckoutInspection({
+    const missingEvidence = runAgentCheckoutInspection({
       ...scan,
       cwd: root,
       env: { ...baseEnv, OPENCLAW_TEST_NO_RECEIPT: "1" },
       timeoutMs: 10_000,
     });
-    assert.equal(missingReceipt.status, 1);
-    assert.match(missingReceipt.error?.message ?? "", /exact challenged path/);
+    assert.equal(missingEvidence.status, 1);
+    assert.match(missingEvidence.error?.message ?? "", /structured read evidence/);
   } finally {
     chmodSync(root, 0o755);
     chmodSync(trackedPath, 0o644);
@@ -373,15 +357,14 @@ const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file
 const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
 const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
 const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-const toolCallId = "read-checkout";
-fs.writeFileSync(sessionFile, [
-  JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } }),
-  JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } })
-].join("\\n") + "\\n");
-process.stdout.write(JSON.stringify({ payloads: [{ text: challenged }], meta: { stopReason: "stop" } }));
+process.stdout.write(JSON.stringify({
+  ok: true,
+  status: "ok",
+  final: challenged,
+  payloads: [{ text: challenged }],
+  codeModeEngaged: true,
+  bridgeCalls: { search: 0, describe: 0, call: 1 },
+}));
 `,
   );
   chmodSync(binary, 0o755);
@@ -430,15 +413,14 @@ const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file
 const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
 const lineNumber = Number(prompt.match(/^Return exactly line (\\d+)/m)[1]);
 const challenged = fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").split(/\\r?\\n/)[lineNumber - 1].trim();
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-const toolCallId = "read-checkout";
-fs.writeFileSync(sessionFile, [
-  JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } }),
-  JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: challenged }] } })
-].join("\\n") + "\\n");
-process.stdout.write(JSON.stringify({ payloads: [{ text: challenged }], meta: { stopReason: "stop" } }));
+process.stdout.write(JSON.stringify({
+  ok: true,
+  status: "ok",
+  final: challenged,
+  payloads: [{ text: challenged }],
+  codeModeEngaged: true,
+  bridgeCalls: { search: 0, describe: 0, call: 1 },
+}));
 `,
   );
   chmodSync(binary, 0o755);

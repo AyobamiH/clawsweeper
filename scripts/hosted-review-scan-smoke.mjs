@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { runAgentProcess } from "../dist/agent-runner.js";
 import { codexEnv } from "../dist/codex-env.js";
 import { AgentInputScanError } from "../dist/agent-input-scan.js";
+import { isCodexUsageLimitError } from "../dist/codex-transient.js";
 
 // Hosted proof: no GitHub credentials, publications, or target repository.
 assert.equal(process.platform, "linux");
@@ -166,28 +167,43 @@ ${live ? `const child = require('node:child_process').spawnSync(${JSON.stringify
   } else {
     writeProvider(true);
     const result = run();
-    assert.ok(!result.error, "native runner failed");
-    assert.equal(result.status, 0, "native runner exited unsuccessfully");
-    let parsed;
-    try {
-      parsed = JSON.parse(readFileSync(output, "utf8"));
-    } catch {
-      throw new Error("Native review did not produce valid JSON; diagnostics withheld.");
-    }
-    assert.ok(
-      parsed?.status === "clean" && parsed.marker === marker && Object.keys(parsed).length === 2,
-      "Native structured response did not match the fixture; diagnostics withheld.",
-    );
-    decision = { status: "clean", marker };
+    const providerStarted = existsSync(calls);
+    const liveQuotaExhausted =
+      (!providerStarted && result.status === 75) ||
+      isCodexUsageLimitError(result.error?.message) ||
+      isCodexUsageLimitError(result.stderr) ||
+      isCodexUsageLimitError(result.stdout);
     assertCheckout();
-    assert.equal(readFileSync(calls, "utf8"), "1");
-    cleanProviderStarts = 1;
+    if (providerStarted) {
+      assert.equal(readFileSync(calls, "utf8"), "1");
+      cleanProviderStarts = 1;
+    } else {
+      assert.equal(liveQuotaExhausted, true, "provider did not start for a non-quota failure");
+    }
     assert.ok(
       readFileSync(diagnosticPromptPath, "utf8") === prompt,
       "Admitted prompt diagnostic did not match; contents withheld.",
     );
     diagnosticPromptMode = statSync(diagnosticPromptPath).mode & 0o777;
     assert.equal(diagnosticPromptMode, 0o600);
+
+    if (liveQuotaExhausted) {
+      decision = { status: "deferred", reason: "subscription_exhausted_during_live_proof" };
+    } else {
+      assert.ok(!result.error, "native runner failed");
+      assert.equal(result.status, 0, "native runner exited unsuccessfully");
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync(output, "utf8"));
+      } catch {
+        throw new Error("Native review did not produce valid JSON; diagnostics withheld.");
+      }
+      assert.ok(
+        parsed?.status === "clean" && parsed.marker === marker && Object.keys(parsed).length === 2,
+        "Native structured response did not match the fixture; diagnostics withheld.",
+      );
+      decision = { status: "clean", marker };
+    }
   }
   writeFileSync(
     artifact,
