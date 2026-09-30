@@ -57,42 +57,24 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
       },
     );
     writeFileSync(promptPath, options.prompt, { encoding: "utf8", mode: 0o600 });
-    const sessionId = openclawSessionId(options.label);
-    // Use the stable headless exec contract for normal automation; retain local mode only for checkout attestation receipts.
-    const args = options.checkoutInspection
-      ? [
-          "agent",
-          "--local",
-          "--agent",
-          "main",
-          "--session-id",
-          sessionId,
-          "--model",
-          options.model,
-          "--message-file",
-          promptPath,
-          "--timeout",
-          String(timeoutSeconds),
-          "--json",
-        ]
-      : [
-          "agent",
-          "exec",
-          "--message-file",
-          promptPath,
-          "--cwd",
-          options.cwd,
-          "--state-dir",
-          stateDir,
-          "--config",
-          configPath,
-          "--model",
-          options.model,
-          ...(options.model.startsWith("workersai/") ? ["--code-mode", "code"] : []),
-          "--timeout",
-          String(timeoutSeconds),
-          "--json",
-        ];
+    const args = [
+      "agent",
+      "exec",
+      "--message-file",
+      promptPath,
+      "--cwd",
+      options.cwd,
+      "--state-dir",
+      stateDir,
+      "--config",
+      configPath,
+      "--model",
+      options.model,
+      ...(options.model.startsWith("workersai/") ? ["--code-mode", "code"] : []),
+      "--timeout",
+      String(timeoutSeconds),
+      "--json",
+    ];
     const thinking = options.reasoningEffort?.trim();
     if (thinking) args.splice(args.length - 1, 0, "--thinking", thinking);
     // Deny-by-default: the embedded agent runs untrusted repository content
@@ -146,12 +128,6 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
       processResult,
       readFileSync(stdoutPath, "utf8"),
       options.checkoutInspection,
-      {
-        cwd: options.cwd,
-        // OpenClaw persists an explicit local session under this agent-owned
-        // path; inspect it before the isolated state directory is removed.
-        transcriptPath: join(stateDir, "agents", "main", "sessions", `${sessionId}.jsonl`),
-      },
     );
   } catch (error) {
     return failedResult(error instanceof Error ? error : new Error(String(error)));
@@ -164,6 +140,17 @@ export function parseOpenclawJsonEnvelope(
   stdout: string,
   stderr = "",
 ): { text: string; failure?: Error } {
+  const parsed = parseOpenclawEnvelope(stdout, stderr);
+  return {
+    text: parsed.text,
+    ...(parsed.failure ? { failure: parsed.failure } : {}),
+  };
+}
+
+function parseOpenclawEnvelope(
+  stdout: string,
+  stderr = "",
+): { envelope?: Record<string, unknown>; text: string; failure?: Error } {
   let envelope: unknown;
   try {
     envelope = parseOpenclawJsonOutput(stdout);
@@ -180,13 +167,20 @@ export function parseOpenclawJsonEnvelope(
   }
   const result = isRecord(envelope.result) ? envelope.result : envelope;
   const payloads = Array.isArray(result.payloads) ? result.payloads : [];
-  const text = payloads
+  const payloadText = payloads
     .filter(isRecord)
     .map((payload) => (typeof payload.text === "string" ? payload.text : ""))
     .filter(Boolean)
     .join("\n");
+  const text =
+    typeof result.final === "string" && result.final.trim()
+      ? result.final
+      : typeof envelope.final === "string" && envelope.final.trim()
+        ? envelope.final
+        : payloadText;
   const failureDetail = openclawFailureDetail(envelope, result, payloads);
   return {
+    envelope,
     text,
     ...(failureDetail ? { failure: new Error(`OpenClaw agent failed: ${failureDetail}`) } : {}),
   };
@@ -250,132 +244,53 @@ function normalizeOpenclawResult(
   processResult: CodexProcessResult,
   completeStdout: string,
   checkoutInspection?: { expectedText: string; expectedPath: string },
-  receipt?: { cwd: string; transcriptPath: string },
 ): CodexProcessResult {
   if (processResult.error || processResult.status !== 0) return processResult;
-  const parsed = parseOpenclawJsonEnvelope(completeStdout, processResult.stderr);
-  const transcriptText =
-    parsed.failure && receipt ? finalAssistantTextFromTranscript(receipt.transcriptPath) : null;
-  if (!parsed.failure || transcriptText !== null) {
-    const text = transcriptText ?? parsed.text;
-    if (!checkoutInspection) return { ...processResult, stdout: text };
-    if (text.trim() !== checkoutInspection.expectedText) {
-      return failedInspectionResult(
-        processResult,
-        "OpenClaw checkout inspection did not return the runner challenge.",
-      );
+  const parsed = parseOpenclawEnvelope(completeStdout, processResult.stderr);
+  if (parsed.failure) {
+    if (/\btimeout\b/i.test(parsed.failure.message)) {
+      (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
     }
-    // The runtime-owned session receipt binds the successful read to the
-    // host-selected tracked path, whose expected line never enters the prompt.
-    if (
-      !receipt ||
-      !hasSuccessfulReadReceipt({
-        ...receipt,
-        expectedPath: checkoutInspection.expectedPath,
-      })
-    ) {
-      return failedInspectionResult(
-        processResult,
-        "OpenClaw checkout inspection did not read the exact challenged path.",
-      );
-    }
-    return { ...processResult, stdout: "" };
+    return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
   }
-  if (/\btimeout\b/i.test(parsed.failure.message)) {
-    (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
+  if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
+  if (parsed.text.trim() !== checkoutInspection.expectedText) {
+    return failedInspectionResult(
+      processResult,
+      "OpenClaw checkout inspection did not return the runner challenge.",
+    );
   }
-  return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
+  if (!parsed.envelope || !hasCheckoutReadEvidence(parsed.envelope)) {
+    return failedInspectionResult(
+      processResult,
+      "OpenClaw checkout inspection did not provide structured read evidence.",
+    );
+  }
+  return { ...processResult, stdout: "" };
 }
 
-function finalAssistantTextFromTranscript(transcriptPath: string): string | null {
-  let transcript: string;
-  try {
-    transcript = readFileSync(transcriptPath, "utf8");
-  } catch {
-    return null;
+function hasCheckoutReadEvidence(envelope: Record<string, unknown>): boolean {
+  const result = isRecord(envelope.result) ? envelope.result : envelope;
+  const meta = isRecord(result.meta) ? result.meta : {};
+  const agentMeta = isRecord(meta.agentMeta) ? meta.agentMeta : {};
+  const toolSummary = [result.toolSummary, envelope.toolSummary, meta.toolSummary]
+    .find(isRecord);
+  if (toolSummary) {
+    const calls = Number(toolSummary.calls);
+    const tools = Array.isArray(toolSummary.tools)
+      ? toolSummary.tools.filter((value): value is string => typeof value === "string")
+      : [];
+    if (Number.isFinite(calls) && calls >= 1 && tools.includes("read")) return true;
   }
-  let finalText: string | null = null;
-  for (const line of transcript.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: unknown;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      return null;
-    }
-    if (!isRecord(entry) || !isRecord(entry.message) || entry.message.role !== "assistant") {
-      continue;
-    }
-    const content = entry.message.content;
-    if (typeof content === "string" && content.trim()) {
-      finalText = content;
-      continue;
-    }
-    if (!Array.isArray(content)) continue;
-    const blocks = content.filter(isRecord);
-    if (blocks.some((block) => block.type === "toolCall")) continue;
-    const text = blocks
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => String(block.text))
-      .join("\n")
-      .trim();
-    if (text) finalText = text;
-  }
-  return finalText;
-}
 
-function hasSuccessfulReadReceipt(options: {
-  cwd: string;
-  transcriptPath: string;
-  expectedPath: string;
-}): boolean {
-  let transcript: string;
-  try {
-    transcript = readFileSync(options.transcriptPath, "utf8");
-  } catch {
-    return false;
-  }
-  const readCalls = new Map<string, { matchesExpectedPath: boolean; resolved: boolean }>();
-  let challengedReadSucceeded = false;
-  for (const line of transcript.split("\n")) {
-    if (!line.trim()) continue;
-    let entry: unknown;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      return false;
-    }
-    if (!isRecord(entry) || !isRecord(entry.message)) continue;
-    const message = entry.message;
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      for (const block of message.content) {
-        if (!isRecord(block) || block.type !== "toolCall") continue;
-        if (
-          block.name !== "read" ||
-          typeof block.id !== "string" ||
-          !isRecord(block.arguments) ||
-          typeof block.arguments.path !== "string" ||
-          readCalls.has(block.id)
-        ) {
-          return false;
-        }
-        readCalls.set(block.id, {
-          matchesExpectedPath:
-            resolve(options.cwd, block.arguments.path) ===
-            resolve(options.cwd, options.expectedPath),
-          resolved: false,
-        });
-      }
-      continue;
-    }
-    if (message.role !== "toolResult") continue;
-    if (message.toolName !== "read" || typeof message.toolCallId !== "string") return false;
-    const call = readCalls.get(message.toolCallId);
-    if (!call || call.resolved || message.isError !== false) return false;
-    call.resolved = true;
-    if (call.matchesExpectedPath) challengedReadSucceeded = true;
-  }
-  return challengedReadSucceeded && [...readCalls.values()].every((call) => call.resolved);
+  const codeModeEngaged =
+    result.codeModeEngaged === true ||
+    envelope.codeModeEngaged === true ||
+    agentMeta.codeModeEngaged === true;
+  if (!codeModeEngaged) return false;
+  const bridgeCalls = [result.bridgeCalls, envelope.bridgeCalls, agentMeta.bridgeCalls]
+    .find(isRecord);
+  return Boolean(bridgeCalls && Number(bridgeCalls.call) >= 1);
 }
 
 function failedInspectionResult(
