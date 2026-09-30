@@ -27,7 +27,7 @@ jobs:
               item_number: 89,
               item_kind: "issue",
               source_event: "acceptance_probe",
-              source_action: "automatic_inference_fallback_code_mode_retry",
+              source_action: "automatic_inference_fallback_attestation_retry",
               supersedes_in_progress: true
             }
           }')"
