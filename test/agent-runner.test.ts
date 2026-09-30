@@ -327,7 +327,6 @@ process.stdout.write(JSON.stringify({
     });
     assert.equal(missingEvidence.status, 1);
     assert.match(missingEvidence.error?.message ?? "", /structured read evidence/);
-
   } finally {
     chmodSync(root, 0o755);
     chmodSync(trackedPath, 0o644);
