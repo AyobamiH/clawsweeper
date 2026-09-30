@@ -345,22 +345,34 @@ function normalizeOpenclawStructuredOutput(text: string): string {
     return trimmed;
   } catch {
     // Provider-backed agents may wrap an otherwise valid structured result in
-    // Markdown or brief prose. Extract exactly one JSON value and let the
-    // existing schema/decision validator remain the authority on its contents.
+    // Markdown or brief prose. Extract exactly one top-level JSON value and let
+    // the existing schema/decision validator remain the authority on contents.
+  }
+
+  const fenced = /^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i.exec(trimmed);
+  if (fenced?.[1]) {
+    const candidate = fenced[1].trim();
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Fall through to bounded top-level extraction.
+    }
   }
 
   const candidates: string[] = [];
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
-  if (fenced?.[1]) candidates.push(fenced[1].trim());
-
-  for (let start = 0; start < trimmed.length; start += 1) {
+  for (let start = 0; start < trimmed.length; ) {
     const opener = trimmed[start];
-    if (opener !== "{" && opener !== "[") continue;
-    const closer = opener === "{" ? "}" : "]";
-    let depth = 0;
+    if (opener !== "{" && opener !== "[") {
+      start += 1;
+      continue;
+    }
+
+    const stack: string[] = [opener];
     let inString = false;
     let escaped = false;
-    for (let index = start; index < trimmed.length; index += 1) {
+    let end = -1;
+    for (let index = start + 1; index < trimmed.length; index += 1) {
       const ch = trimmed[index];
       if (inString) {
         if (escaped) escaped = false;
@@ -372,23 +384,37 @@ function normalizeOpenclawStructuredOutput(text: string): string {
         inString = true;
         continue;
       }
-      if (ch === opener) depth += 1;
-      else if (ch === closer) depth -= 1;
-      if (depth === 0) {
-        candidates.push(trimmed.slice(start, index + 1));
-        break;
+      if (ch === "{" || ch === "[") {
+        stack.push(ch);
+        continue;
       }
+      if (ch === "}" || ch === "]") {
+        const expected = ch === "}" ? "{" : "[";
+        if (stack.at(-1) !== expected) break;
+        stack.pop();
+        if (stack.length === 0) {
+          end = index + 1;
+          break;
+        }
+      }
+    }
+
+    if (end === -1) {
+      start += 1;
+      continue;
+    }
+
+    const candidate = trimmed.slice(start, end);
+    try {
+      JSON.parse(candidate);
+      candidates.push(candidate);
+      start = end;
+    } catch {
+      start += 1;
     }
   }
 
-  const valid = [...new Set(candidates)].filter((candidate) => {
-    try {
-      JSON.parse(candidate);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  const valid = [...new Set(candidates)];
   if (valid.length === 1) return valid[0]!;
   return trimmed;
 }
