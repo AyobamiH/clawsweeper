@@ -47,6 +47,7 @@ export type ExactReviewBaseDecision = {
   commandStatusMarker?: string;
   statusCommentId?: number;
   additionalPrompt?: string;
+  inferencePolicy?: "auto" | "codex" | "workers-ai";
   sourceCommentId?: number;
   sourceCommentUpdatedAt?: string;
   commandBodyDigest?: string;
@@ -334,6 +335,8 @@ export function exactReviewBaseDecisionFrom(value: unknown): ExactReviewBaseDeci
   const statusCommentId = hasStatusCommentId ? Number(decision.statusCommentId) : undefined;
   const hasAdditionalPrompt = Object.hasOwn(decision, "additionalPrompt");
   const additionalPrompt = hasAdditionalPrompt ? decision.additionalPrompt : undefined;
+  const hasInferencePolicy = Object.hasOwn(decision, "inferencePolicy");
+  const inferencePolicy = hasInferencePolicy ? String(decision.inferencePolicy || "") : undefined;
   const hasSourceCommentId = Object.hasOwn(decision, "sourceCommentId");
   const sourceCommentId = hasSourceCommentId ? Number(decision.sourceCommentId) : undefined;
   const hasSourceCommentUpdatedAt = Object.hasOwn(decision, "sourceCommentUpdatedAt");
@@ -404,6 +407,14 @@ export function exactReviewBaseDecisionFrom(value: unknown): ExactReviewBaseDeci
     return null;
   }
   if (
+    hasInferencePolicy &&
+    inferencePolicy !== "auto" &&
+    inferencePolicy !== "codex" &&
+    inferencePolicy !== "workers-ai"
+  ) {
+    return null;
+  }
+  if (
     hasSourceCommentId &&
     (!Number.isSafeInteger(sourceCommentId) || Number(sourceCommentId) <= 0)
   ) {
@@ -458,6 +469,11 @@ export function exactReviewBaseDecisionFrom(value: unknown): ExactReviewBaseDeci
     ...(typeof commandStatusMarker === "string" ? { commandStatusMarker } : {}),
     ...(statusCommentId === undefined ? {} : { statusCommentId }),
     ...(typeof additionalPrompt === "string" ? { additionalPrompt } : {}),
+    ...(inferencePolicy === "auto" ||
+    inferencePolicy === "codex" ||
+    inferencePolicy === "workers-ai"
+      ? { inferencePolicy }
+      : {}),
     ...(sourceCommentId === undefined ? {} : { sourceCommentId }),
     ...(sourceCommentUpdatedAt === undefined ? {} : { sourceCommentUpdatedAt }),
     ...(commandBodyDigest === undefined ? {} : { commandBodyDigest }),
@@ -507,6 +523,7 @@ export async function exactReviewEditedSemanticInput(
         ? decision.statusCommentId
         : null,
       additional_prompt: decision.additionalPrompt || null,
+      inference_policy: decision.inferencePolicy || null,
     },
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tuple));
