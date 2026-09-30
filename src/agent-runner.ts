@@ -349,7 +349,7 @@ function normalizeOpenclawStructuredOutput(text: string): string {
     // the existing schema/decision validator remain the authority on contents.
   }
 
-  const fenced = /^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i.exec(trimmed);
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
   if (fenced?.[1]) {
     const candidate = fenced[1].trim();
     try {
