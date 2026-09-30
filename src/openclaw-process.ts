@@ -482,14 +482,6 @@ function boundedStderrDetail(stderr: string): string {
   return tail ? ` OpenClaw stderr: ${tail}` : "";
 }
 
-function openclawSessionId(label: string): string {
-  const safeLabel = label
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .slice(0, 48);
-  return `${safeLabel || "clawsweeper"}-${randomUUID()}`;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
