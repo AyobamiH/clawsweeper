@@ -30,8 +30,11 @@ jobs:
               item_kind: "issue",
               source_event: "acceptance_probe",
               source_action: "automatic_inference_fallback_structured_decision_retry",
-              supersedes_in_progress: true
+              supersedes_in_progress: true,
+              review_options: {
+                inference_policy: "workers-ai"
+              }
             }
           }')"
           gh api repos/AyobamiH/clawsweeper/dispatches             --method POST             --input - <<< "$payload"
-          echo "Re-dispatched wagging-web-wins#89 through the production exact-review ingress after top-level Workers AI structured-decision fix."
+          echo "Re-dispatched wagging-web-wins#89 through the production exact-review ingress with per-review Workers AI policy after top-level structured-decision fix."
