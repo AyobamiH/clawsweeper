@@ -587,7 +587,7 @@ process.stdout.write(JSON.stringify({ payloads: [{ text }], meta: { stopReason: 
           workDir,
           prompt: "Return a review decision.",
         }),
-      /exact challenged path/,
+      /structured read evidence/,
     );
     assert.equal(readFileSync(invocationsPath, "utf8"), "1");
   } finally {
@@ -623,18 +623,16 @@ if (count > 0) {
 } else {
   const prompt = fs.readFileSync(process.argv[process.argv.indexOf("--message-file") + 1], "utf8");
   const relativePath = JSON.parse(prompt.match(/^Path: (.+)$/m)[1]);
-  const toolCallId = "read-checkout";
-  const sessionId = process.argv[process.argv.indexOf("--session-id") + 1];
-  const sessionFile = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions", sessionId + ".jsonl");
-  fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
-  const entries = [
-    { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: relativePath } }] } },
-    { type: "message", message: { role: "toolResult", toolCallId, toolName: "read", isError: false, content: [{ type: "text", text: "tracked checkout content" }] } },
-  ];
-  fs.writeFileSync(sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\\n") + "\\n");
+  const challenged = fs.readFileSync(
+    path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath),
+    "utf8",
+  ).trim();
   process.stdout.write(JSON.stringify({
-    payloads: [{ text: fs.readFileSync(path.join(process.env.OPENCLAW_WORKSPACE_DIR, relativePath), "utf8").trim() }],
-    meta: { stopReason: "stop" },
+    ok: true,
+    status: "ok",
+    final: challenged,
+    payloads: [{ text: challenged }],
+    toolSummary: { calls: 1, tools: ["read"], failures: 0, totalToolTimeMs: 1 },
   }));
 }
 `,
