@@ -257,12 +257,7 @@ process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [
         OPENCLAW_TEST_PROMPT: promptPath,
       },
       timeoutMs: 10_000,
-      codexExtraArgs: [
-        "--output-schema",
-        schemaPath,
-        "--output-last-message",
-        outputPath,
-      ],
+      codexExtraArgs: ["--output-schema", schemaPath, "--output-last-message", outputPath],
     });
     assert.equal(result.status, 0, result.error?.message);
     const seenPrompt = readFileSync(promptPath, "utf8");
