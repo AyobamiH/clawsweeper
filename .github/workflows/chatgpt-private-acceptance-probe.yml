@@ -1,5 +1,5 @@
 name: Automatic inference fallback private acceptance
-# acceptance-retrigger: agent-exec-attestation-1790784161086
+# acceptance-retrigger: nonzero-final-result-publication-20260930
 
 on:
   push:
