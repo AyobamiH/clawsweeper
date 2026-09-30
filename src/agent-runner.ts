@@ -98,7 +98,7 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
     ...(options.stderrPath ? { stderrPath: options.stderrPath } : {}),
   });
   const result = redactOpenclawFailure(rawResult, model);
-  if (!result.error && result.status === 0 && outputPath) {
+  if (!result.error && outputPath && result.stdout.trim()) {
     writeFileSync(outputPath, result.stdout, "utf8");
   }
   if (!options.appServer) return result;

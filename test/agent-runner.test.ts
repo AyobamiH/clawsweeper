@@ -208,6 +208,50 @@ process.stdout.write(JSON.stringify({ payloads: [{ text: "ok" }], meta: { stopRe
   }
 });
 
+test("OpenClaw nonzero exit preserves a valid final result for schema validation", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-nonzero-test-"));
+  const binary = join(root, "fake-openclaw");
+  const outputPath = join(root, "last-message.json");
+  const decision = '{"decision":"keep_open","confidence":"low","summary":"valid result"}';
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  ok: true,
+  status: "ok",
+  final: ${JSON.stringify(decision)},
+  payloads: [{ text: ${JSON.stringify(decision)} }],
+}));
+process.exitCode = 1;
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "openclaw-nonzero-final",
+      scanSource: { kind: "prompt" },
+      prompt: "Return the requested JSON.",
+      model: "internal",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+      },
+      timeoutMs: 10_000,
+      codexExtraArgs: ["--output-last-message", outputPath],
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.error, undefined);
+    assert.equal(result.stdout, decision);
+    assert.equal(readFileSync(outputPath, "utf8"), decision);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw runner accepts provider model ids with nested path segments", (t) => {
   useFakeScanner(t);
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-workers-ai-test-"));

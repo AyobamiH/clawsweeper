@@ -244,13 +244,18 @@ function normalizeOpenclawResult(
   completeStdout: string,
   checkoutInspection?: { expectedText: string; expectedPath: string },
 ): CodexProcessResult {
-  if (processResult.error || processResult.status !== 0) return processResult;
+  if (processResult.error) return processResult;
   const parsed = parseOpenclawEnvelope(completeStdout, processResult.stderr);
   if (parsed.failure) {
     if (/\btimeout\b/i.test(parsed.failure.message)) {
       (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";
     }
-    return { ...processResult, status: 1, error: parsed.failure, stdout: parsed.text };
+    return {
+      ...processResult,
+      status: 1,
+      error: parsed.failure,
+      stdout: parsed.text,
+    };
   }
   if (!checkoutInspection) return { ...processResult, stdout: parsed.text };
   if (parsed.text.trim() !== checkoutInspection.expectedText) {
