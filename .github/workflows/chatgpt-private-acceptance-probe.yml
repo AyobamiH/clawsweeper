@@ -1,3 +1,4 @@
+# acceptance-rerun: structured-output-normalization
 name: Automatic inference fallback private acceptance
 # acceptance-retrigger: openclaw-schema-contract-20260930
 
