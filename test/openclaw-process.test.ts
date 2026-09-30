@@ -171,7 +171,7 @@ test("Workers AI headless reviews force OpenClaw code mode", () => {
   }
 });
 
-test("OpenClaw checkout inspection retains local session mode for read receipts", () => {
+test("OpenClaw checkout inspection uses agent exec and Workers AI code mode", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-checkout-mode-test-"));
   const recordPath = join(root, "record.json");
   const binary = fakeOpenclaw(root);
@@ -179,16 +179,19 @@ test("OpenClaw checkout inspection retains local session mode for read receipts"
     const result = runOpenclawProcess({
       label: "checkout-mode",
       prompt: "Read the challenged line.",
-      model: "openai/test",
+      model: "workersai/@cf/zai-org/glm-5.3",
       cwd: root,
       env: {
         ...process.env,
         CLAWSWEEPER_OPENCLAW_BIN: binary,
         OPENCLAW_TEST_RECORD: recordPath,
-        OPENCLAW_TEST_READ_PATH: "tracked.txt",
         OPENCLAW_TEST_STDOUT: JSON.stringify({
+          ok: true,
+          status: "ok",
+          final: "tracked checkout content",
           payloads: [{ text: "tracked checkout content" }],
-          meta: { stopReason: "stop" },
+          codeModeEngaged: true,
+          bridgeCalls: { search: 0, describe: 0, call: 1 },
         }),
       },
       timeoutMs: 10_000,
@@ -199,14 +202,15 @@ test("OpenClaw checkout inspection retains local session mode for read receipts"
     });
     assert.equal(result.status, 0, result.error?.message);
     const record = JSON.parse(readFileSync(recordPath, "utf8"));
-    assert.deepEqual(record.args.slice(0, 4), ["agent", "--local", "--agent", "main"]);
-    assert.ok(record.args.includes("--session-id"));
+    assert.deepEqual(record.args.slice(0, 2), ["agent", "exec"]);
+    assert.equal(record.args.includes("--session-id"), false);
+    assert.equal(record.args[record.args.indexOf("--code-mode") + 1], "code");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("OpenClaw checkout inspection requires structured read evidence", () => {
+test("OpenClaw checkout inspection requires challenge text and structured read evidence", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-test-"));
   const recordPath = join(root, "record.json");
   const binary = fakeOpenclaw(root);
@@ -214,6 +218,14 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
     expectedText: "tracked checkout content",
     expectedPath: "tracked.txt",
   };
+  const directReadEnvelope = (text: string) =>
+    JSON.stringify({
+      ok: true,
+      status: "ok",
+      final: text,
+      payloads: [{ text }],
+      toolSummary: { calls: 1, tools: ["read"], failures: 0, totalToolTimeMs: 1 },
+    });
   try {
     const result = runOpenclawProcess({
       label: "checkout-inspection",
@@ -224,11 +236,7 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
         ...process.env,
         CLAWSWEEPER_OPENCLAW_BIN: binary,
         OPENCLAW_TEST_RECORD: recordPath,
-        OPENCLAW_TEST_READ_PATH: "tracked.txt",
-        OPENCLAW_TEST_STDOUT: JSON.stringify({
-          payloads: [{ text: "tracked checkout content" }],
-          meta: { stopReason: "stop" },
-        }),
+        OPENCLAW_TEST_STDOUT: directReadEnvelope("tracked checkout content"),
       },
       timeoutMs: 10_000,
       checkoutInspection,
@@ -251,11 +259,7 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
         ...process.env,
         CLAWSWEEPER_OPENCLAW_BIN: binary,
         OPENCLAW_TEST_RECORD: recordPath,
-        OPENCLAW_TEST_READ_PATH: "tracked.txt",
-        OPENCLAW_TEST_STDOUT: JSON.stringify({
-          payloads: [{ text: "different checkout content" }],
-          meta: { stopReason: "stop" },
-        }),
+        OPENCLAW_TEST_STDOUT: directReadEnvelope("different checkout content"),
       },
       timeoutMs: 10_000,
       checkoutInspection,
@@ -263,8 +267,8 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
     assert.equal(wrongText.status, 1);
     assert.match(wrongText.error?.message ?? "", /runner challenge/);
 
-    const wrongReadPath = runOpenclawProcess({
-      label: "checkout-inspection-wrong-path",
+    const missingEvidence = runOpenclawProcess({
+      label: "checkout-inspection-missing-evidence",
       prompt: "Read the challenged line.",
       model: "openai/test",
       cwd: root,
@@ -272,120 +276,22 @@ test("OpenClaw checkout inspection requires structured read evidence", () => {
         ...process.env,
         CLAWSWEEPER_OPENCLAW_BIN: binary,
         OPENCLAW_TEST_RECORD: recordPath,
-        OPENCLAW_TEST_READ_PATH: "different.txt",
         OPENCLAW_TEST_STDOUT: JSON.stringify({
+          ok: true,
+          status: "ok",
+          final: "tracked checkout content",
           payloads: [{ text: "tracked checkout content" }],
-          meta: { stopReason: "stop" },
         }),
       },
       timeoutMs: 10_000,
       checkoutInspection,
     });
-    assert.equal(wrongReadPath.status, 1);
-    assert.match(wrongReadPath.error?.message ?? "", /exact challenged path/);
-
-    const failedRead = runOpenclawProcess({
-      label: "checkout-inspection-failed-read",
-      prompt: "Read the challenged line.",
-      model: "openai/test",
-      cwd: root,
-      env: {
-        ...process.env,
-        CLAWSWEEPER_OPENCLAW_BIN: binary,
-        OPENCLAW_TEST_RECORD: recordPath,
-        OPENCLAW_TEST_READ_PATH: "tracked.txt",
-        OPENCLAW_TEST_READ_ERROR: "1",
-        OPENCLAW_TEST_STDOUT: JSON.stringify({
-          payloads: [{ text: "tracked checkout content" }],
-          meta: { stopReason: "stop" },
-        }),
-      },
-      timeoutMs: 10_000,
-      checkoutInspection,
-    });
-    assert.equal(failedRead.status, 1);
-    assert.match(failedRead.error?.message ?? "", /exact challenged path/);
-
-    for (const [label, extraReceipt] of [
-      [
-        "non-read tool",
-        [
-          {
-            type: "message",
-            message: {
-              role: "assistant",
-              content: [{ type: "toolCall", id: "exec-after-read", name: "exec", arguments: {} }],
-            },
-          },
-          {
-            type: "message",
-            message: {
-              role: "toolResult",
-              toolCallId: "exec-after-read",
-              toolName: "exec",
-              isError: false,
-              content: [],
-            },
-          },
-        ],
-      ],
-      [
-        "failed later read",
-        [
-          {
-            type: "message",
-            message: {
-              role: "assistant",
-              content: [
-                {
-                  type: "toolCall",
-                  id: "failed-read-after-success",
-                  name: "read",
-                  arguments: { path: "tracked.txt" },
-                },
-              ],
-            },
-          },
-          {
-            type: "message",
-            message: {
-              role: "toolResult",
-              toolCallId: "failed-read-after-success",
-              toolName: "read",
-              isError: true,
-              content: [],
-            },
-          },
-        ],
-      ],
-    ] as const) {
-      const mixedReceipt = runOpenclawProcess({
-        label: `checkout-inspection-${label}`,
-        prompt: "Read the challenged line.",
-        model: "openai/test",
-        cwd: root,
-        env: {
-          ...process.env,
-          CLAWSWEEPER_OPENCLAW_BIN: binary,
-          OPENCLAW_TEST_RECORD: recordPath,
-          OPENCLAW_TEST_READ_PATH: "tracked.txt",
-          OPENCLAW_TEST_RECEIPT_EXTRA: JSON.stringify(extraReceipt),
-          OPENCLAW_TEST_STDOUT: JSON.stringify({
-            payloads: [{ text: "tracked checkout content" }],
-            meta: { stopReason: "stop" },
-          }),
-        },
-        timeoutMs: 10_000,
-        checkoutInspection,
-      });
-      assert.equal(mixedReceipt.status, 1, label);
-      assert.match(mixedReceipt.error?.message ?? "", /exact challenged path/);
-    }
+    assert.equal(missingEvidence.status, 1);
+    assert.match(missingEvidence.error?.message ?? "", /structured read evidence/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
-
 test("OpenClaw JSON parser accepts a complete envelope after diagnostic stdout", () => {
   const parsed = parseOpenclawJsonEnvelope(
     [
