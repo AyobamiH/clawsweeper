@@ -262,7 +262,9 @@ process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [
 
 test("OpenClaw structured output normalization keeps one nested top-level decision", (t) => {
   useFakeScanner(t);
-  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-nested-normalize-test-"));
+  const root = mkdtempSync(
+    join(tmpdir(), "clawsweeper-agent-runner-openclaw-nested-normalize-test-"),
+  );
   const binary = join(root, "fake-openclaw");
   const schemaPath = join(root, "decision.schema.json");
   const outputPath = join(root, "last-message.json");
@@ -322,7 +324,9 @@ process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [
 
 test("OpenClaw structured output normalization fails closed on multiple top-level JSON values", (t) => {
   useFakeScanner(t);
-  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-multi-normalize-test-"));
+  const root = mkdtempSync(
+    join(tmpdir(), "clawsweeper-agent-runner-openclaw-multi-normalize-test-"),
+  );
   const binary = join(root, "fake-openclaw");
   const schemaPath = join(root, "decision.schema.json");
   const outputPath = join(root, "last-message.json");
