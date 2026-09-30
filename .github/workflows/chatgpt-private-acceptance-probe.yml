@@ -1,5 +1,5 @@
 name: Automatic inference fallback private acceptance
-# acceptance-retrigger: nonzero-final-result-publication-20260930
+# acceptance-retrigger: openclaw-schema-contract-20260930
 
 on:
   push:
