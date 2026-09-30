@@ -273,8 +273,7 @@ function hasCheckoutReadEvidence(envelope: Record<string, unknown>): boolean {
   const result = isRecord(envelope.result) ? envelope.result : envelope;
   const meta = isRecord(result.meta) ? result.meta : {};
   const agentMeta = isRecord(meta.agentMeta) ? meta.agentMeta : {};
-  const toolSummary = [result.toolSummary, envelope.toolSummary, meta.toolSummary]
-    .find(isRecord);
+  const toolSummary = [result.toolSummary, envelope.toolSummary, meta.toolSummary].find(isRecord);
   if (toolSummary) {
     const calls = Number(toolSummary.calls);
     const tools = Array.isArray(toolSummary.tools)
@@ -288,8 +287,9 @@ function hasCheckoutReadEvidence(envelope: Record<string, unknown>): boolean {
     envelope.codeModeEngaged === true ||
     agentMeta.codeModeEngaged === true;
   if (!codeModeEngaged) return false;
-  const bridgeCalls = [result.bridgeCalls, envelope.bridgeCalls, agentMeta.bridgeCalls]
-    .find(isRecord);
+  const bridgeCalls = [result.bridgeCalls, envelope.bridgeCalls, agentMeta.bridgeCalls].find(
+    isRecord,
+  );
   return Boolean(bridgeCalls && Number(bridgeCalls.call) >= 1);
 }
 
