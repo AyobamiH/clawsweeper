@@ -7,7 +7,7 @@ test("exact-review workflow resolves inference before setup and keeps broad Clou
   assert.match(source, /name: Resolve inference route/);
   assert.match(
     source,
-    /CLAWSWEEPER_INFERENCE_POLICY: \$\{\{ vars\.CLAWSWEEPER_INFERENCE_POLICY \|\| 'auto' \}\}/,
+    /CLAWSWEEPER_INFERENCE_POLICY: \$\{\{ fromJSON\(steps\.live-item\.outputs\.decision\)\.inferencePolicy \|\| vars\.CLAWSWEEPER_INFERENCE_POLICY \|\| 'auto' \}\}/,
   );
   assert.match(
     source,
@@ -25,6 +25,8 @@ test("exact-review workflow resolves inference before setup and keeps broad Clou
   assert.match(source, /CLAWSWEEPER_OPENCLAW_MODEL=\$model/);
   assert.match(source, /CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON=\$providers_json/);
   assert.match(source, /steps\.inference-route\.outputs\.runner == 'openclaw'/);
+  assert.match(source, /reviewOptions\.inference_policy/);
+  assert.match(source, /inferencePolicy:/);
   assert.ok(
     source.indexOf("name: Resolve inference route") <
       source.indexOf("uses: ./.github/actions/setup-codex"),
