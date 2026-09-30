@@ -208,6 +208,72 @@ process.stdout.write(JSON.stringify({ payloads: [{ text: "ok" }], meta: { stopRe
   }
 });
 
+test("OpenClaw receives Codex output schema as an explicit final-output contract", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-schema-test-"));
+  const binary = join(root, "fake-openclaw");
+  const argsPath = join(root, "args.json");
+  const promptPath = join(root, "seen-prompt.txt");
+  const schemaPath = join(root, "decision.schema.json");
+  const outputPath = join(root, "last-message.json");
+  const diagnosticPromptPath = join(root, "diagnostic.prompt.md");
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision", "summary"],
+    properties: {
+      decision: { type: "string" },
+      summary: { type: "string" },
+    },
+  };
+  writeFileSync(schemaPath, JSON.stringify(schema));
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.OPENCLAW_TEST_ARGS, JSON.stringify(args));
+const messageFile = args[args.indexOf("--message-file") + 1];
+fs.writeFileSync(process.env.OPENCLAW_TEST_PROMPT, fs.readFileSync(messageFile, "utf8"));
+const final = JSON.stringify({ decision: "keep_open", summary: "schema ok" });
+process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [{ text: final }] }));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "openclaw-schema-contract",
+      scanSource: { kind: "prompt" },
+      prompt: "Review this item.",
+      diagnosticPromptPath,
+      model: "internal",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        OPENCLAW_TEST_ARGS: argsPath,
+        OPENCLAW_TEST_PROMPT: promptPath,
+      },
+      timeoutMs: 10_000,
+      codexExtraArgs: ["--output-schema", schemaPath, "--output-last-message", outputPath],
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    const seenPrompt = readFileSync(promptPath, "utf8");
+    assert.match(seenPrompt, /Required final output contract/);
+    assert.match(seenPrompt, /Return only one JSON value/);
+    assert.match(seenPrompt, /"required":\["decision","summary"\]/);
+    assert.equal(readFileSync(diagnosticPromptPath, "utf8"), seenPrompt);
+    assert.equal(
+      readFileSync(outputPath, "utf8"),
+      JSON.stringify({ decision: "keep_open", summary: "schema ok" }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw nonzero exit preserves a valid final result for schema validation", (t) => {
   useFakeScanner(t);
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-nonzero-test-"));

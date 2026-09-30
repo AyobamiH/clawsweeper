@@ -50,15 +50,19 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
   if (outputPath) rmSync(outputPath, { force: true });
   const schemaIndex = options.codexExtraArgs?.lastIndexOf("--output-schema") ?? -1;
   const schemaPath = schemaIndex >= 0 ? options.codexExtraArgs?.[schemaIndex + 1] : undefined;
+  const effectivePrompt =
+    runner === "openclaw" && schemaPath
+      ? openclawPromptWithSchema(options.prompt, schemaPath)
+      : options.prompt;
   scanAgentInput({
     cwd: options.cwd,
-    prompt: options.prompt,
+    prompt: effectivePrompt,
     source: options.scanSource,
     timeoutMs: options.timeoutMs,
     ...(schemaPath ? { schemaPath } : {}),
   });
   if (options.diagnosticPromptPath) {
-    writeFileSync(options.diagnosticPromptPath, options.prompt, { mode: 0o600, flag: "wx" });
+    writeFileSync(options.diagnosticPromptPath, effectivePrompt, { mode: 0o600, flag: "wx" });
   }
   options = { ...options, timeoutMs: options.timeoutMs - (Date.now() - startedAt) };
   if (options.timeoutMs <= 0) {
@@ -70,7 +74,7 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
       args: codexAgentArgs(options),
       cwd: options.cwd,
       env: options.env,
-      input: options.prompt,
+      input: effectivePrompt,
       timeoutMs: options.timeoutMs,
       ...(options.tailBytes === undefined ? {} : { tailBytes: options.tailBytes }),
       ...(options.outputFileBytes === undefined
@@ -86,7 +90,7 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
   const reasoningEffort = openclawReasoningEffort(model, options.reasoningEffort);
   const rawResult = runOpenclawProcess({
     label: options.label,
-    prompt: options.prompt,
+    prompt: effectivePrompt,
     model,
     ...(reasoningEffort ? { reasoningEffort } : {}),
     cwd: options.cwd,
@@ -312,6 +316,23 @@ function spawnResult(result: ReturnType<typeof spawnSync>): CodexProcessResult {
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
   };
+}
+
+function openclawPromptWithSchema(prompt: string, schemaPath: string): string {
+  const schemaText = readFileSync(schemaPath, "utf8").trim();
+  if (!schemaText) {
+    throw new Error("OpenClaw structured-output schema is empty.");
+  }
+  return [
+    prompt.trimEnd(),
+    "",
+    "## Required final output contract",
+    "Return only one JSON value that validates against the JSON Schema below.",
+    "Do not wrap it in Markdown or code fences. Do not add commentary before or after the JSON.",
+    "Every required field must be present and every additional-property restriction must be obeyed.",
+    "",
+    schemaText,
+  ].join("\n");
 }
 
 function redactOpenclawFailure(result: CodexProcessResult, model: string): CodexProcessResult {
