@@ -481,7 +481,6 @@ function boundedStderrDetail(stderr: string): string {
   return tail ? ` OpenClaw stderr: ${tail}` : "";
 }
 
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
