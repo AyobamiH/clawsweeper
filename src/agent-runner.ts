@@ -350,7 +350,7 @@ function normalizeOpenclawStructuredOutput(text: string): string {
   }
 
   const candidates: string[] = [];
-  const fenced = /^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i.exec(trimmed);
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
   if (fenced?.[1]) candidates.push(fenced[1].trim());
 
   for (let start = 0; start < trimmed.length; start += 1) {
