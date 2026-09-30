@@ -32,6 +32,14 @@ test("auto routing falls back to Workers AI when Codex admission fails", async (
     "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1",
   );
   assert.equal(providers.workersai.apiKey, "${CLOUDFLARE_WORKERS_AI_TOKEN}");
+  assert.deepEqual(providers.workersai.models[0], {
+    id: "@cf/zai-org/glm-5.3",
+    name: "@cf/zai-org/glm-5.3",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 1_310_720,
+    maxTokens: 128_000,
+  });
 });
 
 test("auto routing fails closed instead of reusing the broad Cloudflare deployment token", async () => {
