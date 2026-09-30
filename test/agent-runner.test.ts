@@ -260,6 +260,111 @@ process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [
   }
 });
 
+test("OpenClaw structured output normalization keeps one nested top-level decision", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(
+    join(tmpdir(), "clawsweeper-agent-runner-openclaw-nested-normalize-test-"),
+  );
+  const binary = join(root, "fake-openclaw");
+  const schemaPath = join(root, "decision.schema.json");
+  const outputPath = join(root, "last-message.json");
+  const decision = {
+    decision: "keep_open",
+    confidence: "low",
+    summary: "ok",
+    evidence: {
+      files: ["src/example.ts"],
+      checks: [{ name: "typecheck", result: "pass" }],
+    },
+  };
+  writeFileSync(
+    schemaPath,
+    JSON.stringify({
+      type: "object",
+      required: ["decision", "confidence", "summary", "evidence"],
+      properties: {
+        decision: { type: "string" },
+        confidence: { type: "string" },
+        summary: { type: "string" },
+        evidence: { type: "object" },
+      },
+    }),
+  );
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const decision = ${JSON.stringify(JSON.stringify(decision))};
+const final = "Result follows:\\n" + decision + "\\nEnd.";
+process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [{ text: final }] }));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "openclaw-normalize-nested-structured-output",
+      scanSource: { kind: "prompt" },
+      prompt: "Review this item.",
+      model: "internal",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+      },
+      timeoutMs: 10_000,
+      codexExtraArgs: ["--output-schema", schemaPath, "--output-last-message", outputPath],
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    assert.equal(readFileSync(outputPath, "utf8"), JSON.stringify(decision));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw structured output normalization fails closed on multiple top-level JSON values", (t) => {
+  useFakeScanner(t);
+  const root = mkdtempSync(
+    join(tmpdir(), "clawsweeper-agent-runner-openclaw-multi-normalize-test-"),
+  );
+  const binary = join(root, "fake-openclaw");
+  const schemaPath = join(root, "decision.schema.json");
+  const outputPath = join(root, "last-message.json");
+  writeFileSync(schemaPath, JSON.stringify({ type: "object" }));
+  writeFileSync(
+    binary,
+    `#!/usr/bin/env node
+const final = 'First {"decision":"keep_open"} second {"decision":"close"}';
+process.stdout.write(JSON.stringify({ ok: true, status: "ok", final, payloads: [{ text: final }] }));
+`,
+  );
+  chmodSync(binary, 0o755);
+  try {
+    const result = runAgentProcess({
+      label: "openclaw-normalize-multiple-structured-output",
+      scanSource: { kind: "prompt" },
+      prompt: "Review this item.",
+      model: "internal",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_RUNNER: "openclaw",
+        CLAWSWEEPER_OPENCLAW_MODEL: "workersai/@cf/zai-org/glm-5.3",
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+      },
+      timeoutMs: 10_000,
+      codexExtraArgs: ["--output-schema", schemaPath, "--output-last-message", outputPath],
+    });
+    assert.equal(result.status, 0, result.error?.message);
+    assert.equal(
+      readFileSync(outputPath, "utf8"),
+      'First {"decision":"keep_open"} second {"decision":"close"}',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw receives Codex output schema as an explicit final-output contract", (t) => {
   useFakeScanner(t);
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-agent-runner-openclaw-schema-test-"));
