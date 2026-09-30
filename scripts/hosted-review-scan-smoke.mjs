@@ -167,13 +167,19 @@ ${live ? `const child = require('node:child_process').spawnSync(${JSON.stringify
   } else {
     writeProvider(true);
     const result = run();
+    const providerStarted = existsSync(calls);
     const liveQuotaExhausted =
+      (!providerStarted && result.status === 75) ||
       isCodexUsageLimitError(result.error?.message) ||
       isCodexUsageLimitError(result.stderr) ||
       isCodexUsageLimitError(result.stdout);
     assertCheckout();
-    assert.equal(readFileSync(calls, "utf8"), "1");
-    cleanProviderStarts = 1;
+    if (providerStarted) {
+      assert.equal(readFileSync(calls, "utf8"), "1");
+      cleanProviderStarts = 1;
+    } else {
+      assert.equal(liveQuotaExhausted, true, "provider did not start for a non-quota failure");
+    }
     assert.ok(
       readFileSync(diagnosticPromptPath, "utf8") === prompt,
       "Admitted prompt diagnostic did not match; contents withheld.",
