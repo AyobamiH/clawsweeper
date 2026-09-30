@@ -252,7 +252,7 @@ function normalizeOpenclawResult(
     }
     return {
       ...processResult,
-      status: processResult.status ?? 1,
+      status: 1,
       error: parsed.failure,
       stdout: parsed.text,
     };
