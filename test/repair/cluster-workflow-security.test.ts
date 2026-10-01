@@ -65,7 +65,10 @@ test("repair inference policy override is bounded and defaults to auto", () => {
 });
 
 test("repair dispatch plumbing preserves the bounded inference policy", () => {
-  const intake = fs.readFileSync(".github/workflows/repair-issue-implementation-intake.yml", "utf8");
+  const intake = fs.readFileSync(
+    ".github/workflows/repair-issue-implementation-intake.yml",
+    "utf8",
+  );
   const dispatch = fs.readFileSync("src/repair/dispatch-jobs.ts", "utf8");
 
   assert.match(
