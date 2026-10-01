@@ -108,7 +108,13 @@ test("repair plan and execute jobs use the shared inference router before model 
   }
 
   assert.match(source, /if: \$\{\{ env\.CLAWSWEEPER_RUNNER != 'openclaw'/);
-  assert.doesNotMatch(source, /CLOUDFLARE_API_TOKEN/);
+  const provision = workflow.jobs?.provision?.steps?.find(
+    (step) => step.uses === "./.github/actions/cloudflare-runners",
+  );
+  assert.equal(
+    provision?.env?.CLOUDFLARE_API_TOKEN,
+    "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+  );
   assert.doesNotMatch(
     JSON.stringify(workflow.jobs?.cluster?.env ?? {}),
     /CLOUDFLARE_WORKERS_AI_TOKEN/,
@@ -127,6 +133,13 @@ test("repair plan and execute jobs use the shared inference router before model 
       step?.env?.CLOUDFLARE_WORKERS_AI_TOKEN,
       "${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}",
     );
+    assert.equal(step?.env?.CLOUDFLARE_API_TOKEN, undefined);
+  }
+  for (const jobName of ["cluster", "execute"]) {
+    const route = workflow.jobs?.[jobName]?.steps?.find(
+      (step) => step.name === "Resolve inference route",
+    );
+    assert.equal(route?.env?.CLOUDFLARE_API_TOKEN, undefined);
   }
 });
 
