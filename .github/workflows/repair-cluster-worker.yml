@@ -415,7 +415,6 @@ jobs:
         if: ${{ steps.check_job.outputs.job_exists == '1' }}
         env:
           CLAWSWEEPER_ALLOWED_OWNER: ${{ steps.target.outputs.target_owner }}
-          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}
         run: pnpm run repair:validate-job -- "$CLUSTER_JOB_PATH"
 
       - name: Verify self-heal head
@@ -445,6 +444,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           CLAWSWEEPER_ALLOWED_OWNER: ${{ steps.target.outputs.target_owner }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}
         run: |
           worker_mode="$CLUSTER_WORKER_MODE"
           if [ "$worker_mode" != "plan" ] && [ "${CLAWSWEEPER_ALLOW_EXECUTE}" != "1" ]; then
