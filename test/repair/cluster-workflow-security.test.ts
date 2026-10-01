@@ -79,9 +79,7 @@ test("repair plan and execute jobs use the shared inference router before model 
     /CLOUDFLARE_WORKERS_AI_TOKEN/,
   );
 
-  const clusterWorker = workflow.jobs?.cluster?.steps?.find(
-    (step) => step.name === "Run worker",
-  );
+  const clusterWorker = workflow.jobs?.cluster?.steps?.find((step) => step.name === "Run worker");
   const executeFix = workflow.jobs?.execute?.steps?.find(
     (step) => step.name === "Execute credited fix artifact",
   );
