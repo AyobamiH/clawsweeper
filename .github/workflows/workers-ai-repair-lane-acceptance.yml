@@ -1,0 +1,39 @@
+name: Workers AI repair lane acceptance dispatch
+
+on:
+  push:
+    branches:
+      - test/workers-ai-repair-lane-acceptance-20261001
+    paths:
+      - ".github/workflows/workers-ai-repair-lane-acceptance.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch bounded Workers AI repair acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc '{
+            ref: "test/workers-ai-repair-lane-acceptance-20261001",
+            inputs: {
+              job: "jobs/AyobamiH/inbox/issue-ayobamih-clawsweeper-68.md",
+              mode: "autonomous",
+              runner: "clawsweeper-cloudflare",
+              execution_runner: "clawsweeper-cloudflare",
+              planner_sandbox: "read-only",
+              model: "internal",
+              inference_policy: "workers-ai",
+              dry_run: "false",
+              requeue: "false",
+              requeue_depth: "0"
+            }
+          }')"
+          gh api repos/AyobamiH/clawsweeper/actions/workflows/repair-cluster-worker.yml/dispatches             --method POST             --input - <<< "$payload"
+          echo "Dispatched bounded Workers AI repair acceptance for issue #68."
