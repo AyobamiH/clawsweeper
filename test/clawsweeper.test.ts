@@ -2074,7 +2074,11 @@ test("issue implementation workflow lets job intent choose dispatch capacity", (
     workflow.indexOf("\npermissions:"),
   );
 
-  assert.equal(dispatchInputs.match(/^      [a-z_]+:/gm)?.length, 9);
+  assert.equal(dispatchInputs.match(/^      [a-z_]+:/gm)?.length, 10);
+  assert.match(
+    dispatchInputs,
+    /inference_policy:\n\s+description: "Inference policy for dispatched repair work"\n\s+required: false\n\s+default: auto/,
+  );
   assert.doesNotMatch(workflow, /^\s+intake_runner:/m);
   assert.match(
     workflow,
