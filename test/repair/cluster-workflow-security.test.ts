@@ -73,16 +73,16 @@ test("repair dispatch plumbing preserves the bounded inference policy", () => {
 
   assert.match(
     intake,
-    /inference_policy:\\n\\s+description: "Inference policy for dispatched repair work"\\n\\s+required: false\\n\\s+default: auto\\n\\s+type: choice\\n\\s+options:\\n\\s+- auto\\n\\s+- codex\\n\\s+- workers-ai/,
+    /inference_policy:\n\s+description: "Inference policy for dispatched repair work"\n\s+required: false\n\s+default: auto\n\s+type: choice\n\s+options:\n\s+- auto\n\s+- codex\n\s+- workers-ai/,
   );
   assert.match(
     intake,
-    /INFERENCE_POLICY: \\$\\{\\{ github\\.event\\.inputs\\.inference_policy \\|\\| github\\.event\\.client_payload\\.inference_policy \\|\\| 'auto' \\}\\}/,
+    /INFERENCE_POLICY: \$\{\{ github\.event\.inputs\.inference_policy \|\| github\.event\.client_payload\.inference_policy \|\| 'auto' \}\}/,
   );
-  assert.match(intake, /--inference-policy "\\$INFERENCE_POLICY"/);
+  assert.match(intake, /--inference-policy "\$INFERENCE_POLICY"/);
 
-  assert.match(dispatch, /\\["auto", "codex", "workers-ai"\\]\\.includes\\(inferencePolicy\\)/);
-  assert.match(dispatch, /inference_policy=\\$\\{inferencePolicy\\}/);
+  assert.match(dispatch, /\["auto", "codex", "workers-ai"\]\.includes\(inferencePolicy\)/);
+  assert.match(dispatch, /inference_policy=\$\{inferencePolicy\}/);
 });
 test("repair plan and execute jobs use the shared inference router before model setup", () => {
   const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
