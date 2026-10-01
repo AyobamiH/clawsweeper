@@ -45,6 +45,36 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
   assert.doesNotMatch(source, /restore-durable-intake-job\.sh/);
 });
 
+test("repair inference policy override is bounded and defaults to auto", () => {
+  const workflow = parse(
+    fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8"),
+  ) as Workflow & {
+    on?: {
+      workflow_dispatch?: {
+        inputs?: Record<string, {
+          default?: string;
+          type?: string;
+          options?: string[];
+        }>;
+      };
+    };
+  };
+  const policy = workflow.on?.workflow_dispatch?.inputs?.inference_policy;
+  assert.equal(policy?.default, "auto");
+  assert.equal(policy?.type, "choice");
+  assert.deepEqual(policy?.options, ["auto", "codex", "workers-ai"]);
+
+  for (const jobName of ["cluster", "execute"]) {
+    const route = workflow.jobs?.[jobName]?.steps?.find(
+      (step) => step.name === "Resolve inference route",
+    );
+    assert.equal(
+      route?.env?.CLAWSWEEPER_INFERENCE_POLICY,
+      "${{ inputs.inference_policy || vars.CLAWSWEEPER_INFERENCE_POLICY || 'auto' }}",
+    );
+  }
+});
+
 test("repair plan and execute jobs use the shared inference router before model setup", () => {
   const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
   const workflow = parse(source) as Workflow;
