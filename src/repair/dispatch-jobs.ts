@@ -33,6 +33,11 @@ const executionRunner = args["execution-runner"] ?? args.execution_runner ?? def
 const workflow = args.workflow ?? REPAIR_CLUSTER_WORKFLOW;
 const repo = String(args.repo ?? currentProjectRepo());
 const model = String(args.model ?? process.env.CLAWSWEEPER_MODEL ?? "internal");
+const inferencePolicy = String(args["inference-policy"] ?? args.inference_policy ?? "auto").trim();
+if (!["auto", "codex", "workers-ai"].includes(inferencePolicy)) {
+  console.error("invalid inference policy; expected auto, codex, or workers-ai");
+  process.exit(2);
+}
 const waitForCapacity = Boolean(args["wait-for-capacity"]);
 const ref = args.ref ? String(args.ref) : "";
 const files = args._;
@@ -41,7 +46,7 @@ const jobWorkerLanes = new Map<string, WorkerLane>();
 
 if (files.length === 0) {
   console.error(
-    `usage: node scripts/dispatch-jobs.ts <job.md> [...] [--mode plan|execute|autonomous] [--runner label] [--execution-runner label] [--model model] [--max-live-workers ${AUTOMATION_LIMITS.repair_live_runs.default}] [--wait-for-capacity]`,
+    `usage: node scripts/dispatch-jobs.ts <job.md> [...] [--mode plan|execute|autonomous] [--runner label] [--execution-runner label] [--model model] [--inference-policy auto|codex|workers-ai] [--max-live-workers ${AUTOMATION_LIMITS.repair_live_runs.default}] [--wait-for-capacity]`,
   );
   process.exit(2);
 }
@@ -133,6 +138,8 @@ function dispatchJob(relative: JsonValue, position: JsonValue, total: JsonValue)
       `execution_runner=${executionRunner}`,
       "-f",
       `model=${model}`,
+      "-f",
+      `inference_policy=${inferencePolicy}`,
     ],
     { cwd: repoRoot(), encoding: "utf8", stdio: "pipe" },
   );

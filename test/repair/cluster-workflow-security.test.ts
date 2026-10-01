@@ -45,6 +45,102 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
   assert.doesNotMatch(source, /restore-durable-intake-job\.sh/);
 });
 
+test("repair inference policy override is bounded and defaults to auto", () => {
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+  assert.match(
+    source,
+    /inference_policy:\n\s+description: "Inference policy for this repair run"\n\s+required: true\n\s+default: auto\n\s+type: choice\n\s+options:\n\s+- auto\n\s+- codex\n\s+- workers-ai/,
+  );
+
+  for (const jobName of ["cluster", "execute"]) {
+    const route = workflow.jobs?.[jobName]?.steps?.find(
+      (step) => step.name === "Resolve inference route",
+    );
+    assert.equal(
+      route?.env?.CLAWSWEEPER_INFERENCE_POLICY,
+      "${{ inputs.inference_policy || vars.CLAWSWEEPER_INFERENCE_POLICY || 'auto' }}",
+    );
+  }
+});
+
+test("repair dispatch plumbing preserves the bounded inference policy", () => {
+  const intake = fs.readFileSync(
+    ".github/workflows/repair-issue-implementation-intake.yml",
+    "utf8",
+  );
+  const dispatch = fs.readFileSync("src/repair/dispatch-jobs.ts", "utf8");
+
+  assert.match(
+    intake,
+    /inference_policy:\n\s+description: "Inference policy for dispatched repair work"\n\s+required: false\n\s+default: auto\n\s+type: choice\n\s+options:\n\s+- auto\n\s+- codex\n\s+- workers-ai/,
+  );
+  assert.match(
+    intake,
+    /INFERENCE_POLICY: \$\{\{ github\.event\.inputs\.inference_policy \|\| github\.event\.client_payload\.inference_policy \|\| 'auto' \}\}/,
+  );
+  assert.match(intake, /--inference-policy "\$INFERENCE_POLICY"/);
+
+  assert.match(dispatch, /\["auto", "codex", "workers-ai"\]\.includes\(inferencePolicy\)/);
+  assert.match(dispatch, /inference_policy=\$\{inferencePolicy\}/);
+});
+
+test("repair plan and execute jobs use the shared inference router before model setup", () => {
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+
+  for (const jobName of ["cluster", "execute"]) {
+    const steps = workflow.jobs?.[jobName]?.steps ?? [];
+    const routeIndex = steps.findIndex((step) => step.name === "Resolve inference route");
+    const codexIndex = steps.findIndex((step) => step.uses === "./.github/actions/setup-codex");
+    const openclawIndex = steps.findIndex(
+      (step) => step.uses === "./.github/actions/setup-openclaw",
+    );
+    assert.ok(routeIndex >= 0, `${jobName} is missing inference route resolution`);
+    assert.ok(codexIndex > routeIndex, `${jobName} resolves routing after Codex setup`);
+    assert.ok(openclawIndex > routeIndex, `${jobName} resolves routing after OpenClaw setup`);
+
+    const route = steps[routeIndex]!;
+    assert.match(route.run ?? "", /node dist\/repair\/inference-route\.js/);
+    assert.equal(
+      route.env?.CLOUDFLARE_WORKERS_AI_TOKEN,
+      "${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}",
+    );
+  }
+
+  assert.match(source, /if: \$\{\{ env\.CLAWSWEEPER_RUNNER != 'openclaw'/);
+  const provision = workflow.jobs?.provision?.steps?.find(
+    (step) => step.uses === "./.github/actions/cloudflare-runners",
+  );
+  assert.equal(provision?.env?.CLOUDFLARE_API_TOKEN, "${{ secrets.CLOUDFLARE_API_TOKEN }}");
+  assert.doesNotMatch(
+    JSON.stringify(workflow.jobs?.cluster?.env ?? {}),
+    /CLOUDFLARE_WORKERS_AI_TOKEN/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(workflow.jobs?.execute?.env ?? {}),
+    /CLOUDFLARE_WORKERS_AI_TOKEN/,
+  );
+
+  const clusterWorker = workflow.jobs?.cluster?.steps?.find((step) => step.name === "Run worker");
+  const executeFix = workflow.jobs?.execute?.steps?.find(
+    (step) => step.name === "Execute credited fix artifact",
+  );
+  for (const step of [clusterWorker, executeFix]) {
+    assert.equal(
+      step?.env?.CLOUDFLARE_WORKERS_AI_TOKEN,
+      "${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}",
+    );
+    assert.equal(step?.env?.CLOUDFLARE_API_TOKEN, undefined);
+  }
+  for (const jobName of ["cluster", "execute"]) {
+    const route = workflow.jobs?.[jobName]?.steps?.find(
+      (step) => step.name === "Resolve inference route",
+    );
+    assert.equal(route?.env?.CLOUDFLARE_API_TOKEN, undefined);
+  }
+});
+
 test("generated issue workers can create PRs but never inherit the maintainer merge gate", () => {
   const workflow = parse(
     fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8"),

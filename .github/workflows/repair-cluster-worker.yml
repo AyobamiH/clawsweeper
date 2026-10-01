@@ -66,6 +66,15 @@ on:
         required: true
         default: internal
         type: string
+      inference_policy:
+        description: "Inference policy for this repair run"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - codex
+          - workers-ai
       dry_run:
         description: "Render prompt and write a dry result without invoking Codex"
         required: true
@@ -328,6 +337,34 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: bash scripts/capture-repair-execution-gates.sh
 
+      - name: Resolve inference route
+        id: inference_route
+        if: ${{ steps.check_job.outputs.job_exists == '1' }}
+        env:
+          CLAWSWEEPER_INFERENCE_POLICY: ${{ inputs.inference_policy || vars.CLAWSWEEPER_INFERENCE_POLICY || 'auto' }}
+          CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+        run: |
+          set -euo pipefail
+          route="$(node dist/repair/inference-route.js)"
+          printf '%s\n' "$route" | jq '{available,runner,reason,model}'
+          if [ "$(jq -r '.available' <<<"$route")" != "true" ]; then
+            echo "::error::No inference route is available: $(jq -r '.reason' <<<"$route")"
+            exit 1
+          fi
+          runner="$(jq -r '.runner' <<<"$route")"
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' <<<"$route")" >> "$GITHUB_OUTPUT"
+          echo "CLAWSWEEPER_RUNNER=$runner" >> "$GITHUB_ENV"
+          if [ "$runner" = "openclaw" ]; then
+            model="$(jq -r '.model' <<<"$route")"
+            providers_json="$(jq -c '.providersJson | fromjson' <<<"$route")"
+            echo "model=$model" >> "$GITHUB_OUTPUT"
+            echo "CLAWSWEEPER_OPENCLAW_MODEL=$model" >> "$GITHUB_ENV"
+            echo "CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON=$providers_json" >> "$GITHUB_ENV"
+          fi
+
       - name: Resolve Codex session cache
         id: codex_session
         if: ${{ env.CLAWSWEEPER_RUNNER != 'openclaw' && steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_STEERABLE_CODEX == '1' }}
@@ -407,7 +444,7 @@ jobs:
           pnpm run repair:issue-implementation-status -- \
             --job "$CLUSTER_JOB_PATH" \
             --state "Planning" \
-            --detail "Codex is reading the issue and repository, choosing an implementation, and planning validation." \
+            --detail "ClawSweeper is reading the issue and repository, choosing an implementation, and planning validation." \
             --run-url "$CLUSTER_RUN_URL"
 
       - name: Run worker
@@ -416,6 +453,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           CLAWSWEEPER_ALLOWED_OWNER: ${{ steps.target.outputs.target_owner }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}
         run: |
           worker_mode="$CLUSTER_WORKER_MODE"
           if [ "$worker_mode" != "plan" ] && [ "${CLAWSWEEPER_ALLOW_EXECUTE}" != "1" ]; then
@@ -638,6 +676,34 @@ jobs:
           GH_TOKEN: ${{ steps.target_write_token.outputs.token }}
         run: bash scripts/capture-repair-execution-gates.sh
 
+      - name: Resolve inference route
+        id: inference_route
+        if: ${{ steps.check_job.outputs.job_exists == '1' }}
+        env:
+          CLAWSWEEPER_INFERENCE_POLICY: ${{ inputs.inference_policy || vars.CLAWSWEEPER_INFERENCE_POLICY || 'auto' }}
+          CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+        run: |
+          set -euo pipefail
+          route="$(node dist/repair/inference-route.js)"
+          printf '%s\n' "$route" | jq '{available,runner,reason,model}'
+          if [ "$(jq -r '.available' <<<"$route")" != "true" ]; then
+            echo "::error::No inference route is available: $(jq -r '.reason' <<<"$route")"
+            exit 1
+          fi
+          runner="$(jq -r '.runner' <<<"$route")"
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' <<<"$route")" >> "$GITHUB_OUTPUT"
+          echo "CLAWSWEEPER_RUNNER=$runner" >> "$GITHUB_ENV"
+          if [ "$runner" = "openclaw" ]; then
+            model="$(jq -r '.model' <<<"$route")"
+            providers_json="$(jq -c '.providersJson | fromjson' <<<"$route")"
+            echo "model=$model" >> "$GITHUB_OUTPUT"
+            echo "CLAWSWEEPER_OPENCLAW_MODEL=$model" >> "$GITHUB_ENV"
+            echo "CLAWSWEEPER_OPENCLAW_PROVIDERS_JSON=$providers_json" >> "$GITHUB_ENV"
+          fi
+
       - name: Resolve Codex session cache
         id: codex_session
         if: ${{ env.CLAWSWEEPER_RUNNER != 'openclaw' && steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_STEERABLE_CODEX == '1' }}
@@ -723,7 +789,7 @@ jobs:
           pnpm run repair:issue-implementation-status -- \
             --job "$CLUSTER_JOB_PATH" \
             --state "Building" \
-            --detail "Codex is editing, validating, and reviewing the implementation before a branch or pull request is published." \
+            --detail "ClawSweeper is editing, validating, and reviewing the implementation before a branch or pull request is published." \
             --run-url "$CLUSTER_RUN_URL"
 
       - name: Execute credited fix artifact
@@ -738,6 +804,7 @@ jobs:
           # Keep free-form repository skill access; do not replace it with a fixed proof runner.
           OPENCLAW_QA_CONVEX_SITE_URL: ${{ steps.target.outputs.target_slug == 'openclaw-openclaw' && secrets.OPENCLAW_QA_CONVEX_SITE_URL || '' }}
           OPENCLAW_QA_CONVEX_SECRET_CI: ${{ steps.target.outputs.target_slug == 'openclaw-openclaw' && secrets.OPENCLAW_QA_CONVEX_SECRET_CI || '' }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}
         run: pnpm run repair:execute-fix -- "$CLUSTER_JOB_PATH" --latest --defer-publication
 
       - name: Renew target write token for post-flight

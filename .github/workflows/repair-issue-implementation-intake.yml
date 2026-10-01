@@ -49,6 +49,15 @@ on:
         required: false
         default: clawsweeper-cloudflare
         type: string
+      inference_policy:
+        description: "Inference policy for dispatched repair work"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - codex
+          - workers-ai
 permissions:
   contents: write
   actions: read
@@ -243,6 +252,7 @@ jobs:
           RUNNER: ${{ github.event.inputs.runner || github.event.client_payload.runner || vars.CLAWSWEEPER_WORKER_RUNNER || 'clawsweeper-cloudflare' }}
           EXECUTION_RUNNER: ${{ github.event.inputs.execution_runner || github.event.client_payload.execution_runner || vars.CLAWSWEEPER_EXECUTION_RUNNER || 'clawsweeper-cloudflare' }}
           MODEL: internal
+          INFERENCE_POLICY: ${{ github.event.inputs.inference_policy || github.event.client_payload.inference_policy || 'auto' }}
           JOB_PATH: ${{ steps.prepare.outputs.job_path || steps.prepare.outputs.existing_job_path }}
         run: |
           set -euo pipefail
@@ -258,6 +268,7 @@ jobs:
             --runner "$RUNNER" \
             --execution-runner "$EXECUTION_RUNNER" \
             --model "$MODEL" \
+            --inference-policy "$INFERENCE_POLICY" \
             --ref main
 
       - name: Record successful repair worker dispatch
