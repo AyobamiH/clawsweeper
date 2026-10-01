@@ -69,6 +69,28 @@ process.stdout.write(process.env.OPENCLAW_TEST_STDOUT || JSON.stringify({ payloa
   return binary;
 }
 
+test("OpenClaw process serializes worker setup failures instead of losing diagnostics", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-worker-setup-test-"));
+  try {
+    const result = runOpenclawProcess({
+      label: "worker-setup-failure",
+      prompt: "prompt",
+      model: "openai/test",
+      cwd: root,
+      env: process.env,
+      timeoutMs: 10_000,
+      stdoutPath: join(root, "missing-parent", "stdout.log"),
+      stderrPath: join(root, "missing-parent", "stderr.log"),
+    });
+    assert.equal(result.status, null);
+    assert.equal(codexProcessErrorCode(result.error), "ENOENT");
+    assert.match(result.error?.message ?? "", /missing-parent/);
+    assert.doesNotMatch(result.error?.message ?? "", /worker failed with exit/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw process emits isolated config and invocation, joins payloads, and cleans state", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-test-"));
   const recordPath = join(root, "record.json");
