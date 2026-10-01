@@ -84,6 +84,7 @@ test("repair dispatch plumbing preserves the bounded inference policy", () => {
   assert.match(dispatch, /\["auto", "codex", "workers-ai"\]\.includes\(inferencePolicy\)/);
   assert.match(dispatch, /inference_policy=\$\{inferencePolicy\}/);
 });
+
 test("repair plan and execute jobs use the shared inference router before model setup", () => {
   const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
   const workflow = parse(source) as Workflow;
