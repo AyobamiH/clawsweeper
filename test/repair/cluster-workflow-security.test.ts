@@ -112,10 +112,7 @@ test("repair plan and execute jobs use the shared inference router before model 
   const provision = workflow.jobs?.provision?.steps?.find(
     (step) => step.uses === "./.github/actions/cloudflare-runners",
   );
-  assert.equal(
-    provision?.env?.CLOUDFLARE_API_TOKEN,
-    "${{ secrets.CLOUDFLARE_API_TOKEN }}",
-  );
+  assert.equal(provision?.env?.CLOUDFLARE_API_TOKEN, "${{ secrets.CLOUDFLARE_API_TOKEN }}");
   assert.doesNotMatch(
     JSON.stringify(workflow.jobs?.cluster?.env ?? {}),
     /CLOUDFLARE_WORKERS_AI_TOKEN/,
