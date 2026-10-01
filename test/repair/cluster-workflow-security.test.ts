@@ -53,7 +53,9 @@ test("repair plan and execute jobs use the shared inference router before model 
     const steps = workflow.jobs?.[jobName]?.steps ?? [];
     const routeIndex = steps.findIndex((step) => step.name === "Resolve inference route");
     const codexIndex = steps.findIndex((step) => step.uses === "./.github/actions/setup-codex");
-    const openclawIndex = steps.findIndex((step) => step.uses === "./.github/actions/setup-openclaw");
+    const openclawIndex = steps.findIndex(
+      (step) => step.uses === "./.github/actions/setup-openclaw",
+    );
     assert.ok(routeIndex >= 0, `${jobName} is missing inference route resolution`);
     assert.ok(codexIndex > routeIndex, `${jobName} resolves routing after Codex setup`);
     assert.ok(openclawIndex > routeIndex, `${jobName} resolves routing after OpenClaw setup`);
@@ -77,7 +79,9 @@ test("repair plan and execute jobs use the shared inference router before model 
     /CLOUDFLARE_WORKERS_AI_TOKEN/,
   );
 
-  const clusterWorker = workflow.jobs?.cluster?.steps?.find((step) => step.name === "Run worker");
+  const clusterWorker = workflow.jobs?.cluster?.steps?.find(
+    (step) => step.name === "Run worker",
+  );
   const executeFix = workflow.jobs?.execute?.steps?.find(
     (step) => step.name === "Execute credited fix artifact",
   );
