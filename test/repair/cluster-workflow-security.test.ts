@@ -45,6 +45,50 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
   assert.doesNotMatch(source, /restore-durable-intake-job\.sh/);
 });
 
+test("repair plan and execute jobs use the shared inference router before model setup", () => {
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+
+  for (const jobName of ["cluster", "execute"]) {
+    const steps = workflow.jobs?.[jobName]?.steps ?? [];
+    const routeIndex = steps.findIndex((step) => step.name === "Resolve inference route");
+    const codexIndex = steps.findIndex((step) => step.uses === "./.github/actions/setup-codex");
+    const openclawIndex = steps.findIndex((step) => step.uses === "./.github/actions/setup-openclaw");
+    assert.ok(routeIndex >= 0, `${jobName} is missing inference route resolution`);
+    assert.ok(codexIndex > routeIndex, `${jobName} resolves routing after Codex setup`);
+    assert.ok(openclawIndex > routeIndex, `${jobName} resolves routing after OpenClaw setup`);
+
+    const route = steps[routeIndex]!;
+    assert.match(route.run ?? "", /node dist\/repair\/inference-route\.js/);
+    assert.equal(
+      route.env?.CLOUDFLARE_WORKERS_AI_TOKEN,
+      "${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}",
+    );
+  }
+
+  assert.match(source, /if: \$\{\{ env\.CLAWSWEEPER_RUNNER != 'openclaw'/);
+  assert.doesNotMatch(source, /CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(
+    JSON.stringify(workflow.jobs?.cluster?.env ?? {}),
+    /CLOUDFLARE_WORKERS_AI_TOKEN/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(workflow.jobs?.execute?.env ?? {}),
+    /CLOUDFLARE_WORKERS_AI_TOKEN/,
+  );
+
+  const clusterWorker = workflow.jobs?.cluster?.steps?.find((step) => step.name === "Run worker");
+  const executeFix = workflow.jobs?.execute?.steps?.find(
+    (step) => step.name === "Execute credited fix artifact",
+  );
+  for (const step of [clusterWorker, executeFix]) {
+    assert.equal(
+      step?.env?.CLOUDFLARE_WORKERS_AI_TOKEN,
+      "${{ steps.inference_route.outputs.runner == 'openclaw' && secrets.CLOUDFLARE_WORKERS_AI_TOKEN || '' }}",
+    );
+  }
+});
+
 test("generated issue workers can create PRs but never inherit the maintainer merge gate", () => {
   const workflow = parse(
     fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8"),
