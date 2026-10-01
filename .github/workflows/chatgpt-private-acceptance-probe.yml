@@ -1,4 +1,4 @@
-# acceptance-rerun: workers-ai-structured-decision-fresh-fixture-20260930
+# acceptance-rerun: workers-ai-structured-decision-glm-capacity-20261001
 name: Automatic inference fallback private acceptance
 # acceptance-retrigger: openclaw-schema-contract-20260930
 
