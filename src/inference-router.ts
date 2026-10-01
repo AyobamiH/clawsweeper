@@ -16,6 +16,20 @@ export type InferenceRoute =
     }
   | { available: false; runner: "none"; reason: string };
 
+function workersAiModelConfig(modelId: string): Record<string, unknown> {
+  if (modelId === "@cf/zai-org/glm-5.3") {
+    return {
+      id: modelId,
+      name: modelId,
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 1_310_720,
+      maxTokens: 128_000,
+    };
+  }
+  return { id: modelId, name: modelId };
+}
+
 export async function selectInferenceRoute(
   env: NodeJS.ProcessEnv = process.env,
   admit: (env?: NodeJS.ProcessEnv, refresh?: boolean) => Promise<boolean> = admitSubscription,
@@ -50,7 +64,7 @@ export async function selectInferenceRoute(
         baseUrl: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
         apiKey: "${CLOUDFLARE_WORKERS_AI_TOKEN}",
         api: "openai-completions",
-        models: [{ id: modelId, name: modelId }],
+        models: [workersAiModelConfig(modelId)],
       },
     };
     return {
