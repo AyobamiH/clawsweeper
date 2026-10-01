@@ -6,7 +6,17 @@ import { parse } from "yaml";
 test("upstream OpenClaw placeholder recovery is explicit opt-in maintenance", () => {
   const source = readFileSync(".github/workflows/exact-review-reconcile.yml", "utf8");
   const workflow = parse(source) as {
-    jobs?: Record<string, { steps?: Array<{ name?: string; if?: string; with?: Record<string, string>; env?: Record<string, string> }> }>;
+    jobs?: Record<
+      string,
+      {
+        steps?: Array<{
+          name?: string;
+          if?: string;
+          with?: Record<string, string>;
+          env?: Record<string, string>;
+        }>;
+      }
+    >;
   };
   const steps = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? []);
   const token = steps.find((step) => step.name === "Create target write token");
