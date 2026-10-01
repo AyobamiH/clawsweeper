@@ -1,4 +1,5 @@
 name: Workers AI repair lane acceptance dispatch
+# retry: durable-state job staged
 
 on:
   push:
