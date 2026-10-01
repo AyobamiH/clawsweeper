@@ -46,23 +46,12 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
 });
 
 test("repair inference policy override is bounded and defaults to auto", () => {
-  const workflow = parse(
-    fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8"),
-  ) as Workflow & {
-    on?: {
-      workflow_dispatch?: {
-        inputs?: Record<string, {
-          default?: string;
-          type?: string;
-          options?: string[];
-        }>;
-      };
-    };
-  };
-  const policy = workflow.on?.workflow_dispatch?.inputs?.inference_policy;
-  assert.equal(policy?.default, "auto");
-  assert.equal(policy?.type, "choice");
-  assert.deepEqual(policy?.options, ["auto", "codex", "workers-ai"]);
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+  assert.match(
+    source,
+    /inference_policy:\n\s+description: "Inference policy for this repair run"\n\s+required: true\n\s+default: auto\n\s+type: choice\n\s+options:\n\s+- auto\n\s+- codex\n\s+- workers-ai/,
+  );
 
   for (const jobName of ["cluster", "execute"]) {
     const route = workflow.jobs?.[jobName]?.steps?.find(
