@@ -1,0 +1,17 @@
+name: PR66 format probe
+on:
+  push:
+    branches: [feat/repair-inference-auto-routing-20261001]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pnpm
+      - name: Format repair routing test and print diff
+        run: |
+          pnpm exec oxfmt test/repair/cluster-workflow-security.test.ts
+          echo '===DIFF==='
+          git diff -- test/repair/cluster-workflow-security.test.ts
