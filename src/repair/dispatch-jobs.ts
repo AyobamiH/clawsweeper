@@ -33,9 +33,7 @@ const executionRunner = args["execution-runner"] ?? args.execution_runner ?? def
 const workflow = args.workflow ?? REPAIR_CLUSTER_WORKFLOW;
 const repo = String(args.repo ?? currentProjectRepo());
 const model = String(args.model ?? process.env.CLAWSWEEPER_MODEL ?? "internal");
-const inferencePolicy = String(
-  args["inference-policy"] ?? args.inference_policy ?? "auto",
-).trim();
+const inferencePolicy = String(args["inference-policy"] ?? args.inference_policy ?? "auto").trim();
 if (!["auto", "codex", "workers-ai"].includes(inferencePolicy)) {
   console.error("invalid inference policy; expected auto, codex, or workers-ai");
   process.exit(2);
