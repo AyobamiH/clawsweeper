@@ -1,0 +1,38 @@
+name: Workers AI repair acceptance current-main rerun
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/workers-ai-repair-current-main-rerun.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch current repair worker with Workers AI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -nc '{
+            ref:"main",
+            inputs:{
+              job:"jobs/AyobamiH/inbox/issue-ayobamih-clawsweeper-68.md",
+              mode:"autonomous",
+              runner:"clawsweeper-cloudflare",
+              execution_runner:"clawsweeper-cloudflare",
+              planner_sandbox:"read-only",
+              model:"internal",
+              inference_policy:"workers-ai",
+              dry_run:"false",
+              requeue:"true",
+              requeue_depth:"0"
+            }
+          }')"
+          gh api repos/AyobamiH/clawsweeper/actions/workflows/repair-cluster-worker.yml/dispatches             --method POST             --input - <<< "$payload"
+          echo "Dispatched current-main Workers AI repair acceptance."
