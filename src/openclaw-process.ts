@@ -69,7 +69,9 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
       configPath,
       "--model",
       options.model,
-      ...(options.model.startsWith("workersai/") ? ["--code-mode", "code"] : []),
+      ...(options.model.startsWith("workersai/")
+        ? ["--code-mode", "code", "--local-model-lean"]
+        : []),
       "--timeout",
       String(timeoutSeconds),
       "--json",
