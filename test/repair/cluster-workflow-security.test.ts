@@ -45,6 +45,31 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
   assert.doesNotMatch(source, /restore-durable-intake-job\.sh/);
 });
 
+test("repair mutation authority is bounded per run and defaults off", () => {
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+
+  assert.match(
+    source,
+    /authorize_execute:\n\s+description: "Explicitly authorize mutation for this trusted repair run"\n\s+required: false\n\s+default: false\n\s+type: boolean/,
+  );
+  assert.match(
+    source,
+    /authorize_fix_pr:\n\s+description: "Explicitly authorize fix-PR publication for this trusted repair run"\n\s+required: false\n\s+default: false\n\s+type: boolean/,
+  );
+
+  const clusterEnv = workflow.jobs?.cluster?.env ?? {};
+  assert.equal(
+    clusterEnv.CLAWSWEEPER_ALLOW_EXECUTE,
+    "${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && (vars.CLAWSWEEPER_ALLOW_EXECUTE == '1' || inputs.authorize_execute == true) && '1' || '0' }}",
+  );
+  assert.equal(
+    clusterEnv.CLAWSWEEPER_ALLOW_FIX_PR,
+    "${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && (vars.CLAWSWEEPER_ALLOW_FIX_PR == '1' || inputs.authorize_fix_pr == true) && '1' || '0' }}",
+  );
+  assert.equal(clusterEnv.CLAWSWEEPER_ALLOW_MERGE, "0");
+});
+
 test("repair inference policy override is bounded and defaults to auto", () => {
   const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
   const workflow = parse(source) as Workflow;
