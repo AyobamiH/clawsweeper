@@ -2307,11 +2307,32 @@ function editValidatePrepareMerge({
           : codexResult.status !== 0
             ? codexFailureDetail(codexResult, "Codex fix worker failed")
             : "";
+      const hasWorkingTreeChanges = Boolean(
+        run("git", ["status", "--porcelain"], { cwd: targetDir }).trim(),
+      );
+      const hasHeadChanges = currentHead(targetDir) !== headBeforeAttempt;
+      const recoveredOpenclawCleanup =
+        process.env.CLAWSWEEPER_RUNNER === "openclaw" &&
+        (hasWorkingTreeChanges || hasHeadChanges) &&
+        /Agent exec cleanup failed: Agent runtime cleanup did not settle/i.test(
+          String(codexResult.error?.message ?? ""),
+        ) &&
+        /\bended with stopReason=stop\b/i.test(String(codexResult.stderr ?? ""));
+      const effectiveErrorDetail = recoveredOpenclawCleanup ? "" : errorDetail;
+      if (recoveredOpenclawCleanup) {
+        logProgress("recovering completed OpenClaw edit after cleanup failure", {
+          mode,
+          attempt,
+          head_changed: hasHeadChanges,
+          working_tree_changed: hasWorkingTreeChanges,
+        });
+      }
       const remainingConflicts =
         rebaseResult?.status === "conflicts" ? unmergedPaths(targetDir) : [];
-      // Worker failures keep their transport/terminal classification. Only a completed
-      // edit pass that leaves conflicts consumes the bounded conflict-repair budget.
-      const conflictDecision = errorDetail
+      // Worker failures keep their transport/terminal classification. A cleanup-only
+      // OpenClaw failure may advance only when the agent already stopped cleanly and
+      // left a bounded target mutation for the existing validation/review gates.
+      const conflictDecision = effectiveErrorDetail
         ? { action: "proceed" as const }
         : rebaseConflictEditDecision({
             rebaseStatus: rebaseResult?.status,
@@ -2341,7 +2362,7 @@ function editValidatePrepareMerge({
         throw new Error(conflictDecision.reason);
       }
       if (timedOut) throw new Error(errorDetail);
-      if (codexResult.error || codexResult.status !== 0) {
+      if (!recoveredOpenclawCleanup && (codexResult.error || codexResult.status !== 0)) {
         if (attempt < maxEditAttempts && isRetryableCodexErrorMessage(errorDetail)) {
           previousSummary = compactText(errorDetail, 360);
           const retryDelayMs = codexRetryDelayMs(errorDetail, attempt);
@@ -2372,10 +2393,6 @@ function editValidatePrepareMerge({
         headSha: currentHead(targetDir),
       });
 
-      const hasWorkingTreeChanges = Boolean(
-        run("git", ["status", "--porcelain"], { cwd: targetDir }).trim(),
-      );
-      const hasHeadChanges = currentHead(targetDir) !== headBeforeAttempt;
       producedChanges = producedChanges || hasWorkingTreeChanges || hasHeadChanges;
       if (producedChanges) break;
       previousSummary = readTextIfExists(summaryPath).trim();

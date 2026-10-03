@@ -231,6 +231,30 @@ test("repair Codex heartbeat wrapper uses bounded process capture", () => {
   assert.doesNotMatch(source, /writeFileSync\([^)]*codexResult\.stdout/);
 });
 
+test("repair edit recovery requires a completed OpenClaw run and a real target mutation", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  const start = source.indexOf("const recoveredOpenclawCleanup =");
+  const end = source.indexOf("const remainingConflicts =", start);
+
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const recovery = source.slice(start, end);
+
+  assert.match(recovery, /process\.env\.CLAWSWEEPER_RUNNER === "openclaw"/);
+  assert.match(recovery, /hasWorkingTreeChanges \|\| hasHeadChanges/);
+  assert.match(recovery, /Agent exec cleanup failed: Agent runtime cleanup did not settle/);
+  assert.match(recovery, /ended with stopReason=stop/);
+  assert.match(
+    source,
+    /if \(!recoveredOpenclawCleanup && \(codexResult\.error \|\| codexResult\.status !== 0\)\)/,
+  );
+  assert.ok(
+    source.indexOf("producedChanges = producedChanges || hasWorkingTreeChanges || hasHeadChanges") >
+      start,
+    "cleanup recovery must still flow through ordinary mutation detection before validation",
+  );
+});
+
 test("issue implementation rechecks opt-out labels immediately before branch pushes", () => {
   const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
   const pushStart = source.indexOf("function pushRecoverableBranch(");
