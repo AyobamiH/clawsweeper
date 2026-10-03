@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import type { JsonValue, LooseRecord } from "./json-types.js";
 import { validateRepairContractShape } from "./repair-contract.js";
-import { parseAllowedValidationCommand } from "./validation-command-utils.js";
+import { repairValidationCommandFailures } from "./result-validation-commands.js";
 import fs from "node:fs";
 import path from "node:path";
 import { findFilesByBasenameSync } from "./glob-files.js";
@@ -522,19 +522,7 @@ function validateFixArtifact(fixArtifact: LooseRecord, failures: LooseRecord[]) 
   if (typeof fixArtifact.changelog_required !== "boolean") {
     failures.push("fix_artifact.changelog_required must be boolean");
   }
-  if (Array.isArray(fixArtifact.validation_commands)) {
-    for (const command of fixArtifact.validation_commands) {
-      try {
-        parseAllowedValidationCommand(command);
-      } catch (error) {
-        failures.push(
-          `fix_artifact.validation_commands contains unsupported or unsafe command: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-  }
+  failures.push(...repairValidationCommandFailures(fixArtifact.validation_commands));
   failures.push(...validateRepairContractShape(fixArtifact));
   if (!FIX_REPAIR_STRATEGIES.has(fixArtifact.repair_strategy)) {
     failures.push("fix_artifact.repair_strategy is required");
