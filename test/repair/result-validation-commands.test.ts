@@ -7,7 +7,7 @@ test("repair result validation commands accept deterministic supported commands"
     repairValidationCommandFailures([
       "git diff --check",
       "pnpm check:changed",
-      "node scripts/check-fixture.mjs test/fixtures/example.txt",
+      "node scripts/assert-file-text.mjs test/fixtures/example.txt EXPECTED",
     ]),
     [],
   );
