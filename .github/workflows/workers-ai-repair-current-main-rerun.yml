@@ -1,5 +1,5 @@
 name: Workers AI repair acceptance current-main rerun
-# acceptance-rerun: post-pr77-20261003
+# acceptance-rerun: post-pr78-20261003
 
 on:
   push:
