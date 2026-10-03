@@ -29,6 +29,8 @@ jobs:
               planner_sandbox:"read-only",
               model:"internal",
               inference_policy:"workers-ai",
+              authorize_execute:true,
+              authorize_fix_pr:true,
               dry_run:"false",
               requeue:"true",
               requeue_depth:"0"
