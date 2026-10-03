@@ -332,6 +332,7 @@ async function repairResultIfNeeded() {
       "Do not mutate GitHub. Do not change the job scope. Return a complete replacement JSON result only.",
       "Fix the validation failures with the narrowest safe changes. If a PR closeout comment is missing contributor credit, update that action comment to explicitly preserve credit, including wording such as `credit`, `attribution`, `thanks @user`, or `source PR`, and keep the canonical/fix links intact.",
       "Validation commands must be directly executable without a shell: no command substitution, pipes, redirection, &&, ||, semicolons, inline interpreters, or mutation. Prefer repo-native scripts such as `pnpm check:changed`, `git diff --check`, or a checked-in validation script invoked with `node <script> <args>`.",
+      "For an exact one-line text-file assertion, use `node scripts/assert-file-text.mjs <path> <expected-text>` instead of shell substitution with cat/wc.",
       "If a validator failure reveals that an action is not safely repairable from the provided artifacts, downgrade only that action to a non-mutating `keep_related`, `keep_independent`, blocked fix-first action, or `needs_human` with exact evidence.",
       "",
       "## Validator output",
