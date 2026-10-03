@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { runAgentProcess } from "../agent-runner.js";
 import { codexAppServerProcessOptionsFromEnv } from "../codex-process.js";
 import { deterministicAutomergeResult } from "./deterministic-automerge-result.js";
+import { normalizeRepairValidationCommands } from "./result-validation-commands.js";
 import {
   assertAllowedOwner,
   makeRunDir,
@@ -316,8 +317,12 @@ function codexConfigArgs() {
 
 async function repairResultIfNeeded() {
   for (let attempt = 1; attempt <= resultRepairAttempts; attempt += 1) {
-    const review = reviewResult();
+    let review = reviewResult();
     if (review.status === 0) return;
+    if (normalizeMechanicalValidationCommands()) {
+      review = reviewResult();
+      if (review.status === 0) return;
+    }
     fs.writeFileSync(
       path.join(runDir, `review-results-failed-${attempt}.json`),
       review.stdout || review.stderr || "",
@@ -370,6 +375,27 @@ async function repairResultIfNeeded() {
     }
     sanitizeResultFile(resultPath);
   }
+}
+
+function normalizeMechanicalValidationCommands(): boolean {
+  if (!fs.existsSync(resultPath)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(resultPath, "utf8"));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object") return false;
+  const result = parsed as LooseRecord;
+  const fixArtifact = result.fix_artifact;
+  if (!fixArtifact || typeof fixArtifact !== "object") return false;
+  const normalized = normalizeRepairValidationCommands(fixArtifact.validation_commands);
+  if (!normalized.changed) return false;
+  fixArtifact.validation_commands = normalized.commands;
+  sanitizeResultEvidence(result);
+  fs.writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+  console.log("[repair] normalized mechanically safe validation commands without model inference");
+  return true;
 }
 
 function reviewResult() {
