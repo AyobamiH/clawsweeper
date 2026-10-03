@@ -213,7 +213,10 @@ export function validateJob(job: ParsedJob | LooseRecord) {
     errors.push(`unsupported job_intent: ${fm.job_intent}`);
   }
   if (fm.source === "issue_implementation") {
-    if (typeof fm.source_issue_repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fm.source_issue_repo)) {
+    if (
+      typeof fm.source_issue_repo !== "string" ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fm.source_issue_repo)
+    ) {
       errors.push("issue implementation jobs require source_issue_repo");
     }
     const issueNumber = Number(fm.source_issue_number);
