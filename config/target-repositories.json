@@ -360,7 +360,13 @@
       }
     }
   ],
-  "core_target_overrides": {},
+  "core_target_overrides": {
+    "AyobamiH/clawsweeper": {
+      "package_manager": "pnpm",
+      "validation_commands": [],
+      "changed_gate": null
+    }
+  },
   "target_inventory": {
     "owners": ["AyobamiH"],
     "allow_repositories": [

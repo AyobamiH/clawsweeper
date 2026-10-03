@@ -156,6 +156,19 @@ test("non-OpenClaw repairs do not get OpenClaw changed gate injection", () => {
   );
 });
 
+test("AyobamiH ClawSweeper self-repair resolves to pnpm without fleet enrollment", () => {
+  __resetTargetRepoToolchainCache();
+  try {
+    assert.deepEqual(resolveTargetRepoToolchain("AyobamiH/clawsweeper"), {
+      packageManager: "pnpm",
+      baseValidationCommands: [],
+      changedGate: null,
+    });
+  } finally {
+    __resetTargetRepoToolchainCache();
+  }
+});
+
 test("ClawSweeper repairs preserve their configured changed gate from the real config", () => {
   const cwd = packageFixture({ "check:changed": "node check.js" });
 
