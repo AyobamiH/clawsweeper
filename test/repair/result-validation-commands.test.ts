@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { repairValidationCommandFailures } from "../../src/repair/result-validation-commands.ts";
+import { repairValidationCommandFailures } from "../../dist/repair/result-validation-commands.js";
 
 test("repair result validation commands accept deterministic supported commands", () => {
   assert.deepEqual(
