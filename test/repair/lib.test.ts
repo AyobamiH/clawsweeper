@@ -80,6 +80,29 @@ candidates:
   );
 });
 
+test("validateJob requires source issue metadata for issue implementation jobs", () => {
+  const base = parseSimpleYaml(`repo: AyobamiH/clawsweeper
+cluster_id: issue-68
+mode: autonomous
+source: issue_implementation
+allowed_actions:
+  - fix
+candidates:
+  - "#68"
+`);
+  assert.deepEqual(validateJob({ frontmatter: base }), [
+    "issue implementation jobs require source_issue_repo",
+    "issue implementation jobs require source_issue_number",
+  ]);
+
+  const valid = {
+    ...base,
+    source_issue_repo: "AyobamiH/clawsweeper",
+    source_issue_number: "68",
+  };
+  assert.deepEqual(validateJob({ frontmatter: valid }), []);
+});
+
 test("security signal detection ignores non-security advisory wording", () => {
   assert.equal(
     hasSecuritySignalText(
