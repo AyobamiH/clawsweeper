@@ -1,11 +1,8 @@
 import { parseAllowedValidationCommand } from "./validation-command-utils.js";
 
-const EXACT_TEXT_ASSERTION =
-  /^test "\$\(cat ([A-Za-z0-9_./-]+)\)" = "([A-Za-z0-9_.:+/-]+)"$/;
-const EXACT_LINE_COUNT_ASSERTION =
-  /^test "\$\(wc -l < ([A-Za-z0-9_./-]+)\)" -eq ([0-9]+)$/;
-const EXACT_BYTE_COUNT_ASSERTION =
-  /^test "\$\(wc -c < ([A-Za-z0-9_./-]+)\)" -eq ([0-9]+)$/;
+const EXACT_TEXT_ASSERTION = /^test "\$\(cat ([A-Za-z0-9_./-]+)\)" = "([A-Za-z0-9_.:+/-]+)"$/;
+const EXACT_LINE_COUNT_ASSERTION = /^test "\$\(wc -l < ([A-Za-z0-9_./-]+)\)" -eq ([0-9]+)$/;
+const EXACT_BYTE_COUNT_ASSERTION = /^test "\$\(wc -c < ([A-Za-z0-9_./-]+)\)" -eq ([0-9]+)$/;
 
 export function normalizeRepairValidationCommands(value: unknown): {
   commands: unknown;
