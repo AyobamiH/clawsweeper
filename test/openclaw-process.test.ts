@@ -168,7 +168,7 @@ test("OpenClaw process emits isolated config and invocation, joins payloads, and
   }
 });
 
-test("Workers AI headless reviews force OpenClaw code mode", () => {
+test("Workers AI headless reviews force OpenClaw code mode with lean tools", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-workers-ai-code-mode-test-"));
   const recordPath = join(root, "record.json");
   const binary = fakeOpenclaw(root);
@@ -188,6 +188,7 @@ test("Workers AI headless reviews force OpenClaw code mode", () => {
     assert.equal(result.status, 0, result.error?.message);
     const record = JSON.parse(readFileSync(recordPath, "utf8"));
     assert.equal(record.args[record.args.indexOf("--code-mode") + 1], "code");
+    assert.equal(record.args.includes("--local-model-lean"), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -227,6 +228,7 @@ test("OpenClaw checkout inspection uses agent exec and Workers AI code mode", ()
     assert.deepEqual(record.args.slice(0, 2), ["agent", "exec"]);
     assert.equal(record.args.includes("--session-id"), false);
     assert.equal(record.args[record.args.indexOf("--code-mode") + 1], "code");
+    assert.equal(record.args.includes("--local-model-lean"), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
