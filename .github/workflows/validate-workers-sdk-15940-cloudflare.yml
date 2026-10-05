@@ -1,0 +1,189 @@
+name: Validate Workers SDK 15940 on Cloudflare
+
+on:
+  push:
+    branches:
+      - validation/workers-sdk-15940-cloudflare
+    paths:
+      - .github/workflows/validate-workers-sdk-15940-cloudflare.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-repair-compute
+  queue: max
+  cancel-in-progress: false
+
+env:
+  CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+  RED_SHA: 9e48ef9fd456e414ce108b80e54326fed814febd
+  GREEN_SHA: d5d9fe50fe24dc7f3e949e2608e23c101e70ad12
+
+jobs:
+  provision:
+    name: Provision Cloudflare validation runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      runner: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded runner credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+
+  validate:
+    name: RED/GREEN published-type proof on Cloudflare
+    needs: provision
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - name: Require fresh Cloudflare compute
+        if: ${{ needs.provision.outputs.attempt != format('{0}', github.run_attempt) }}
+        run: |
+          echo "Rerun all jobs so validation receives fresh Cloudflare compute." >&2
+          exit 1
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global pnpm@10.33.0
+          pnpm --version
+          node --version
+          git --version
+
+      - name: Fetch exact RED and GREEN revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/workers-sdk-15940"
+          mkdir -p "$root/source" "$root/evidence"
+          git -C "$root/source" init
+          git -C "$root/source" remote add origin https://github.com/AyobamiH/workers-sdk.git
+          git -C "$root/source" fetch --depth=1 origin "$RED_SHA"
+          git -C "$root/source" branch red FETCH_HEAD
+          git -C "$root/source" fetch --depth=1 origin "$GREEN_SHA"
+          git -C "$root/source" branch green FETCH_HEAD
+          git -C "$root/source" worktree add --detach "$root/red" red
+          git -C "$root/source" worktree add --detach "$root/green" green
+          printf '%s\n' "$RED_SHA" > "$root/evidence/red-sha.txt"
+          printf '%s\n' "$GREEN_SHA" > "$root/evidence/green-sha.txt"
+          printf '%s\n' "$RUNNER_NAME" > "$root/evidence/runner.txt"
+
+      - name: Prove RED fails for published declaration leakage
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/workers-sdk-15940"
+          cd "$root/red"
+          pnpm install --frozen-lockfile --filter wrangler... --filter @fixture/import-npm... 2>&1 | tee "$root/evidence/red-install.log"
+          set +e
+          pnpm exec turbo type:tests --filter=@fixture/import-npm --force 2>&1 | tee "$root/evidence/red.log"
+          red_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$red_exit" > "$root/evidence/red-exit.txt"
+          if [ "$red_exit" -eq 0 ]; then
+            echo "RED unexpectedly passed; reproduction is not proven." >&2
+            exit 1
+          fi
+          if ! grep -E 'TS2307|Cannot find module' "$root/evidence/red.log" | grep -E 'wrangler-dist/cli\.d\.ts|@cloudflare/(workers-utils|containers-shared|workers-shared|remote-bindings)|devtools-protocol|yargs|cloudflare' > "$root/evidence/red-expected-errors.txt"; then
+            echo "RED failed, but not for the expected Wrangler declaration leak." >&2
+            exit 1
+          fi
+
+      - name: Prove GREEN passes the same consumer boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/workers-sdk-15940"
+          cd "$root/green"
+          pnpm install --frozen-lockfile --filter wrangler... --filter @fixture/import-npm... 2>&1 | tee "$root/evidence/green-install.log"
+          set +e
+          pnpm exec turbo type:tests --filter=@fixture/import-npm --force 2>&1 | tee "$root/evidence/green.log"
+          green_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$green_exit" > "$root/evidence/green-exit.txt"
+          if [ "$green_exit" -ne 0 ]; then
+            echo "GREEN failed the same consumer type boundary." >&2
+            exit "$green_exit"
+          fi
+          test -s packages/wrangler/wrangler-dist/cli.d.ts
+          grep -E '^import .* from ' packages/wrangler/wrangler-dist/cli.d.ts > "$root/evidence/green-declaration-imports.txt" || true
+          if grep -nE '@cloudflare/(workers-utils|containers-shared|workers-shared|remote-bindings)|devtools-protocol|from "yargs"|from "cloudflare"' packages/wrangler/wrangler-dist/cli.d.ts > "$root/evidence/green-private-leaks.txt"; then
+            echo "GREEN still exposes private declaration imports." >&2
+            cat "$root/evidence/green-private-leaks.txt" >&2
+            exit 1
+          fi
+          : > "$root/evidence/green-private-leaks.txt"
+
+      - name: Write validation summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/workers-sdk-15940"
+          {
+            echo "red_sha=$RED_SHA"
+            echo "green_sha=$GREEN_SHA"
+            echo "runner=$RUNNER_NAME"
+            echo "red_exit=$(cat "$root/evidence/red-exit.txt" 2>/dev/null || echo missing)"
+            echo "green_exit=$(cat "$root/evidence/green-exit.txt" 2>/dev/null || echo missing)"
+          } | tee "$root/evidence/summary.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: workers-sdk-15940-cloudflare-red-green
+          path: ${{ runner.temp }}/workers-sdk-15940/evidence
+          if-no-files-found: error
+
+  cleanup:
+    name: Destroy Cloudflare validation runner
+    needs:
+      - provision
+      - validate
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mint bounded cleanup credential
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: AyobamiH
+          repositories: clawsweeper
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
