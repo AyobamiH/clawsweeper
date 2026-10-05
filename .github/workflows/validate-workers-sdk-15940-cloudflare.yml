@@ -18,8 +18,8 @@ concurrency:
 
 env:
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
-  RED_SHA: 9e48ef9fd456e414ce108b80e54326fed814febd
-  GREEN_SHA: d5d9fe50fe24dc7f3e949e2608e23c101e70ad12
+  RED_SHA: 5b1194f9d8fc4f8a39a6e153bf35382f0f3e6577
+  GREEN_SHA: 775014677514aa35aaacdb0c9448174a33dbfe71
 
 jobs:
   provision:
@@ -53,7 +53,7 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
 
   validate:
-    name: RED/GREEN published-type proof on Cloudflare
+    name: RED/GREEN declaration-boundary proof on Cloudflare
     needs: provision
     runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 60
@@ -69,11 +69,11 @@ jobs:
         run: |
           set -euo pipefail
           npm install --global pnpm@10.33.0
-          pnpm --version
           node --version
+          pnpm --version
           git --version
 
-      - name: Fetch exact RED and GREEN revisions
+      - name: Fetch exact revisions and install once
         shell: bash
         run: |
           set -euo pipefail
@@ -85,76 +85,82 @@ jobs:
           git -C "$root/source" branch red FETCH_HEAD
           git -C "$root/source" fetch --depth=1 origin "$GREEN_SHA"
           git -C "$root/source" branch green FETCH_HEAD
-          git -C "$root/source" worktree add --detach "$root/red" red
-          git -C "$root/source" worktree add --detach "$root/green" green
+          git -C "$root/source" checkout --detach red
+          cd "$root/source"
+          pnpm install --frozen-lockfile 2>&1 | tee "$root/evidence/install.log"
           printf '%s\n' "$RED_SHA" > "$root/evidence/red-sha.txt"
           printf '%s\n' "$GREEN_SHA" > "$root/evidence/green-sha.txt"
           printf '%s\n' "$RUNNER_NAME" > "$root/evidence/runner.txt"
 
-      - name: Prove RED fails for published declaration leakage
+      - name: Prove RED fails at the published declaration boundary
         shell: bash
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/workers-sdk-15940"
-          cd "$root/red"
-          pnpm install --frozen-lockfile --filter wrangler... --filter @fixture/import-npm... 2>&1 | tee "$root/evidence/red-install.log"
+          cd "$root/source"
           set +e
-          pnpm exec turbo type:tests --filter=@fixture/import-npm --force 2>&1 | tee "$root/evidence/red.log"
+          pnpm exec turbo type:tests --filter=wrangler --force 2>&1 | tee "$root/evidence/red.log"
           red_exit=${PIPESTATUS[0]}
           set -e
           printf '%s\n' "$red_exit" > "$root/evidence/red-exit.txt"
+          test -s packages/wrangler/wrangler-dist/cli.d.ts
+          wc -c < packages/wrangler/wrangler-dist/cli.d.ts | tr -d ' ' > "$root/evidence/red-cli-dts-bytes.txt"
           if [ "$red_exit" -eq 0 ]; then
-            echo "RED unexpectedly passed; reproduction is not proven." >&2
+            echo "RED unexpectedly passed; the regression does not prove the issue." >&2
             exit 1
           fi
-          if ! grep -E 'TS2307|Cannot find module' "$root/evidence/red.log" | grep -E 'wrangler-dist/cli\.d\.ts|@cloudflare/(workers-utils|containers-shared|workers-shared|remote-bindings)|devtools-protocol|yargs|cloudflare' > "$root/evidence/red-expected-errors.txt"; then
-            echo "RED failed, but not for the expected Wrangler declaration leak." >&2
+          if ! grep -q "published declarations have unresolved package boundaries" "$root/evidence/red.log"; then
+            echo "RED failed for an unexpected reason." >&2
             exit 1
           fi
+          grep -E '@cloudflare/(workers-utils|containers-shared|workers-shared|remote-bindings)|devtools-protocol|yargs|cloudflare' "$root/evidence/red.log" > "$root/evidence/red-leaks.txt" || true
+          test -s "$root/evidence/red-leaks.txt"
 
-      - name: Prove GREEN passes the same consumer boundary
+      - name: Prove GREEN passes and record declaration size
         shell: bash
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/workers-sdk-15940"
-          cd "$root/green"
-          pnpm install --frozen-lockfile --filter wrangler... --filter @fixture/import-npm... 2>&1 | tee "$root/evidence/green-install.log"
+          cd "$root/source"
+          git reset --hard
+          git clean -ffd -e node_modules
+          git checkout --detach green
           set +e
-          pnpm exec turbo type:tests --filter=@fixture/import-npm --force 2>&1 | tee "$root/evidence/green.log"
+          pnpm exec turbo check:lint check:type check:format type:tests --filter=wrangler --force 2>&1 | tee "$root/evidence/green.log"
           green_exit=${PIPESTATUS[0]}
           set -e
           printf '%s\n' "$green_exit" > "$root/evidence/green-exit.txt"
+          test -s packages/wrangler/wrangler-dist/cli.d.ts
+          wc -c < packages/wrangler/wrangler-dist/cli.d.ts | tr -d ' ' > "$root/evidence/green-cli-dts-bytes.txt"
           if [ "$green_exit" -ne 0 ]; then
-            echo "GREEN failed the same consumer type boundary." >&2
             exit "$green_exit"
           fi
-          test -s packages/wrangler/wrangler-dist/cli.d.ts
-          grep -E '^import .* from ' packages/wrangler/wrangler-dist/cli.d.ts > "$root/evidence/green-declaration-imports.txt" || true
-          if grep -nE '@cloudflare/(workers-utils|containers-shared|workers-shared|remote-bindings)|devtools-protocol|from "yargs"|from "cloudflare"' packages/wrangler/wrangler-dist/cli.d.ts > "$root/evidence/green-private-leaks.txt"; then
-            echo "GREEN still exposes private declaration imports." >&2
-            cat "$root/evidence/green-private-leaks.txt" >&2
-            exit 1
-          fi
-          : > "$root/evidence/green-private-leaks.txt"
 
-      - name: Write validation summary
+      - name: Summarise evidence
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/workers-sdk-15940"
+          red_bytes="$(cat "$root/evidence/red-cli-dts-bytes.txt" 2>/dev/null || echo missing)"
+          green_bytes="$(cat "$root/evidence/green-cli-dts-bytes.txt" 2>/dev/null || echo missing)"
           {
             echo "red_sha=$RED_SHA"
             echo "green_sha=$GREEN_SHA"
             echo "runner=$RUNNER_NAME"
             echo "red_exit=$(cat "$root/evidence/red-exit.txt" 2>/dev/null || echo missing)"
             echo "green_exit=$(cat "$root/evidence/green-exit.txt" 2>/dev/null || echo missing)"
+            echo "red_cli_dts_bytes=$red_bytes"
+            echo "green_cli_dts_bytes=$green_bytes"
+            if [[ "$red_bytes" =~ ^[0-9]+$ && "$green_bytes" =~ ^[0-9]+$ && "$red_bytes" -gt 0 ]]; then
+              awk -v red="$red_bytes" -v green="$green_bytes" 'BEGIN { printf "size_ratio=%.3f\n", green/red }'
+            fi
           } | tee "$root/evidence/summary.txt"
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: workers-sdk-15940-cloudflare-red-green
+          name: workers-sdk-15940-cloudflare-maintainer-proof
           path: ${{ runner.temp }}/workers-sdk-15940/evidence
           if-no-files-found: error
 
