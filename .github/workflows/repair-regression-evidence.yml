@@ -25,9 +25,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/repair-regression
-          gh api repos/AyobamiH/clawsweeper/actions/jobs/112637596244/logs > .artifacts/repair-regression/full-validation.log
+          gh api --allow-escape-sequences repos/AyobamiH/clawsweeper/actions/jobs/112637596244/logs > .artifacts/repair-regression/full-validation.log
           python3 - <<'PY'
           from pathlib import Path
+          import re
           root = Path('.artifacts/repair-regression')
           lines = (root / 'full-validation.log').read_text().splitlines()
           selected = set()
@@ -35,14 +36,17 @@ jobs:
               if 'not ok ' in line or 'AssertionError' in line or 'ERR_ASSERTION' in line:
                   selected.update(range(max(0, i - 5), min(len(lines), i + 90)))
           summary = '\n'.join(lines[i] for i in sorted(selected))
+          summary = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', summary)
           (root / 'failure-summary.txt').write_text(summary + '\n')
           print(summary[-24000:] or 'No TAP assertion failure found; inspect the archived transcript.')
           PY
       - uses: ./.github/actions/setup-pnpm
+        if: always()
         with:
-          node-version: '24'
+          node-version: "24"
           build-script: build:all
       - name: Package isolated validation workspace
+        if: always()
         run: |
           set -euo pipefail
           git archive HEAD | gzip > .artifacts/repair-regression/source.tar.gz
@@ -52,6 +56,77 @@ jobs:
           npm pack pnpm@11.10.0 --pack-destination .artifacts/repair-regression/runtime --ignore-scripts
           git rev-parse HEAD > .artifacts/repair-regression/revision.txt
           node --version > .artifacts/repair-regression/node-version.txt
+      - uses: ./.github/actions/setup-codex
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
+      - name: Classify allowance failure without publishing provider diagnostics
+        run: |
+          python3 - <<'PY'
+          import json, os, selectors, subprocess, time
+          from pathlib import Path
+          env = dict(os.environ)
+          for key in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'PROXY_API_KEY', 'CLAWSWEEPER_QUOTA_SECRET', 'CLAWSWEEPER_WEBHOOK_SECRET'):
+              env.pop(key, None)
+          child = subprocess.Popen(['codex', 'app-server', '-c', 'forced_login_method="chatgpt"'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
+          def send(value):
+              child.stdin.write((json.dumps(value) + '\n').encode())
+              child.stdin.flush()
+          send({'method':'initialize','id':1,'params':{'clientInfo':{'name':'clawsweeper-quota','version':'1'}}})
+          selector = selectors.DefaultSelector()
+          selector.register(child.stdout, selectors.EVENT_READ)
+          deadline = time.monotonic() + 20
+          report = {'status':'timeout','modelCalls':0}
+          buffer = b''
+          finished = False
+          try:
+              while time.monotonic() < deadline and not finished:
+                  for key, _ in selector.select(0.25):
+                      chunk = os.read(key.fd, 65536)
+                      if not chunk:
+                          report['status'] = 'process_closed'
+                          finished = True
+                          break
+                      buffer += chunk
+                      if len(buffer) > 256000:
+                          report['status'] = 'output_limit'
+                          finished = True
+                          break
+                      while b'\n' in buffer:
+                          line, buffer = buffer.split(b'\n', 1)
+                          try:
+                              message = json.loads(line)
+                          except (ValueError, UnicodeDecodeError):
+                              continue
+                          if message.get('id') not in (1, 2):
+                              continue
+                          if message.get('error'):
+                              error = message['error']
+                              text = json.dumps(error).lower()
+                              tags = [tag for tag in ('refresh_token_reused','refresh_token_expired','refresh_token_invalidated','not_authenticated','unauthorized','expired','401','403','429') if tag in text]
+                              report = {'status':'rpc_error','stage':'initialize' if message['id'] == 1 else 'account/rateLimits/read','rpcCode':error.get('code') if isinstance(error.get('code'), int) else None,'categories':tags,'modelCalls':0}
+                              finished = True
+                              break
+                          if message['id'] == 1:
+                              send({'method':'initialized'})
+                              send({'method':'account/rateLimits/read','id':2})
+                          else:
+                              result = message.get('result') or {}
+                              bucket = (result.get('rateLimitsByLimitId') or {}).get('codex') or result.get('rateLimits') or {}
+                              report = {'status':'response','modelCalls':0,'hasCodexBucket':bool(bucket),'primaryPresent':bool(bucket.get('primary')),'secondaryPresent':bool(bucket.get('secondary'))}
+                              finished = True
+                              break
+          finally:
+              import signal
+              try:
+                  os.killpg(child.pid, signal.SIGKILL)
+              except ProcessLookupError:
+                  pass
+              child.wait(timeout=5)
+              selector.close()
+          Path('.artifacts/repair-regression/allowance-diagnostic.json').write_text(json.dumps(report) + '\n')
+          print(json.dumps(report))
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:
