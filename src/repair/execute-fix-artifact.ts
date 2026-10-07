@@ -664,6 +664,16 @@ try {
           reason: error.message,
         });
         if (!shouldFallbackToReplacementAfterRepairError(error)) throw error;
+        if (job.frontmatter.allow_replacement_pr === false) {
+          logProgress("replacement fallback blocked by job policy", {
+            source_pr: firstSourcePullRequest(fixArtifact).url,
+            reason: error.message,
+          });
+          throw new Error(
+            `direct contributor repair failed and replacement PR is forbidden by job policy: ${error.message}`,
+            { cause: error },
+          );
+        }
         const fallbackTargetDir = prepareFallbackReplacementCheckout(targetDir);
         outcome = executeReplacementBranch({
           fixArtifact,
@@ -878,7 +888,7 @@ function preflightRepairSourceBranchWrite(fixArtifact: LooseRecord) {
       source_pr: sourcePr.url,
       head_repo: pull.head.repo.full_name,
       head_ref: pull.head.ref,
-      same_repo_branch: pull.head.repo.full_name === result.repo,
+      same_repo_branch: sameRepoSlug(pull.head.repo.full_name, result.repo),
       maintainer_can_modify: pull.maintainer_can_modify === true,
     };
   }
@@ -927,7 +937,7 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
   if (initialPauseBlock) return initialPauseBlock;
   if (!pull.head?.repo?.full_name || !pull.head?.ref)
     throw new Error(`source PR #${sourcePr.number} is missing head repo/ref`);
-  const sameRepoBranch = pull.head.repo.full_name === result.repo;
+  const sameRepoBranch = sameRepoSlug(pull.head.repo.full_name, result.repo);
   const branchBlock = sourceBranchWriteBlockReason(result.repo, pull);
   if (branchBlock) throw new Error(`source PR #${sourcePr.number} ${branchBlock}`);
   const replacementRemoteLeaseSha = trustedRemoteBranchSha(
@@ -1684,6 +1694,9 @@ function executeReplacementBranch({
   supersedeSources,
   fallbackReason,
 }: LooseRecord) {
+  if (job.frontmatter.allow_replacement_pr === false) {
+    throw new Error("replacement PR is forbidden by job frontmatter");
+  }
   const baseBranch = String(process.env.CLAWSWEEPER_FIX_BASE_BRANCH ?? DEFAULT_BASE_BRANCH);
   const contributorCredits = sourceContributorCredits({
     fixArtifact,

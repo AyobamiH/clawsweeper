@@ -546,3 +546,22 @@ test("repair contributor branch honors allow_rebase false before edit", () => {
   assert.match(source, /skipping source branch rebase by job policy/);
   assert.match(source, /allowRebase,/);
 });
+
+test("same-repository contributor repair comparison is case-insensitive", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(
+    source,
+    /const sameRepoBranch = sameRepoSlug\(pull\.head\.repo\.full_name, result\.repo\)/,
+  );
+  assert.match(
+    source,
+    /same_repo_branch: sameRepoSlug\(pull\.head\.repo\.full_name, result\.repo\)/,
+  );
+});
+
+test("repair job may deterministically forbid replacement fallback", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(source, /job\.frontmatter\.allow_replacement_pr === false/);
+  assert.match(source, /replacement fallback blocked by job policy/);
+  assert.match(source, /replacement PR is forbidden by job frontmatter/);
+});
