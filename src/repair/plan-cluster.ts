@@ -701,7 +701,10 @@ function formatNormalizedRef(ref: JsonValue) {
 }
 
 function sameGitHubRepository(left: JsonValue, right: JsonValue) {
-  const normalize = (value: JsonValue) => String(value ?? "").trim().toLowerCase();
+  const normalize = (value: JsonValue) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
   const normalizedLeft = normalize(left);
   const normalizedRight = normalize(right);
   return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
