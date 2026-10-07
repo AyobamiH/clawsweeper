@@ -44,6 +44,19 @@ test("sourceBranchWriteBlockReason allows same-repo branches despite maintainer 
   );
 });
 
+test("sourceBranchWriteBlockReason treats repository identity case-insensitively", () => {
+  assert.equal(
+    sourceBranchWriteBlockReason("ayobamih/wagging-web-wins", {
+      maintainer_can_modify: false,
+      head: {
+        ref: "fixture",
+        repo: { full_name: "AyobamiH/wagging-web-wins" },
+      },
+    }),
+    null,
+  );
+});
+
 test("sourceBranchWriteBlockReason allows fork branches with maintainer edits", () => {
   assert.equal(
     sourceBranchWriteBlockReason("openclaw/openclaw", {

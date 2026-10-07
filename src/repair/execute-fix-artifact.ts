@@ -2487,17 +2487,23 @@ function editValidatePrepareMerge({
     .split(/\r?\n/)
     .filter(Boolean);
   let finalSyncCheckpoint = "";
-  const sync = reconcileLatestBaseBeforePush({
-    fixArtifact,
-    targetDir,
-    branch,
-    mode,
-    baseBranch,
-    contributorCredits,
-    attempt: 1,
-    repositoryContext,
-    sourceHead,
-  });
+  const sync = allowRebase
+    ? reconcileLatestBaseBeforePush({
+        fixArtifact,
+        targetDir,
+        branch,
+        mode,
+        baseBranch,
+        contributorCredits,
+        attempt: 1,
+        repositoryContext,
+        sourceHead,
+      })
+    : {
+        status: "skipped-by-job-policy",
+        base_sha: targetBaseSha,
+        reason: "rebase forbidden by job frontmatter",
+      };
   const synchronizedBaseSha = pinRepairBase(() => String(sync.base_sha ?? "")).sha;
   acceptedBaseSha = synchronizedBaseSha;
   logProgress("final base sync result", { mode, attempt: 1, status: sync.status });
@@ -2508,7 +2514,7 @@ function editValidatePrepareMerge({
     details: sync.status,
     headSha: currentHead(targetDir),
   });
-  if (sync.status !== "already-current") {
+  if (allowRebase && sync.status !== "already-current") {
     codexReview = reviewAfterFinalBaseSync({
       syncChanged: true,
       currentReview: codexReview,

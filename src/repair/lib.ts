@@ -177,6 +177,8 @@ export function validateJob(job: ParsedJob | LooseRecord) {
     "allow_merge",
     "allow_unmerged_fix_close",
     "allow_post_merge_close",
+    "allow_rebase",
+    "allow_replacement_pr",
     "allow_broad_fix_artifacts",
     "require_fix_before_close",
     "security_sensitive",

@@ -389,7 +389,7 @@ test("final rebase checks stay pinned across the workspace-write Codex handoff",
   const reconcile = source.slice(reconcileStart, reconcileEnd);
   const codexEnd = source.indexOf("function readTextIfExists(", reconcileEnd);
   const codexReconcile = source.slice(reconcileEnd, codexEnd);
-  const syncStart = source.indexOf("const sync = reconcileLatestBaseBeforePush({");
+  const syncStart = source.indexOf("const sync = allowRebase");
   const syncEnd = source.indexOf('logProgress("final base sync result"', syncStart);
   const syncCaller = source.slice(syncStart, syncEnd);
 
@@ -478,8 +478,11 @@ test("final repair contract and compaction use the exact accepted base SHA", () 
   assert.doesNotMatch(helper, /origin\//);
   assert.doesNotMatch(helper, /--porcelain=v1|phase|checkpoint/);
 
-  const syncStart = source.indexOf("const sync = reconcileLatestBaseBeforePush({");
-  const alreadyCurrent = source.indexOf('if (sync.status !== "already-current")', syncStart);
+  const syncStart = source.indexOf("const sync = allowRebase");
+  const alreadyCurrent = source.indexOf(
+    'if (allowRebase && sync.status !== "already-current")',
+    syncStart,
+  );
   const acceptedUpdate = source.indexOf("acceptedBaseSha = synchronizedBaseSha", syncStart);
   assert.ok(syncStart < acceptedUpdate && acceptedUpdate < alreadyCurrent);
 });
@@ -540,11 +543,14 @@ test("repair workflow renews target credentials before deferred outcome publicat
   assert.match(workflow.slice(publishIndex, postFlightIndex), /--latest --publish-report-only/);
 });
 
-test("repair contributor branch honors allow_rebase false before edit", () => {
+test("repair contributor branch honors allow_rebase false before edit and final sync", () => {
   const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
   assert.match(source, /const allowRebase = job\.frontmatter\.allow_rebase !== false/);
   assert.match(source, /skipping source branch rebase by job policy/);
   assert.match(source, /allowRebase,/);
+  assert.match(source, /status: "skipped-by-job-policy"/);
+  assert.match(source, /reason: "rebase forbidden by job frontmatter"/);
+  assert.match(source, /if \(allowRebase && sync\.status !== "already-current"\)/);
 });
 
 test("same-repository contributor repair comparison is case-insensitive", () => {

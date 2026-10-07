@@ -68,3 +68,40 @@ Codex integration status remains independent. No fresh Codex authentication or
 allowance probe was requested in this follow-through. Any future landing of the
 ClawSweeper infrastructure PR must still satisfy its current-head review and
 normal landing policy; separating providers does not waive review requirements.
+
+## Live Workers AI acceptance run 37596664105
+
+A fresh provider-specific run was dispatched on 2026-10-07 from the repaired
+ClawSweeper branch with `inference_policy=workers-ai`, autonomous mode, explicit
+execute/fix authority, and merge authority disabled:
+https://github.com/AyobamiH/clawsweeper/actions/runs/37596664105
+
+Observed outcome:
+
+- Cloudflare ephemeral planning and execution runners provisioned successfully.
+- Planning completed successfully through OpenClaw + Workers AI; Codex setup was
+  skipped.
+- Execution reached the credited fix-artifact stage with
+  `CLAWSWEEPER_ALLOW_EXECUTE=1`, `CLAWSWEEPER_ALLOW_FIX_PR=1`, and
+  `CLAWSWEEPER_ALLOW_MERGE=0`.
+- The target validation plan was accepted.
+- Execution then entered the generic contributor-branch rebase path and failed
+  at `rebaseTargetOntoVerifiedBase` with `git exited 1` before any publication.
+- PR #91 remained at
+  `dd8e24d9f8c5e7dfafa03055cb0059ebef5c878d`; no fixture edit was published.
+- Cloudflare repair compute cleanup completed successfully.
+
+The saved acceptance job already required a narrow one-line edit and prohibited
+rebasing/replacement work, but those constraints were not enforced through the
+executor's final-base synchronization path. The remediation makes the existing
+`allow_rebase: false` policy authoritative both before the edit and during the
+final pre-publication synchronization, validates `allow_rebase` and
+`allow_replacement_pr` as booleans, and retains the same-repository
+case-insensitive writeability fix. The saved job also has
+`allow_replacement_pr: false` so this acceptance cannot manufacture success via
+a replacement branch or PR.
+
+Local validation for this remediation: build:repair passed, 57 focused repair
+checks passed, repair lint passed, static/document/format checks passed, and
+`git diff --check` passed. A new live Workers AI run is still required before
+this document may claim provider-specific end-to-end acceptance.
