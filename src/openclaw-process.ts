@@ -43,16 +43,26 @@ export interface OpenClawProcessOptions {
 export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProcessResult {
   const startedAt = Date.now();
   const firstAttempt = runOpenclawProcessAttempt(options);
-  if (!isRetryableOpenclawCleanupFailure(firstAttempt)) return firstAttempt;
+  // A cleanup error can erase a successful final envelope after tools edited the
+  // checkout. Empty output is not evidence that a mutating run is safe to replay.
+  if (!options.checkoutInspection || !isRetryableOpenclawCleanupFailure(firstAttempt)) {
+    return firstAttempt;
+  }
 
   const remainingMs = options.timeoutMs - (Date.now() - startedAt);
   if (remainingMs < OPENCLAW_CLEANUP_RETRY_MIN_BUDGET_MS) return firstAttempt;
 
-  const retry = runOpenclawProcessAttempt({ ...options, timeoutMs: remainingMs });
+  const retry = runOpenclawProcessAttempt({
+    ...options,
+    timeoutMs: remainingMs,
+    // Keep the first attempt's diagnostics instead of truncating its evidence.
+    ...(options.stdoutPath ? { stdoutPath: `${options.stdoutPath}.retry-1` } : {}),
+    ...(options.stderrPath ? { stderrPath: `${options.stderrPath}.retry-1` } : {}),
+  });
   return {
     ...retry,
     stderr: [
-      "ClawSweeper retried OpenClaw once after an isolated runtime cleanup ownership failure.",
+      "ClawSweeper retried the read-only OpenClaw checkout inspection once after cleanup failure.",
       retry.stderr,
     ]
       .filter(Boolean)
@@ -63,6 +73,7 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
 function isRetryableOpenclawCleanupFailure(result: CodexProcessResult): boolean {
   return (
     result.status === 1 &&
+    result.signal === null &&
     Boolean(result.error && OPENCLAW_UNCERTAIN_CLEANUP_PATTERN.test(result.error.message)) &&
     result.stdout.trim() === ""
   );

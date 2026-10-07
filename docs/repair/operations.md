@@ -20,6 +20,27 @@ commands, finalizers, self-heal, gates, and ledgers, see
 For the trusted ClawSweeper-to-ClawSweeper PR repair loop, see
 [`docs/repair/auto-update-prs.md`](auto-update-prs.md).
 
+## Per-run repair authority and cleanup recovery
+
+An accepted maintainer repair command or validated trusted ClawSweeper verdict
+carries `authorize_execute=true` and `authorize_fix_pr=true` on its repair-worker
+dispatch. The workflow still applies its mode, job, containment and publication
+gates. Manual workflow defaults remain off; these flags never grant merge
+permission. Keep repair-only fixtures open and unmerged.
+
+An OpenClaw cleanup error can replace a completed result with empty output.
+Do not treat that as proof that no edits happened. General agent runs fail closed
+without automatic replay. Only checkout inspection, configured with the `read`
+tool and execution denied, may retry the exact uncertain-cleanup error once,
+using fresh state and the remaining original budget. Externally requested log
+paths retain the first attempt; the retry uses the `.retry-1` suffix.
+
+A failed ChatGPT allowance read is not proof of exhausted quota. Preserve the
+failure and diagnose managed ChatGPT authentication separately; do not enable an
+API-billing fallback or bypass the live proof. The controlled regression evidence
+and remaining live acceptance limits are recorded in
+[the repair-command proof](../proof/repair-command-execution/README.md).
+
 ## Cluster Repair Operations Counters
 
 The README dashboard and hosted live dashboard expose passive counters for the

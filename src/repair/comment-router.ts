@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { repairDispatchAuthorizationInputs } from "./repair-dispatch-authorization.js";
 import type { JsonValue, LooseRecord } from "./json-types.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -3681,15 +3682,6 @@ function freeformReviewPrompt(command: LooseRecord): string {
     "Answer this request in the public ClawSweeper review comment. Keep the answer concise and evidence-based.",
     "This is a read-only assist pass: do not merge, close, label, or push code from the model. If the request asks for an action, map it to existing ClawSweeper structured recommendations only when the normal evidence, security, review, and repair gates support it.",
   ].join("\n");
-}
-
-function repairDispatchAuthorizationInputs(command: LooseRecord): string[] {
-  if (command.maintainer_authorized !== true && command.trusted_bot !== true) {
-    throw new Error(
-      "repair dispatch requires maintainer authorization or trusted ClawSweeper automation",
-    );
-  }
-  return ["-f", "authorize_execute=true", "-f", "authorize_fix_pr=true"];
 }
 
 function dispatchRepair(command: LooseRecord) {

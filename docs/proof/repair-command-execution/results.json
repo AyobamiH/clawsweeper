@@ -1,0 +1,25 @@
+{
+  "schema": "clawsweeper.repair-command-proof.v1",
+  "source_head": "6729edf3c9a42a447e7e02aeac4556a38dffefb8",
+  "runtime": "Node 24.21.0 / Linux",
+  "focused_tests": {
+    "passed": 39,
+    "failed": 0
+  },
+  "pin_regression": {
+    "passed": 1,
+    "failed": 0
+  },
+  "before_patch": {
+    "mutating_agent_starts": 2,
+    "first_attempt_evidence_overwritten": true
+  },
+  "after_patch": {
+    "mutating_agent_starts": 1,
+    "read_only_max_attempts": 2,
+    "first_attempt_evidence_retained": true
+  },
+  "live_codex": "blocked: allowance RPC authentication failure",
+  "live_workers_ai_repair": "not_verified",
+  "model_calls_in_controlled_proof": 0
+}
