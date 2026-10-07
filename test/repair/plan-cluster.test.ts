@@ -304,6 +304,7 @@ test("plan-cluster treats same-repo PR branches as writable despite raw maintain
       ...process.env,
       ...mockGhBinEnv(path.join(binDir, "gh"), binDir),
       FAKE_GH_MAINTAINER_CAN_MODIFY: "false",
+      FAKE_GH_HEAD_REPO: "OpenClaw/OpenClaw",
     },
     stdio: "pipe",
   });
@@ -311,6 +312,7 @@ test("plan-cluster treats same-repo PR branches as writable despite raw maintain
   const clusterPlan = JSON.parse(fs.readFileSync(path.join(runDir, "cluster-plan.json"), "utf8"));
   const pull = clusterPlan.items[0].pull_request;
 
+  assert.equal(pull.head_repo, "OpenClaw/OpenClaw");
   assert.equal(pull.maintainer_can_modify, false);
   assert.equal(pull.same_repo_head, true);
   assert.equal(pull.branch_writable, true);
@@ -531,7 +533,7 @@ function pull(number, sha) {
     head: {
       ref: "branch-" + number,
       sha,
-      repo: { full_name: "openclaw/openclaw", owner: { login: "openclaw" } },
+      repo: { full_name: process.env.FAKE_GH_HEAD_REPO || "openclaw/openclaw", owner: { login: "openclaw" } },
     },
     maintainer_can_modify: process.env.FAKE_GH_MAINTAINER_CAN_MODIFY === "false" ? false : true,
     requested_reviewers: [],
