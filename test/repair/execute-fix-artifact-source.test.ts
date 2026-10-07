@@ -594,11 +594,21 @@ test("repair job may deterministically forbid every replacement fallback", () =>
   assert.notEqual(preparedEnd, -1);
   const preparedReplacement = source.slice(preparedStart, preparedEnd);
   const guardIndex = preparedReplacement.indexOf("job.frontmatter.allow_replacement_pr === false");
+  const synchronizationGuard = preparedReplacement.indexOf(
+    "!isAncestor({ targetDir, ancestor: preparedBaseSha, descendant: preparedCommit })",
+  );
+  const blockedMessage = preparedReplacement.indexOf(
+    "prepared repair is not synchronized with target base; replacement fallback blocked",
+  );
   const firstMutationIndex = preparedReplacement.indexOf("switchTargetBranchWithPlumbing({");
+  const compactionIndex = preparedReplacement.indexOf("compactReplacementHistory({");
   const pushIndex = preparedReplacement.indexOf("pushRecoverableBranch({");
   const createIndex = preparedReplacement.indexOf('"pr",\n        "create"');
   assert.ok(guardIndex >= 0);
-  assert.ok(firstMutationIndex > guardIndex);
-  assert.ok(pushIndex > guardIndex);
-  assert.ok(createIndex > guardIndex);
+  assert.ok(synchronizationGuard > guardIndex);
+  assert.ok(blockedMessage > synchronizationGuard);
+  assert.ok(firstMutationIndex > blockedMessage);
+  assert.ok(compactionIndex > blockedMessage);
+  assert.ok(pushIndex > blockedMessage);
+  assert.ok(createIndex > blockedMessage);
 });
