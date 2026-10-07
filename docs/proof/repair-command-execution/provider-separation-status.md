@@ -189,3 +189,43 @@ this work because the execution safety boundary blocked direct transfer of the
 live credential. No credential value was printed or exposed. Restoring hosted
 live Codex review requires a separate safe refresh of the GitHub secret, but
 that provider availability no longer blocks Workers AI repairs or core CI.
+
+## Final landing hardening: no-rebase invariant
+
+The final GitHub Codex review of `8007fe419ee78fccbc7cc3e371ac831d6b368dc2`
+identified one remaining P1 policy gap: `allow_rebase: false` was authoritative
+for the initial edit pass but was not yet propagated into every writable
+validation/review fix pass, and publication did not independently reject a
+rewritten source ancestry.
+
+Commit `4bc2b21aaf360b7e93d77b978b4d15edd56c9dab` closes that gap at three
+layers:
+
+- `allowRebase` is propagated into validation-fix and review-fix agents, whose
+  no-rebase prompts explicitly forbid rebase, merge, reset, cherry-pick and
+  other HEAD/ancestry rewrites;
+- every writable pass enforces a runtime invariant: when rebasing is forbidden,
+  HEAD must remain unchanged during the agent pass and no rebase/merge or
+  unresolved merge state may remain;
+- immediately before publication, the original source head must still be an
+  ancestor of the accepted repair head. A rewritten ancestry is rejected even
+  if some other path were to bypass prompt guidance.
+
+Focused repair/policy/prompt/OpenClaw validation passed 72/72 before commit. A
+fresh ChatGPT-backed local Codex review of the uncommitted fix reported no
+actionable correctness issue and specifically confirmed that the no-rebase
+invariant is enforced across edit, validation-fix, review-fix, pre-checkpoint
+and publication paths.
+
+Exact-head GitHub validation for `4bc2b21aaf360b7e93d77b978b4d15edd56c9dab`
+then passed:
+
+- CI, including Hosted native review scan smoke, `pnpm check`, sparse repair
+  build smoke and Windows Codex launcher;
+- repair containment smoke, including both containment samples and Cloudflare
+  cleanup;
+- CodeQL;
+- automerge e2e production hermetic scenarios.
+
+No merge, deploy, paid OpenAI fallback, replacement PR, or broadened repair
+authority is introduced by this hardening. OpenClaw Bay remains unaffected.
