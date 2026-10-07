@@ -105,3 +105,50 @@ Local validation for this remediation: build:repair passed, 57 focused repair
 checks passed, repair lint passed, static/document/format checks passed, and
 `git diff --check` passed. A new live Workers AI run is still required before
 this document may claim provider-specific end-to-end acceptance.
+
+## Provider-specific acceptance outcome
+
+The controlled Workers AI acceptance is now complete for the repair behavior
+claimed by PR #91.
+
+Run: https://github.com/AyobamiH/clawsweeper/actions/runs/37603814544
+ClawSweeper source head: `959d29f42185ee681e03dcd77197ca00d8d9d4ef`
+Source PR: https://github.com/AyobamiH/wagging-web-wins/pull/91
+Repaired source head: `5fba0cb1d2b924f1fe88652a2d59c338bb4b7f78`
+
+Observed evidence:
+
+- Fresh Cloudflare plan and execute containers provisioned successfully.
+- Planning completed successfully with the OpenClaw Workers AI route; direct
+  OpenAI/Codex setup was skipped for inference.
+- Execution used `workersai/@cf/zai-org/glm-5.3`, with execute/fix authority
+  enabled and merge authority disabled.
+- The saved job enforced `allow_rebase: false` and
+  `allow_replacement_pr: false`; execution logged both the skipped initial
+  rebase and `final base sync result ... skipped-by-job-policy`.
+- OpenClaw lost its final envelope during cleanup, but the guarded recovery
+  detected a real working-tree mutation and continued without replaying the
+  mutating agent.
+- The repaired contributor branch was pushed at
+  `5fba0cb1d2b924f1fe88652a2d59c338bb4b7f78`.
+- The diff from the pre-repair head is exactly one line in
+  `src/lib/clawsweeper-repair-acceptance.ts`:
+  `BROKEN` -> `WORKERS_AI_REPAIR_OK`. The paired test is unchanged.
+- The retained review artifact reports `status: passed`, no findings, and
+  independently identifies the same repaired head and one-line repair.
+- Cloudflare repair compute cleanup completed successfully.
+- On the repaired head, quality, boundaries, preview, states, browser, routes,
+  Cloudflare Pages, and the rerun design check all completed successfully.
+
+The workflow itself reported failure only after publication while reading the
+PR status-check rollup through GitHub GraphQL. The target App token was missing
+`checks: read` / `statuses: read` in this workflow even though the repository's
+existing target-token pattern already used those permissions. This was a
+post-publication verification false-negative, not a Workers AI repair failure.
+PR #91 remained open and unmerged as required.
+
+Follow-up commit `6c5c63dbaef6c86914d27b7b7fbccab0fa206cc5` adds the missing
+check/status read permissions to the planning, execution, and renewed
+post-flight target tokens. Static/format checks and 40 focused workflow/executor
+tests passed for that permission repair. No merge, deployment, paid OpenAI
+fallback, or replacement PR was introduced.
