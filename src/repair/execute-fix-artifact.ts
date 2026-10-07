@@ -42,6 +42,7 @@ import {
   branchHasBaseDiff,
   currentHead,
   ensureMergeBaseAvailable,
+  hasRebaseInProgress,
   isAncestor,
   type RebaseOntoBaseResult,
   unmergedPaths,
@@ -103,6 +104,8 @@ import {
 import { tryResolveMechanicalRebaseConflicts } from "./mechanical-rebase-conflicts.js";
 import { compactText, escapeRegExp } from "./text-utils.js";
 import {
+  noRebasePublicationBlockReason,
+  noRebaseWritablePassBlockReason,
   shouldCloseSupersededSourcePrs,
   shouldSeedReplacementBranchFromSource,
   sourceBranchWriteBlockReason,
@@ -664,6 +667,16 @@ try {
           reason: error.message,
         });
         if (!shouldFallbackToReplacementAfterRepairError(error)) throw error;
+        if (job.frontmatter.allow_replacement_pr === false) {
+          logProgress("replacement fallback blocked by job policy", {
+            source_pr: firstSourcePullRequest(fixArtifact).url,
+            reason: error.message,
+          });
+          throw new Error(
+            `direct contributor repair failed and replacement PR is forbidden by job policy: ${error.message}`,
+            { cause: error },
+          );
+        }
         const fallbackTargetDir = prepareFallbackReplacementCheckout(targetDir);
         outcome = executeReplacementBranch({
           fixArtifact,
@@ -756,7 +769,7 @@ function isBlockedFixError(error: JsonValue) {
   if (isRepairBranchPushBlocked(error)) return true;
   if (isRetryableCodexErrorMessage(String(error?.message ?? error))) return true;
   if (isCodexContextLimitError(String(error?.message ?? error))) return true;
-  return /external base blocker|Codex produced no target repo changes|Codex \/review did not pass|Codex (?:fix worker|review-fix worker|\/review) timed out|Codex (?:fix worker|review-fix worker|\/review) failed|validation command failed|command timed out after \d+ms: git (?:fetch|push)|rebase (?:conflicts remain unresolved|produced additional conflicts)/i.test(
+  return /external base blocker|replacement PR is forbidden by job (?:frontmatter|policy)|prepared repair is not synchronized with target base|Codex produced no target repo changes|Codex \/review did not pass|Codex (?:fix worker|review-fix worker|\/review) timed out|Codex (?:fix worker|review-fix worker|\/review) failed|validation command failed|command timed out after \d+ms: git (?:fetch|push)|rebase (?:conflicts remain unresolved|produced additional conflicts)/i.test(
     String(error?.message ?? error),
   );
 }
@@ -878,7 +891,7 @@ function preflightRepairSourceBranchWrite(fixArtifact: LooseRecord) {
       source_pr: sourcePr.url,
       head_repo: pull.head.repo.full_name,
       head_ref: pull.head.ref,
-      same_repo_branch: pull.head.repo.full_name === result.repo,
+      same_repo_branch: sameRepoSlug(pull.head.repo.full_name, result.repo),
       maintainer_can_modify: pull.maintainer_can_modify === true,
     };
   }
@@ -927,7 +940,7 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
   if (initialPauseBlock) return initialPauseBlock;
   if (!pull.head?.repo?.full_name || !pull.head?.ref)
     throw new Error(`source PR #${sourcePr.number} is missing head repo/ref`);
-  const sameRepoBranch = pull.head.repo.full_name === result.repo;
+  const sameRepoBranch = sameRepoSlug(pull.head.repo.full_name, result.repo);
   const branchBlock = sourceBranchWriteBlockReason(result.repo, pull);
   if (branchBlock) throw new Error(`source PR #${sourcePr.number} ${branchBlock}`);
   const replacementRemoteLeaseSha = trustedRemoteBranchSha(
@@ -963,16 +976,25 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
   const sourceHead = currentHead(targetDir);
   logProgress("preparing target toolchain", { source_head: sourceHead });
   prepareTargetToolchain(targetDir, currentTargetValidationOptions());
+  const allowRebase = job.frontmatter.allow_rebase !== false;
   const codexOwnsInitialRebase =
-    isBranchRepairStatusJob() && fixArtifact.deterministic_rebase_only !== true;
+    allowRebase && isBranchRepairStatusJob() && fixArtifact.deterministic_rebase_only !== true;
   let rebaseResult = null;
   let fastRepair: LooseRecord = {
     status: "disabled",
-    reason: codexOwnsInitialRebase
-      ? "initial automerge rebase is delegated to Codex repair"
-      : "not evaluated",
+    reason: !allowRebase
+      ? "rebase forbidden by job frontmatter"
+      : codexOwnsInitialRebase
+        ? "initial automerge rebase is delegated to Codex repair"
+        : "not evaluated",
   };
-  if (codexOwnsInitialRebase) {
+  if (!allowRebase) {
+    logProgress("skipping source branch rebase by job policy", {
+      branch,
+      base_branch: baseBranch,
+      source_head: sourceHead,
+    });
+  } else if (codexOwnsInitialRebase) {
     logProgress("deferring initial automerge rebase to Codex repair pass", {
       branch,
       base_branch: baseBranch,
@@ -1032,6 +1054,7 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
     fallbackReason: null,
     sourceHead,
     rebaseResult,
+    allowRebase,
   });
   (prep.merge_preflight as JsonValue).target = `#${sourcePr.number}`;
   return pushRepairBranchAndUpdateStatus({
@@ -1059,6 +1082,11 @@ function pushRepairBranchAndUpdateStatus({
   replacementRemoteLeaseSha,
 }: LooseRecord) {
   const branchUpdate = branchUpdateState({ targetDir, sourceHead });
+  const noRebasePublicationBlock = noRebasePublicationBlockReason({
+    allowRebase: job.frontmatter.allow_rebase !== false,
+    sourceRewritten: branchUpdate.rewritten,
+  });
+  if (noRebasePublicationBlock) throw new Error(noRebasePublicationBlock);
   if (dryRun) {
     return {
       action: "repair_contributor_branch",
@@ -1119,6 +1147,17 @@ function pushRepairBranchAndUpdateStatus({
   } catch (error) {
     const blockedReason = repairBranchPushBlockedReason(error);
     if (blockedReason && !sameRepoBranch) {
+      if (job.frontmatter.allow_replacement_pr === false) {
+        logProgress("repair branch push blocked; replacement fallback forbidden by job policy", {
+          source_pr: sourcePr.url,
+          head_repo: pull.head.repo.full_name,
+          head_ref: pull.head.ref,
+          reason: blockedReason,
+        });
+        // Preserve the original classified push error so the outer repair
+        // boundary records a durable blocked outcome instead of losing the report.
+        throw error;
+      }
       logProgress("repair branch push blocked; publishing prepared repair as replacement PR", {
         source_pr: sourcePr.url,
         head_repo: pull.head.repo.full_name,
@@ -1245,6 +1284,20 @@ function openReplacementPrFromPreparedRepairCheckout({
   fallbackReason,
   expectedRemoteSha,
 }: LooseRecord) {
+  if (job.frontmatter.allow_replacement_pr === false) {
+    throw new Error("replacement PR is forbidden by job frontmatter");
+  }
+  const preparedBaseSha = String(prep.target_base_sha ?? "");
+  const preparedCommit = String(prep.commit ?? "");
+  if (
+    !/^[0-9a-f]{40}$/i.test(preparedBaseSha) ||
+    !/^[0-9a-f]{40}$/i.test(preparedCommit) ||
+    !isAncestor({ targetDir, ancestor: preparedBaseSha, descendant: preparedCommit })
+  ) {
+    throw new Error(
+      "prepared repair is not synchronized with target base; replacement fallback blocked",
+    );
+  }
   const baseBranch = String(process.env.CLAWSWEEPER_FIX_BASE_BRANCH ?? DEFAULT_BASE_BRANCH);
   const contributorCredits = sourceContributorCredits({
     fixArtifact,
@@ -1632,6 +1685,33 @@ function branchUpdateState({ targetDir, sourceHead }: LooseRecord) {
   return { rewritten };
 }
 
+function hasMergeInProgress(targetDir: string) {
+  const mergeHeadPath = run("git", ["rev-parse", "--git-path", "MERGE_HEAD"], {
+    cwd: targetDir,
+  }).trim();
+  const absoluteMergeHead = path.isAbsolute(mergeHeadPath)
+    ? mergeHeadPath
+    : path.join(targetDir, mergeHeadPath);
+  return fs.existsSync(absoluteMergeHead);
+}
+
+function assertNoRebaseWritablePassState({
+  allowRebase,
+  targetDir,
+  headBefore,
+  label,
+}: LooseRecord) {
+  const reason = noRebaseWritablePassBlockReason({
+    allowRebase: allowRebase !== false,
+    headBefore: String(headBefore),
+    headAfter: currentHead(targetDir),
+    rebaseInProgress: hasRebaseInProgress(targetDir),
+    mergeInProgress: hasMergeInProgress(targetDir),
+    unmergedPaths: unmergedPaths(targetDir),
+  });
+  if (reason) throw new Error(String(label) + ": " + reason);
+}
+
 function repairBranchPushArgs({ pull, sourceRef = "HEAD" }: LooseRecord) {
   const remote = `https://github.com/${pull.head.repo.full_name}.git`;
   if (!/^(?:HEAD|[0-9a-f]{40})$/i.test(String(sourceRef))) {
@@ -1674,6 +1754,9 @@ function executeReplacementBranch({
   supersedeSources,
   fallbackReason,
 }: LooseRecord) {
+  if (job.frontmatter.allow_replacement_pr === false) {
+    throw new Error("replacement PR is forbidden by job frontmatter");
+  }
   const baseBranch = String(process.env.CLAWSWEEPER_FIX_BASE_BRANCH ?? DEFAULT_BASE_BRANCH);
   const contributorCredits = sourceContributorCredits({
     fixArtifact,
@@ -2182,6 +2265,7 @@ function editValidatePrepareMerge({
   reconcileWithBase = false,
   sourceHead = null,
   rebaseResult = null,
+  allowRebase = true,
 }: LooseRecord) {
   let producedChanges = allowExistingChanges;
   let previousSummary = "";
@@ -2255,6 +2339,7 @@ function editValidatePrepareMerge({
         validationCommands: validationPreflight.resolved_commands ?? [],
         targetBaseSha,
         isAutomergeRepair: isAutomergeRepairJob(),
+        allowRebase,
       });
       const summaryPath = path.join(workRoot, `${mode}-codex-summary-${attempt}.md`);
       const workerTimeoutMs = currentCodexTimeoutMs(true);
@@ -2311,6 +2396,12 @@ function editValidatePrepareMerge({
         run("git", ["status", "--porcelain"], { cwd: targetDir }).trim(),
       );
       const hasHeadChanges = currentHead(targetDir) !== headBeforeAttempt;
+      assertNoRebaseWritablePassState({
+        allowRebase,
+        targetDir,
+        headBefore: headBeforeAttempt,
+        label: "Codex edit pass " + mode + " attempt " + attempt,
+      });
       const recoveredOpenclawCleanup =
         process.env.CLAWSWEEPER_RUNNER === "openclaw" &&
         (hasWorkingTreeChanges || hasHeadChanges) &&
@@ -2407,14 +2498,23 @@ function editValidatePrepareMerge({
     );
   }
 
-  const completedRebase = completeTargetRebaseWithIsolation({
-    cwd: targetDir,
-    timeoutMs: targetValidationTimeoutMs,
-  });
-  if (completedRebase.status === "continued") {
-    logProgress("completed resolved rebase", {
-      previous_head: completedRebase.previous_head,
-      current_head: completedRebase.current_head,
+  if (allowRebase) {
+    const completedRebase = completeTargetRebaseWithIsolation({
+      cwd: targetDir,
+      timeoutMs: targetValidationTimeoutMs,
+    });
+    if (completedRebase.status === "continued") {
+      logProgress("completed resolved rebase", {
+        previous_head: completedRebase.previous_head,
+        current_head: completedRebase.current_head,
+      });
+    }
+  } else {
+    assertNoRebaseWritablePassState({
+      allowRebase,
+      targetDir,
+      headBefore: repairDeltaBaseHead,
+      label: "pre-checkpoint no-rebase policy",
     });
   }
 
@@ -2442,6 +2542,7 @@ function editValidatePrepareMerge({
     baseBranch,
     targetBaseSha,
     sourceHead: repairDeltaBaseHead,
+    allowRebase,
     onReviewFix: (reviewAttempt: JsonValue) => {
       const checkpoint = commitCheckpointIfNeeded({
         targetDir,
@@ -2462,17 +2563,23 @@ function editValidatePrepareMerge({
     .split(/\r?\n/)
     .filter(Boolean);
   let finalSyncCheckpoint = "";
-  const sync = reconcileLatestBaseBeforePush({
-    fixArtifact,
-    targetDir,
-    branch,
-    mode,
-    baseBranch,
-    contributorCredits,
-    attempt: 1,
-    repositoryContext,
-    sourceHead,
-  });
+  const sync = allowRebase
+    ? reconcileLatestBaseBeforePush({
+        fixArtifact,
+        targetDir,
+        branch,
+        mode,
+        baseBranch,
+        contributorCredits,
+        attempt: 1,
+        repositoryContext,
+        sourceHead,
+      })
+    : {
+        status: "skipped-by-job-policy",
+        base_sha: targetBaseSha,
+        reason: "rebase forbidden by job frontmatter",
+      };
   const synchronizedBaseSha = pinRepairBase(() => String(sync.base_sha ?? "")).sha;
   acceptedBaseSha = synchronizedBaseSha;
   logProgress("final base sync result", { mode, attempt: 1, status: sync.status });
@@ -2483,7 +2590,7 @@ function editValidatePrepareMerge({
     details: sync.status,
     headSha: currentHead(targetDir),
   });
-  if (sync.status !== "already-current") {
+  if (allowRebase && sync.status !== "already-current") {
     codexReview = reviewAfterFinalBaseSync({
       syncChanged: true,
       currentReview: codexReview,
@@ -2898,6 +3005,7 @@ function validateAndReviewLoop({
   targetBaseSha,
   onReviewFix = null,
   sourceHead = null,
+  allowRebase = true,
 }: LooseRecord) {
   let lastReview = null;
   let validationCommands: LooseRecord[] = [];
@@ -2976,6 +3084,7 @@ function validateAndReviewLoop({
           validationPlan,
           validationCommands,
           targetBaseSha,
+          allowRebase,
         });
         onReviewFix?.(`validation-${attempt}`);
         continue;
@@ -3022,6 +3131,7 @@ function validateAndReviewLoop({
         review: lastReview,
         attempt: `${attempt}-final`,
         targetBaseSha,
+        allowRebase,
       });
       onReviewFix?.(`${attempt}-final`);
       const finalValidationPlan = repairDeltaValidationPlan(
@@ -3064,6 +3174,7 @@ function validateAndReviewLoop({
       review: lastReview,
       attempt,
       targetBaseSha,
+      allowRebase,
     });
     onReviewFix?.(attempt);
   }
@@ -3327,12 +3438,17 @@ function runCodexReviewFix({
   review,
   attempt,
   targetBaseSha,
+  allowRebase = true,
 }: LooseRecord) {
+  const headBefore = currentHead(targetDir);
   const prompt = [
     "Address every actionable finding from Codex /review.",
     "",
     "Rules:",
     `- keep all inspection and validation anchored to pinned target base ${targetBaseSha};`,
+    allowRebase
+      ? "- preserve the existing repair policy for any permitted base reconciliation;"
+      : "- rebase, merge, reset, cherry-pick, and any other HEAD/ancestry rewrite are forbidden for this pass; preserve the current HEAD and treat stale-base conflicts as external blockers;",
     "- keep the patch narrow;",
     "- keep shell output bounded; inspect targeted files and avoid broad repo-wide dumps;",
     "- do not commit, push, open PRs, close PRs, or call gh;",
@@ -3380,6 +3496,12 @@ function runCodexReviewFix({
       stderrPath: path.join(workRoot, `${mode}-codex-review-fix-${attempt}.stderr.log`),
     },
   );
+  assertNoRebaseWritablePassState({
+    allowRebase,
+    targetDir,
+    headBefore,
+    label: "Codex review-fix worker " + mode + " attempt " + attempt,
+  });
   if ((child.error as JsonValue)?.code === "ETIMEDOUT")
     throw new Error(`Codex review-fix worker timed out after ${reviewFixTimeoutMs}ms`);
   if (child.error) throw new Error(child.error.message || String(child.error));
@@ -3396,7 +3518,9 @@ function runCodexValidationFix({
   validationPlan,
   validationCommands = [],
   targetBaseSha,
+  allowRebase = true,
 }: LooseRecord) {
+  const headBefore = currentHead(targetDir);
   const validationError = compactText(String(error?.message ?? error), 8000);
   const changedFiles = run("git", ["diff", "--name-only"], { cwd: targetDir })
     .split("\n")
@@ -3407,6 +3531,9 @@ function runCodexValidationFix({
     "",
     "Rules:",
     `- keep all inspection and validation anchored to pinned target base ${targetBaseSha};`,
+    allowRebase
+      ? "- preserve the existing repair policy for any permitted base reconciliation;"
+      : "- rebase, merge, reset, cherry-pick, and any other HEAD/ancestry rewrite are forbidden for this pass; preserve the current HEAD and treat stale-base conflicts as external blockers;",
     "- keep the patch narrow;",
     "- fix only issues introduced by the current repair branch or required to make its changed gate pass;",
     "- keep shell output bounded; inspect targeted files and avoid broad repo-wide dumps;",
@@ -3461,6 +3588,12 @@ function runCodexValidationFix({
       stderrPath: path.join(workRoot, `${mode}-codex-validation-fix-${attempt}.stderr.log`),
     },
   );
+  assertNoRebaseWritablePassState({
+    allowRebase,
+    targetDir,
+    headBefore,
+    label: "Codex validation-fix worker " + mode + " attempt " + attempt,
+  });
   if ((child.error as JsonValue)?.code === "ETIMEDOUT")
     throw new Error(`Codex validation-fix worker timed out after ${validationFixTimeoutMs}ms`);
   if (child.error) throw new Error(child.error.message || String(child.error));
@@ -3757,7 +3890,7 @@ function commitCheckpointIfNeeded({ targetDir, message, trailers = [] }: LooseRe
 function enforceFinalRepairContract({ fixArtifact, targetDir, baseSha }: LooseRecord) {
   if (!repairContract(fixArtifact)) return;
   const changedFiles = changedFilesFromNameOnlyZ(
-    run("git", ["diff", "--name-only", "-z", `${baseSha}..HEAD`], { cwd: targetDir }),
+    run("git", ["diff", "--name-only", "-z", `${baseSha}...HEAD`], { cwd: targetDir }),
   );
   enforceRepairContract({ fixArtifact, changedFiles });
 }

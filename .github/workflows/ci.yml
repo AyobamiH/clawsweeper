@@ -59,8 +59,19 @@ jobs:
         id: allowance
         run: |
           node dist/subscription-quota-worker.js read > "$RUNNER_TEMP/chatgpt-allowance.json"
-          available="$(jq -r 'if (.windows | type) == "array" and (.windows | length) > 0 and ([.windows[].remainingPercent] | all(. > 0)) then "true" else "false" end' "$RUNNER_TEMP/chatgpt-allowance.json")"
+          available="$(jq -r '.available == true' "$RUNNER_TEMP/chatgpt-allowance.json")"
+          reason="$(jq -r '
+            if .error then .error
+            elif (.windows | type) != "array" or (.windows | length) == 0 then "no_allowance_windows"
+            elif ([.windows[].remainingPercent] | any(. <= 0)) then "allowance_exhausted"
+            else "available"
+            end
+          ' "$RUNNER_TEMP/chatgpt-allowance.json")"
           echo "available=$available" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          if [[ "$available" != "true" ]]; then
+            echo "::warning title=Codex provider unavailable::$reason; live Codex smoke is deferred and refusal boundaries will be proved instead."
+          fi
       - name: Prove subscription fail-closed boundaries
         run: node scripts/prove-subscription-fail-closed.mjs "$RUNNER_TEMP/subscription-boundary-proof.json"
       - name: Prove refusal then clean structured review

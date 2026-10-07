@@ -253,7 +253,7 @@ function hydrateItem(repo: string, number: JsonValue) {
           head_repo_owner: pullRequest.head?.repo?.owner?.login,
           head_sha: pullRequest.head?.sha,
           maintainer_can_modify: pullRequest.maintainer_can_modify,
-          same_repo_head: pullRequest.head?.repo?.full_name === repo,
+          same_repo_head: sameGitHubRepository(pullRequest.head?.repo?.full_name, repo),
           branch_writable: branchWritableByAutomation(repo, pullRequest),
           branch_write_reason: branchWriteReason(repo, pullRequest),
           requested_reviewers: (pullRequest.requested_reviewers ?? [])
@@ -700,12 +700,25 @@ function formatNormalizedRef(ref: JsonValue) {
     : `https://github.com/${ref.repo}/issues/${ref.number}`;
 }
 
+function sameGitHubRepository(left: JsonValue, right: JsonValue) {
+  const normalize = (value: JsonValue) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
 function branchWritableByAutomation(repo: string, pullRequest: LooseRecord) {
-  return pullRequest.head?.repo?.full_name === repo || pullRequest.maintainer_can_modify === true;
+  return (
+    sameGitHubRepository(pullRequest.head?.repo?.full_name, repo) ||
+    pullRequest.maintainer_can_modify === true
+  );
 }
 
 function branchWriteReason(repo: string, pullRequest: LooseRecord) {
-  if (pullRequest.head?.repo?.full_name === repo) {
+  if (sameGitHubRepository(pullRequest.head?.repo?.full_name, repo)) {
     return "same-repo head branch is writable by the GitHub App contents permission";
   }
   if (pullRequest.maintainer_can_modify === true) {

@@ -168,6 +168,31 @@ test("automerge fix prompt makes Codex own PR repair, rebase, and CI discovery",
   assert.doesNotMatch(prompt, /do not push, open PRs, close PRs, or call gh/);
 });
 
+test("automerge fix prompt preserves no-rebase job policy", () => {
+  const prompt = buildFixPrompt({
+    fixArtifact: {
+      repair_strategy: "repair_contributor_branch",
+      summary: "Repair without rewriting contributor ancestry.",
+      changelog_required: false,
+      validation_commands: ["git diff --check"],
+    },
+    branch: "clawsweeper/automerge-owner-repo-91",
+    mode: "repair",
+    attempt: 1,
+    maxEditAttempts: 1,
+    repositoryContext: "candidate_files (1):\nsrc/fixture.ts (100)",
+    validationCommands: ["git diff --check"],
+    isAutomergeRepair: true,
+    allowRebase: false,
+  });
+
+  assert.match(prompt, /rebase is explicitly forbidden by the repair job/);
+  assert.match(prompt, /rebase remains forbidden for this automerge repair/);
+  assert.match(prompt, /preserve the contributor branch ancestry/);
+  assert.doesNotMatch(prompt, /fetch origin\/main and rebase this branch once/);
+  assert.doesNotMatch(prompt, /if no successful deterministic pre-edit rebase was supplied/);
+});
+
 test("fix prompt includes rebase and previous no-diff recovery details", () => {
   const prompt = buildFixPrompt({
     fixArtifact: {
@@ -393,3 +418,32 @@ function makeGitRepo(files: Record<string, string>): string {
   execFileSync("git", ["add", "."], { cwd: tmp });
   return tmp;
 }
+
+test("buildFixPrompt forbids base rewrite when allowRebase is false", () => {
+  const prompt = buildFixPrompt({
+    fixArtifact: {
+      repair_strategy: "repair_contributor_branch",
+      validation_commands: ["git diff --check"],
+    },
+    branch: "fixture",
+    mode: "repair",
+    attempt: 1,
+    maxEditAttempts: 1,
+    repositoryContext: "",
+    validationCommands: ["git diff --check"],
+    isAutomergeRepair: true,
+    allowRebase: false,
+  });
+  assert.match(prompt, /rebase is explicitly forbidden by the repair job/);
+  assert.match(prompt, /do not run git rebase/);
+  assert.match(prompt, /preserve the current contributor branch ancestry/);
+  assert.match(prompt, /without assuming any later base sync/);
+  assert.match(prompt, /do not assume ClawSweeper will move the base later/);
+  assert.match(prompt, /do not defer failures to a later base sync/);
+  assert.doesNotMatch(prompt, /performs one deterministic final base sync/);
+  assert.doesNotMatch(prompt, /leave any later base movement to ClawSweeper/);
+  assert.doesNotMatch(
+    prompt,
+    /leaving later origin\/main movement to ClawSweeper's deterministic final base sync/,
+  );
+});

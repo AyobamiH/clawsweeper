@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { repairDispatchAuthorizationInputs } from "./repair-dispatch-authorization.js";
 import type { JsonValue, LooseRecord } from "./json-types.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -3754,6 +3755,7 @@ function dispatchRepair(command: LooseRecord) {
       `execution_runner=${executionRunner}`,
       "-f",
       `model=${model}`,
+      ...repairDispatchAuthorizationInputs(command),
       ...(sessionId ? ["-f", `automerge_session_id=${sessionId}`] : []),
     ],
     { env: dispatchTokenEnv() },

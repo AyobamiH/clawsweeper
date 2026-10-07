@@ -389,7 +389,7 @@ test("final rebase checks stay pinned across the workspace-write Codex handoff",
   const reconcile = source.slice(reconcileStart, reconcileEnd);
   const codexEnd = source.indexOf("function readTextIfExists(", reconcileEnd);
   const codexReconcile = source.slice(reconcileEnd, codexEnd);
-  const syncStart = source.indexOf("const sync = reconcileLatestBaseBeforePush({");
+  const syncStart = source.indexOf("const sync = allowRebase");
   const syncEnd = source.indexOf('logProgress("final base sync result"', syncStart);
   const syncCaller = source.slice(syncStart, syncEnd);
 
@@ -473,13 +473,16 @@ test("final repair contract and compaction use the exact accepted base SHA", () 
   assert.match(source, /acceptedBaseSha = synchronizedBaseSha/);
   assert.match(source, /baseRef: baseSha/);
   assert.match(source, /target_base_sha: acceptedBaseSha/);
-  assert.match(helper, /"diff", "--name-only", "-z", `\$\{baseSha\}\.\.HEAD`/);
+  assert.match(helper, /"diff", "--name-only", "-z", `\$\{baseSha\}\.\.\.HEAD`/);
   assert.match(helper, /enforceRepairContract\(\{ fixArtifact, changedFiles \}\)/);
   assert.doesNotMatch(helper, /origin\//);
   assert.doesNotMatch(helper, /--porcelain=v1|phase|checkpoint/);
 
-  const syncStart = source.indexOf("const sync = reconcileLatestBaseBeforePush({");
-  const alreadyCurrent = source.indexOf('if (sync.status !== "already-current")', syncStart);
+  const syncStart = source.indexOf("const sync = allowRebase");
+  const alreadyCurrent = source.indexOf(
+    'if (allowRebase && sync.status !== "already-current")',
+    syncStart,
+  );
   const acceptedUpdate = source.indexOf("acceptedBaseSha = synchronizedBaseSha", syncStart);
   assert.ok(syncStart < acceptedUpdate && acceptedUpdate < alreadyCurrent);
 });
@@ -538,4 +541,95 @@ test("repair workflow renews target credentials before deferred outcome publicat
     /GH_TOKEN: \${{ steps\.target_post_flight_token\.outputs\.token }}/,
   );
   assert.match(workflow.slice(publishIndex, postFlightIndex), /--latest --publish-report-only/);
+});
+
+test("repair contributor branch honors allow_rebase false before edit and final sync", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(source, /const allowRebase = job\.frontmatter\.allow_rebase !== false/);
+  assert.match(source, /skipping source branch rebase by job policy/);
+  assert.match(source, /allowRebase,/);
+  assert.match(source, /status: "skipped-by-job-policy"/);
+  assert.match(source, /reason: "rebase forbidden by job frontmatter"/);
+  assert.match(source, /if \(allowRebase && sync\.status !== "already-current"\)/);
+  assert.match(
+    source,
+    /validateAndReviewLoop\(\{[\s\S]*?sourceHead: repairDeltaBaseHead,[\s\S]*?allowRebase,/,
+  );
+  assert.match(
+    source,
+    /runCodexValidationFix\(\{[\s\S]*?targetBaseSha,[\s\S]*?allowRebase,[\s\S]*?\}\)/,
+  );
+  assert.match(
+    source,
+    /runCodexReviewFix\(\{[\s\S]*?targetBaseSha,[\s\S]*?allowRebase,[\s\S]*?\}\)/,
+  );
+  assert.match(source, /if \(allowRebase\) \{[\s\S]*?completeTargetRebaseWithIsolation\(\{/);
+  assert.match(source, /label: "pre-checkpoint no-rebase policy"/);
+  assert.match(source, /noRebasePublicationBlockReason\(\{/);
+  assert.match(source, /sourceRewritten: branchUpdate\.rewritten/);
+  assert.match(source, /rebase, merge, reset, cherry-pick/);
+  assert.ok(
+    [...source.matchAll(/assertNoRebaseWritablePassState\(\{/g)].length >= 4,
+    "initial and follow-up writable passes must enforce the no-rebase state invariant",
+  );
+});
+
+test("same-repository contributor repair comparison is case-insensitive", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(
+    source,
+    /const sameRepoBranch = sameRepoSlug\(pull\.head\.repo\.full_name, result\.repo\)/,
+  );
+  assert.match(
+    source,
+    /same_repo_branch: sameRepoSlug\(pull\.head\.repo\.full_name, result\.repo\)/,
+  );
+});
+
+test("repair job may deterministically forbid every replacement fallback", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(source, /job\.frontmatter\.allow_replacement_pr === false/);
+  assert.match(source, /replacement fallback blocked by job policy/);
+  assert.match(source, /replacement PR is forbidden by job frontmatter/);
+  assert.match(source, /repair branch push blocked; replacement fallback forbidden by job policy/);
+  assert.match(source, /replacement PR is forbidden by job \(\?:frontmatter\|policy\)/);
+
+  const pushStart = source.indexOf("function pushRepairBranchAndUpdateStatus(");
+  const pushEnd = source.indexOf("function repairPushSettleBlock(", pushStart);
+  assert.notEqual(pushStart, -1);
+  assert.notEqual(pushEnd, -1);
+  const pushRepair = source.slice(pushStart, pushEnd);
+  const pushPolicyGuard = pushRepair.indexOf("job.frontmatter.allow_replacement_pr === false");
+  const preservedThrow = pushRepair.indexOf("throw error;", pushPolicyGuard);
+  const preparedFallback = pushRepair.indexOf(
+    "openReplacementPrFromPreparedRepairCheckout({",
+    pushPolicyGuard,
+  );
+  assert.ok(pushPolicyGuard >= 0);
+  assert.ok(preservedThrow > pushPolicyGuard);
+  assert.ok(preparedFallback > preservedThrow);
+
+  const preparedStart = source.indexOf("function openReplacementPrFromPreparedRepairCheckout(");
+  const preparedEnd = source.indexOf("function executeReplacementBranch(", preparedStart);
+  assert.notEqual(preparedStart, -1);
+  assert.notEqual(preparedEnd, -1);
+  const preparedReplacement = source.slice(preparedStart, preparedEnd);
+  const guardIndex = preparedReplacement.indexOf("job.frontmatter.allow_replacement_pr === false");
+  const synchronizationGuard = preparedReplacement.indexOf(
+    "!isAncestor({ targetDir, ancestor: preparedBaseSha, descendant: preparedCommit })",
+  );
+  const blockedMessage = preparedReplacement.indexOf(
+    "prepared repair is not synchronized with target base; replacement fallback blocked",
+  );
+  const firstMutationIndex = preparedReplacement.indexOf("switchTargetBranchWithPlumbing({");
+  const compactionIndex = preparedReplacement.indexOf("compactReplacementHistory({");
+  const pushIndex = preparedReplacement.indexOf("pushRecoverableBranch({");
+  const createIndex = preparedReplacement.indexOf('"pr",\n        "create"');
+  assert.ok(guardIndex >= 0);
+  assert.ok(synchronizationGuard > guardIndex);
+  assert.ok(blockedMessage > synchronizationGuard);
+  assert.ok(firstMutationIndex > blockedMessage);
+  assert.ok(compactionIndex > blockedMessage);
+  assert.ok(pushIndex > blockedMessage);
+  assert.ok(createIndex > blockedMessage);
 });
