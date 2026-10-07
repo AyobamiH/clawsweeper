@@ -175,3 +175,62 @@ test("git final-tree integration ignores paths changed only by the latest base",
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("diverged no-rebase contract uses merge-base branch delta", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-repair-contract-diverged-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q");
+    git("config", "user.name", "ClawSweeper Test");
+    git("config", "user.email", "clawsweeper@example.invalid");
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src/a.ts"), "export const value = 1;\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    const initial = git("rev-parse", "HEAD");
+
+    git("checkout", "-qb", "latest-base");
+    writeFileSync(join(root, "src/a.ts"), "export const value = 2;\n");
+    writeFileSync(join(root, "src/upstream-only.ts"), "export const upstream = true;\n");
+    git("add", ".");
+    git("commit", "-qm", "upstream advances");
+    const latestBase = git("rev-parse", "HEAD");
+
+    git("checkout", "-qb", "repair", initial);
+    writeFileSync(join(root, "src/a.ts"), "export const value = 2;\n");
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs/repair.md"), "repair evidence\n");
+    git("add", ".");
+    git("commit", "-qm", "repair without rebase");
+
+    const changedFiles = changedFilesFromNameOnlyZ(
+      execFileSync("git", ["diff", "--name-only", "-z", `${latestBase}...HEAD`], {
+        cwd: root,
+        encoding: "utf8",
+      }),
+    );
+    assert.ok(changedFiles.includes("src/a.ts"));
+    assert.ok(changedFiles.includes("docs/repair.md"));
+    assert.equal(changedFiles.includes("src/upstream-only.ts"), false);
+
+    assert.doesNotThrow(() =>
+      enforceRepairContract({
+        changedFiles,
+        fixArtifact: { repair_contract: { must_touch: ["src/a.ts"], match: "all" } },
+      }),
+    );
+    assert.throws(
+      () =>
+        enforceRepairContract({
+          changedFiles,
+          fixArtifact: {
+            repair_contract: { must_touch: ["src/upstream-only.ts"], match: "all" },
+          },
+        }),
+      /repair contract rejected final repair tree/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

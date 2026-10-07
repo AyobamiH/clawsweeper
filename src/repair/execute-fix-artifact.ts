@@ -3802,7 +3802,7 @@ function commitCheckpointIfNeeded({ targetDir, message, trailers = [] }: LooseRe
 function enforceFinalRepairContract({ fixArtifact, targetDir, baseSha }: LooseRecord) {
   if (!repairContract(fixArtifact)) return;
   const changedFiles = changedFilesFromNameOnlyZ(
-    run("git", ["diff", "--name-only", "-z", `${baseSha}..HEAD`], { cwd: targetDir }),
+    run("git", ["diff", "--name-only", "-z", `${baseSha}...HEAD`], { cwd: targetDir }),
   );
   enforceRepairContract({ fixArtifact, changedFiles });
 }

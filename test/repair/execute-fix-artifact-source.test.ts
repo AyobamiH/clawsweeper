@@ -473,7 +473,7 @@ test("final repair contract and compaction use the exact accepted base SHA", () 
   assert.match(source, /acceptedBaseSha = synchronizedBaseSha/);
   assert.match(source, /baseRef: baseSha/);
   assert.match(source, /target_base_sha: acceptedBaseSha/);
-  assert.match(helper, /"diff", "--name-only", "-z", `\$\{baseSha\}\.\.HEAD`/);
+  assert.match(helper, /"diff", "--name-only", "-z", `\$\{baseSha\}\.\.\.HEAD`/);
   assert.match(helper, /enforceRepairContract\(\{ fixArtifact, changedFiles \}\)/);
   assert.doesNotMatch(helper, /origin\//);
   assert.doesNotMatch(helper, /--porcelain=v1|phase|checkpoint/);
