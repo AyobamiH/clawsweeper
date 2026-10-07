@@ -111,12 +111,6 @@ jobs:
       - name: Run full validation
         run: pnpm run check
 
-      - name: Show formatter diff on validation failure
-        if: failure()
-        run: |
-          pnpm exec oxfmt src/repair/plan-cluster.ts
-          git diff -- src/repair/plan-cluster.ts
-
   sparse-repair-builds:
     name: sparse repair build smoke
     if: github.event_name == 'pull_request'
