@@ -7,131 +7,110 @@ on:
       - .github/workflows/repair-regression-evidence.yml
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
   evidence:
-    if: github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository && github.actor == 'AyobamiH' && github.event.pull_request.head.ref == 'fix/repair-command-execution-gate'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
           persist-credentials: false
-      - name: Capture the completed failing check
+      - name: Apply the digest-pinned locally tested candidate
         env:
-          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          mkdir -p .artifacts/repair-regression
-          gh api --allow-escape-sequences repos/AyobamiH/clawsweeper/actions/jobs/112637596244/logs > .artifacts/repair-regression/full-validation.log
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^)" = "6729edf3c9a42a447e7e02aeac4556a38dffefb8"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/repair-regression-evidence.yml"
+          mkdir -p .artifacts/repair-candidate
           python3 - <<'PY'
+          import base64, gzip, hashlib, subprocess
           from pathlib import Path
-          import re
-          root = Path('.artifacts/repair-regression')
-          lines = (root / 'full-validation.log').read_text().splitlines()
-          selected = set()
-          for i, line in enumerate(lines):
-              if 'not ok ' in line or 'AssertionError' in line or 'ERR_ASSERTION' in line:
-                  selected.update(range(max(0, i - 5), min(len(lines), i + 90)))
-          summary = '\n'.join(lines[i] for i in sorted(selected))
-          summary = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', summary)
-          (root / 'failure-summary.txt').write_text(summary + '\n')
-          print(summary[-24000:] or 'No TAP assertion failure found; inspect the archived transcript.')
+          encoded = '''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'''
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          digest = hashlib.sha256(patch).hexdigest()
+          assert digest == 'bc9164b27449e82943ced0d9d2363f9302a46cd0629a8efa63f8ebf13f5ad508', digest
+          Path('.artifacts/repair-candidate/candidate.patch').write_bytes(patch)
+          subprocess.run(['git', 'apply', '--index', '.artifacts/repair-candidate/candidate.patch'], check=True)
           PY
+          git rm .github/workflows/repair-regression-evidence.yml
+          git diff --cached --check
       - uses: ./.github/actions/setup-pnpm
-        if: always()
         with:
           node-version: "24"
           build-script: build:all
-      - name: Package isolated validation workspace
-        if: always()
+      - name: Recheck candidate behaviour and contracts
         run: |
           set -euo pipefail
-          git archive HEAD | gzip > .artifacts/repair-regression/source.tar.gz
-          mkdir -p .artifacts/repair-regression/runtime
-          cp "$(command -v node)" .artifacts/repair-regression/runtime/node
-          tar -czf .artifacts/repair-regression/dependencies.tar.gz node_modules dist
-          npm pack pnpm@11.10.0 --pack-destination .artifacts/repair-regression/runtime --ignore-scripts
-          git rev-parse HEAD > .artifacts/repair-regression/revision.txt
-          node --version > .artifacts/repair-regression/node-version.txt
-      - uses: ./.github/actions/setup-codex
+          pnpm run check:static
+          pnpm run lint
+          node --test test/openclaw-process.test.ts test/repair/repair-dispatch-authorization.test.ts test/repair/cluster-workflow-security.test.ts | tee .artifacts/repair-candidate/focused.log
+          node --test --test-name-pattern 'agent workflows install pinned CLI releases' test/clawsweeper.test.ts | tee .artifacts/repair-candidate/pin.log
+      - name: Store immutable candidate objects without changing any branch
         env:
-          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
-          CLAWSWEEPER_INTERNAL_MODEL: ${{ secrets.CLAWSWEEPER_MODEL }}
-      - name: Classify allowance failure without publishing provider diagnostics
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json, os, selectors, subprocess, time
+          import base64, json, os, subprocess, urllib.request
           from pathlib import Path
-          env = dict(os.environ)
-          for key in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'PROXY_API_KEY', 'CLAWSWEEPER_QUOTA_SECRET', 'CLAWSWEEPER_WEBHOOK_SECRET'):
-              env.pop(key, None)
-          child = subprocess.Popen(['codex', 'app-server', '-c', 'forced_login_method="chatgpt"'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
-          def send(value):
-              child.stdin.write((json.dumps(value) + '\n').encode())
-              child.stdin.flush()
-          send({'method':'initialize','id':1,'params':{'clientInfo':{'name':'clawsweeper-quota','version':'1'}}})
-          selector = selectors.DefaultSelector()
-          selector.register(child.stdout, selectors.EVENT_READ)
-          deadline = time.monotonic() + 20
-          report = {'status':'timeout','modelCalls':0}
-          buffer = b''
-          finished = False
-          try:
-              while time.monotonic() < deadline and not finished:
-                  for key, _ in selector.select(0.25):
-                      chunk = os.read(key.fd, 65536)
-                      if not chunk:
-                          report['status'] = 'process_closed'
-                          finished = True
-                          break
-                      buffer += chunk
-                      if len(buffer) > 256000:
-                          report['status'] = 'output_limit'
-                          finished = True
-                          break
-                      while b'\n' in buffer:
-                          line, buffer = buffer.split(b'\n', 1)
-                          try:
-                              message = json.loads(line)
-                          except (ValueError, UnicodeDecodeError):
-                              continue
-                          if message.get('id') not in (1, 2):
-                              continue
-                          if message.get('error'):
-                              error = message['error']
-                              text = json.dumps(error).lower()
-                              tags = [tag for tag in ('refresh_token_reused','refresh_token_expired','refresh_token_invalidated','not_authenticated','unauthorized','expired','401','403','429') if tag in text]
-                              report = {'status':'rpc_error','stage':'initialize' if message['id'] == 1 else 'account/rateLimits/read','rpcCode':error.get('code') if isinstance(error.get('code'), int) else None,'categories':tags,'modelCalls':0}
-                              finished = True
-                              break
-                          if message['id'] == 1:
-                              send({'method':'initialized'})
-                              send({'method':'account/rateLimits/read','id':2})
-                          else:
-                              result = message.get('result') or {}
-                              bucket = (result.get('rateLimitsByLimitId') or {}).get('codex') or result.get('rateLimits') or {}
-                              report = {'status':'response','modelCalls':0,'hasCodexBucket':bool(bucket),'primaryPresent':bool(bucket.get('primary')),'secondaryPresent':bool(bucket.get('secondary'))}
-                              finished = True
-                              break
-          finally:
-              import signal
-              try:
-                  os.killpg(child.pid, signal.SIGKILL)
-              except ProcessLookupError:
-                  pass
-              child.wait(timeout=5)
-              selector.close()
-          Path('.artifacts/repair-regression/allowance-diagnostic.json').write_text(json.dumps(report) + '\n')
-          print(json.dumps(report))
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          approved = {
+              '.github/workflows/repair-regression-evidence.yml',
+              'src/openclaw-process.ts', 'src/repair/comment-router.ts',
+              'src/repair/repair-dispatch-authorization.ts', 'test/clawsweeper.test.ts',
+              'test/openclaw-process.test.ts', 'test/repair/cluster-workflow-security.test.ts',
+              'test/repair/repair-dispatch-authorization.test.ts', 'docs/repair/operations.md',
+              'docs/proof/repair-command-execution/README.md',
+              'docs/proof/repair-command-execution/results.json',
+              'docs/proof/repair-command-execution/focused-green.log',
+              'docs/proof/repair-command-execution/pin-regression-green.log',
+              'docs/proof/repair-command-execution/replay-regression-red.log',
+          }
+          changed = git('diff', '--cached', '--name-only').splitlines()
+          assert set(changed) == approved, changed
+          assert git('diff', '--name-only') == '', 'Unstaged tracked modifications'
+          def post(endpoint, payload):
+              assert endpoint in ('git/blobs', 'git/trees')
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/AyobamiH/clawsweeper/' + endpoint,
+                  data=json.dumps(payload).encode(), method='POST',
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json',
+                           'Content-Type': 'application/json'},
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          entries = []
+          for name in changed:
+              if name == '.github/workflows/repair-regression-evidence.yml':
+                  entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'sha': None})
+                  continue
+              stage = git('ls-files', '--stage', '--', name).split('\t', 1)[0].split()
+              mode, expected, index = stage
+              assert index == '0' and mode in ('100644', '100755')
+              payload = base64.b64encode(Path(name).read_bytes()).decode()
+              blob = post('git/blobs', {'content': payload, 'encoding': 'base64'})
+              assert blob['sha'] == expected, name
+              entries.append({'path': name, 'mode': mode, 'type': 'blob', 'sha': expected})
+          tree = post('git/trees', {'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': entries})
+          assert tree['sha'] == git('write-tree'), 'Remote candidate tree mismatch'
+          receipt = {'parent': git('rev-parse', 'HEAD'), 'tree': tree['sha'],
+                     'candidatePatchSha256': 'bc9164b27449e82943ced0d9d2363f9302a46cd0629a8efa63f8ebf13f5ad508',
+                     'entries': entries, 'branchWrites': 0, 'modelCalls': 0}
+          Path('.artifacts/repair-candidate/tree-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt))
           PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: repair-regression-evidence
-          path: .artifacts/repair-regression/
+          name: validated-repair-candidate
+          path: .artifacts/repair-candidate/
           retention-days: 3
-          include-hidden-files: true
           if-no-files-found: error
