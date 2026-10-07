@@ -45,24 +45,34 @@ export function buildFixPrompt({
       ? "- pin that base SHA while editing and validating; do not refetch, rebase, or rerun validation solely because origin/main advances during this edit pass;"
       : "- preserve the current contributor branch ancestry and source head while editing; validation must run on that unchanged ancestry plus the requested repair;",
     "- rebasing can temporarily stale the prepared dependencies when package manifests or lockfiles change; never install or refresh them yourself; ClawSweeper refreshes them through its trusted isolated installer before independent validation, so treat earlier dependency-resolution failures as provisional;",
-    "- after validation passes against the pinned base, return the repair; ClawSweeper performs one deterministic final base sync, then exact-head review and GitHub checks provide the final proof;",
+    allowRebase
+      ? "- after validation passes against the pinned base, return the repair; ClawSweeper performs one deterministic final base sync, then exact-head review and GitHub checks provide the final proof;"
+      : "- after validation passes on the current ancestry, return the repair without assuming any later base sync; this job forbids ClawSweeper from rebasing before publication, so stale-base conflicts or failures must be reported as external blockers rather than deferred;",
     "- keep built runtime outputs needed for validation, but place generated archives under TMPDIR and remove checkout-local temporary archives or incremental validation caches you created before returning; independent validation must preserve the target checkout identity;",
     allowRebase
       ? "- run local git status/diff/log/rebase/merge commands needed to reconcile this branch with the pinned base;"
       : "- use git status/diff/log for inspection only; do not run rebase or merge commands;",
     "- use the dependency toolchain ClawSweeper already prepared; never run an unrestricted package-manager install, hook installer, git config, or git config write; every package-manager install or deploy must include --ignore-scripts; never change core.hooksPath or other Git callback settings;",
-    "- when git conflicts exist, resolve every conflict marker and leave the checkout in a normal non-rebasing state;",
-    "- use one repair loop against the pinned base: inspect review comments and failing checks, make the narrowest fix, run validation, and repeat only for actionable failures until the branch is merge-ready or a concrete external blocker is proven;",
+    allowRebase
+      ? "- when git conflicts exist, resolve every conflict marker and leave the checkout in a normal non-rebasing state;"
+      : "- if the checkout already contains merge/rebase conflict state or conflict markers, stop and report that state as an external blocker; do not resolve it by rewriting the contributor branch base;",
+    allowRebase
+      ? "- use one repair loop against the pinned base: inspect review comments and failing checks, make the narrowest fix, run validation, and repeat only for actionable failures until the branch is merge-ready or a concrete external blocker is proven;"
+      : "- use one repair loop on the preserved source ancestry: inspect review comments and failing checks, make the narrowest fix, run validation, and repeat only for actionable failures until the branch is ready on that ancestry or a concrete external blocker is proven;",
     "- preserve contributor credit in the PR body or commit history; edit a changelog only when the artifact explicitly requires it and repository policy permits it;",
     "- address review-bot concerns named in the artifact;",
     "- resolve actionable human review comments, bot comments, and requested changes named in the artifact;",
     "- fix relevant failing CI/check output named in the artifact; do not leave known changed-surface CI failures for a later pass;",
-    "- Live behavior: use Telegram as the primary proof surface whenever it can exercise the changed behavior, including shared core behavior; after base sync read and use `.agents/skills/telegram-e2e-userbot/SKILL.md` to exercise the exact change; extend its harness or recipes when needed;",
+    allowRebase
+      ? "- Live behavior: use Telegram as the primary proof surface whenever it can exercise the changed behavior, including shared core behavior; after base sync read and use `.agents/skills/telegram-e2e-userbot/SKILL.md` to exercise the exact change; extend its harness or recipes when needed;"
+      : "- Live behavior: use Telegram as the primary proof surface whenever it can exercise the changed behavior, including shared core behavior; on the preserved source ancestry read and use `.agents/skills/telegram-e2e-userbot/SKILL.md` to exercise the exact change; extend its harness or recipes when needed;",
     isAutomergeRepair ? renderAutomergeRepairGuidance(allowRebase) : "",
     renderChangelogRule(fixArtifact),
     "- prepare the PR so it can pass the ClawSweeper Repair merge_preflight gate;",
     renderGitHubToolRule(isAutomergeRepair),
-    "- do not create a final commit unless git rebase/merge conflict resolution requires it; ClawSweeper Repair checkpoints ordinary edits after you return;",
+    allowRebase
+      ? "- do not create a final commit unless git rebase/merge conflict resolution requires it; ClawSweeper Repair checkpoints ordinary edits after you return;"
+      : "- do not create a final commit; ClawSweeper Repair checkpoints ordinary edits after you return, and this job forbids base-rewrite conflict resolution;",
     "- ClawSweeper Repair will checkpoint and push your edits to the recovery branch after you return;",
     "- do not inspect or print environment variables, credentials, tokens, or secrets;",
     "- do not change auth, approval, sandbox, or trust-boundary semantics unless the artifact explicitly asks for that boundary change;",
@@ -76,7 +86,9 @@ export function buildFixPrompt({
     targetBaseSha ? `Pinned target base SHA: ${targetBaseSha}` : "",
     `Edit attempt: ${attempt ?? 1} of ${maxEditAttempts}`,
     reconcileWithBase
-      ? "Existing repair branch detected. Reconcile the existing branch diff with the deterministic pre-edit rebase result before touching new code."
+      ? allowRebase
+        ? "Existing repair branch detected. Reconcile the existing branch diff with the deterministic pre-edit rebase result before touching new code."
+        : "Existing repair branch detected. Preserve its current ancestry and reconcile only the existing repair diff; do not perform or assume a base sync."
       : "",
     sourceHead ? `Source head before edit: ${sourceHead}` : "",
     rebaseResult ? renderRebaseResult(rebaseResult) : "",
@@ -225,10 +237,12 @@ function renderAutomergeRepairGuidance(allowRebase: boolean) {
     "- inspect the PR comments, review threads, ClawSweeper verdict, and failing check evidence already provided; if read-only `gh` is available, use it to inspect missing PR comments, reviews, checks, and logs;",
     allowRebase
       ? "- if no successful deterministic pre-edit rebase was supplied, fetch origin/main and rebase this branch once, then resolve conflicts;"
-      : "- rebase remains forbidden for this automerge repair: preserve the contributor branch ancestry and leave any later base movement to ClawSweeper;",
+      : "- rebase remains forbidden for this automerge repair: preserve the contributor branch ancestry and do not assume ClawSweeper will move the base later in this run;",
     "- address actionable PR comments and review findings;",
     "- fix failing CI/checks for this PR;",
-    "- failed exact-head checks are repair scope for automerge even when the failing file is outside likely_files; fix the narrow failure against the pinned base or prove it is an external blocker there, leaving later origin/main movement to ClawSweeper's deterministic final base sync;",
+    allowRebase
+      ? "- failed exact-head checks are repair scope for automerge even when the failing file is outside likely_files; fix the narrow failure against the pinned base or prove it is an external blocker there, leaving later origin/main movement to ClawSweeper's deterministic final base sync;"
+      : "- failed exact-head checks are repair scope for automerge even when the failing file is outside likely_files; fix the narrow failure on the preserved source ancestry or prove it is an external blocker there; do not defer failures to a later base sync because this job forbids one;",
     "- run the tests/checks needed to prove the PR should go green, then keep iterating until the checkout is merge-ready or a concrete external blocker is proven;",
   ].join("\n");
 }

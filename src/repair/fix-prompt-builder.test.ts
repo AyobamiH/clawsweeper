@@ -431,9 +431,19 @@ test("buildFixPrompt forbids base rewrite when allowRebase is false", () => {
     maxEditAttempts: 1,
     repositoryContext: "",
     validationCommands: ["git diff --check"],
+    isAutomergeRepair: true,
     allowRebase: false,
   });
   assert.match(prompt, /rebase is explicitly forbidden by the repair job/);
   assert.match(prompt, /do not run git rebase/);
   assert.match(prompt, /preserve the current contributor branch ancestry/);
+  assert.match(prompt, /without assuming any later base sync/);
+  assert.match(prompt, /do not assume ClawSweeper will move the base later/);
+  assert.match(prompt, /do not defer failures to a later base sync/);
+  assert.doesNotMatch(prompt, /performs one deterministic final base sync/);
+  assert.doesNotMatch(prompt, /leave any later base movement to ClawSweeper/);
+  assert.doesNotMatch(
+    prompt,
+    /leaving later origin\/main movement to ClawSweeper's deterministic final base sync/,
+  );
 });

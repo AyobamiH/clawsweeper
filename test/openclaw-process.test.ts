@@ -97,6 +97,7 @@ function runCleanupScenario(options: {
   repeatFailure?: boolean;
   finalOnFailure?: string;
   timeoutMs?: number;
+  logPaths?: boolean;
 }) {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-cleanup-test-"));
   const binary = join(root, "fake-openclaw-cleanup");
@@ -132,8 +133,7 @@ if (previous.length === 0 || ${JSON.stringify(options.repeatFailure === true)}) 
     cwd: root,
     env: { ...process.env, CLAWSWEEPER_OPENCLAW_BIN: binary, OPENCLAW_TEST_ATTEMPTS: attemptsPath },
     timeoutMs: options.timeoutMs ?? 10_000,
-    stdoutPath,
-    stderrPath,
+    ...(options.logPaths === false ? {} : { stdoutPath, stderrPath }),
     ...(options.inspection
       ? {
           checkoutInspection: {
@@ -185,6 +185,21 @@ test("OpenClaw retries only read-only checkout inspection with fresh state and r
     );
     assert.equal(readFileSync(scenario.stderrPath, "utf8"), "attempt-1");
     assert.equal(readFileSync(`${scenario.stderrPath}.retry-1`, "utf8"), "attempt-2");
+  } finally {
+    rmSync(scenario.root, { recursive: true, force: true });
+  }
+});
+
+test("OpenClaw read-only cleanup retry returns first-attempt diagnostics without explicit log paths", () => {
+  const scenario = runCleanupScenario({ inspection: true, logPaths: false });
+  try {
+    assert.equal(scenario.result.status, 0, scenario.result.error?.message);
+    assert.equal(scenario.attempts.length, 2);
+    assert.match(scenario.result.stderr, /First attempt diagnostics:/);
+    assert.match(scenario.result.stderr, /cleanup did not settle/);
+    assert.match(scenario.result.stderr, /attempt-1/);
+    assert.match(scenario.result.stderr, /Retry diagnostics:/);
+    assert.match(scenario.result.stderr, /attempt-2/);
   } finally {
     rmSync(scenario.root, { recursive: true, force: true });
   }

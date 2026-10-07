@@ -63,6 +63,10 @@ export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProces
     ...retry,
     stderr: [
       "ClawSweeper retried the read-only OpenClaw checkout inspection once after cleanup failure.",
+      "First attempt diagnostics:",
+      firstAttempt.error?.message,
+      firstAttempt.stderr,
+      "Retry diagnostics:",
       retry.stderr,
     ]
       .filter(Boolean)
