@@ -3683,6 +3683,15 @@ function freeformReviewPrompt(command: LooseRecord): string {
   ].join("\n");
 }
 
+function repairDispatchAuthorizationInputs(command: LooseRecord): string[] {
+  if (command.maintainer_authorized !== true && command.trusted_bot !== true) {
+    throw new Error(
+      "repair dispatch requires maintainer authorization or trusted ClawSweeper automation",
+    );
+  }
+  return ["-f", "authorize_execute=true", "-f", "authorize_fix_pr=true"];
+}
+
 function dispatchRepair(command: LooseRecord) {
   let dispatchKey = dispatchReceiptKey(command);
   const expectedTitle = repairRunNameForJob(
@@ -3754,6 +3763,7 @@ function dispatchRepair(command: LooseRecord) {
       `execution_runner=${executionRunner}`,
       "-f",
       `model=${model}`,
+      ...repairDispatchAuthorizationInputs(command),
       ...(sessionId ? ["-f", `automerge_session_id=${sessionId}`] : []),
     ],
     { env: dispatchTokenEnv() },
