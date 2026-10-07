@@ -42,6 +42,7 @@ import {
   branchHasBaseDiff,
   currentHead,
   ensureMergeBaseAvailable,
+  hasRebaseInProgress,
   isAncestor,
   type RebaseOntoBaseResult,
   unmergedPaths,
@@ -103,6 +104,8 @@ import {
 import { tryResolveMechanicalRebaseConflicts } from "./mechanical-rebase-conflicts.js";
 import { compactText, escapeRegExp } from "./text-utils.js";
 import {
+  noRebasePublicationBlockReason,
+  noRebaseWritablePassBlockReason,
   shouldCloseSupersededSourcePrs,
   shouldSeedReplacementBranchFromSource,
   sourceBranchWriteBlockReason,
@@ -1079,6 +1082,11 @@ function pushRepairBranchAndUpdateStatus({
   replacementRemoteLeaseSha,
 }: LooseRecord) {
   const branchUpdate = branchUpdateState({ targetDir, sourceHead });
+  const noRebasePublicationBlock = noRebasePublicationBlockReason({
+    allowRebase: job.frontmatter.allow_rebase !== false,
+    sourceRewritten: branchUpdate.rewritten,
+  });
+  if (noRebasePublicationBlock) throw new Error(noRebasePublicationBlock);
   if (dryRun) {
     return {
       action: "repair_contributor_branch",
@@ -1675,6 +1683,33 @@ function branchUpdateState({ targetDir, sourceHead }: LooseRecord) {
     /^[0-9a-f]{40}$/i.test(String(sourceHead ?? "")) &&
     !isAncestor({ targetDir, ancestor: sourceHead, descendant: "HEAD" });
   return { rewritten };
+}
+
+function hasMergeInProgress(targetDir: string) {
+  const mergeHeadPath = run("git", ["rev-parse", "--git-path", "MERGE_HEAD"], {
+    cwd: targetDir,
+  }).trim();
+  const absoluteMergeHead = path.isAbsolute(mergeHeadPath)
+    ? mergeHeadPath
+    : path.join(targetDir, mergeHeadPath);
+  return fs.existsSync(absoluteMergeHead);
+}
+
+function assertNoRebaseWritablePassState({
+  allowRebase,
+  targetDir,
+  headBefore,
+  label,
+}: LooseRecord) {
+  const reason = noRebaseWritablePassBlockReason({
+    allowRebase: allowRebase !== false,
+    headBefore: String(headBefore),
+    headAfter: currentHead(targetDir),
+    rebaseInProgress: hasRebaseInProgress(targetDir),
+    mergeInProgress: hasMergeInProgress(targetDir),
+    unmergedPaths: unmergedPaths(targetDir),
+  });
+  if (reason) throw new Error(String(label) + ": " + reason);
 }
 
 function repairBranchPushArgs({ pull, sourceRef = "HEAD" }: LooseRecord) {
@@ -2361,6 +2396,12 @@ function editValidatePrepareMerge({
         run("git", ["status", "--porcelain"], { cwd: targetDir }).trim(),
       );
       const hasHeadChanges = currentHead(targetDir) !== headBeforeAttempt;
+      assertNoRebaseWritablePassState({
+        allowRebase,
+        targetDir,
+        headBefore: headBeforeAttempt,
+        label: "Codex edit pass " + mode + " attempt " + attempt,
+      });
       const recoveredOpenclawCleanup =
         process.env.CLAWSWEEPER_RUNNER === "openclaw" &&
         (hasWorkingTreeChanges || hasHeadChanges) &&
@@ -2457,14 +2498,23 @@ function editValidatePrepareMerge({
     );
   }
 
-  const completedRebase = completeTargetRebaseWithIsolation({
-    cwd: targetDir,
-    timeoutMs: targetValidationTimeoutMs,
-  });
-  if (completedRebase.status === "continued") {
-    logProgress("completed resolved rebase", {
-      previous_head: completedRebase.previous_head,
-      current_head: completedRebase.current_head,
+  if (allowRebase) {
+    const completedRebase = completeTargetRebaseWithIsolation({
+      cwd: targetDir,
+      timeoutMs: targetValidationTimeoutMs,
+    });
+    if (completedRebase.status === "continued") {
+      logProgress("completed resolved rebase", {
+        previous_head: completedRebase.previous_head,
+        current_head: completedRebase.current_head,
+      });
+    }
+  } else {
+    assertNoRebaseWritablePassState({
+      allowRebase,
+      targetDir,
+      headBefore: repairDeltaBaseHead,
+      label: "pre-checkpoint no-rebase policy",
     });
   }
 
@@ -2492,6 +2542,7 @@ function editValidatePrepareMerge({
     baseBranch,
     targetBaseSha,
     sourceHead: repairDeltaBaseHead,
+    allowRebase,
     onReviewFix: (reviewAttempt: JsonValue) => {
       const checkpoint = commitCheckpointIfNeeded({
         targetDir,
@@ -2954,6 +3005,7 @@ function validateAndReviewLoop({
   targetBaseSha,
   onReviewFix = null,
   sourceHead = null,
+  allowRebase = true,
 }: LooseRecord) {
   let lastReview = null;
   let validationCommands: LooseRecord[] = [];
@@ -3032,6 +3084,7 @@ function validateAndReviewLoop({
           validationPlan,
           validationCommands,
           targetBaseSha,
+          allowRebase,
         });
         onReviewFix?.(`validation-${attempt}`);
         continue;
@@ -3078,6 +3131,7 @@ function validateAndReviewLoop({
         review: lastReview,
         attempt: `${attempt}-final`,
         targetBaseSha,
+        allowRebase,
       });
       onReviewFix?.(`${attempt}-final`);
       const finalValidationPlan = repairDeltaValidationPlan(
@@ -3120,6 +3174,7 @@ function validateAndReviewLoop({
       review: lastReview,
       attempt,
       targetBaseSha,
+      allowRebase,
     });
     onReviewFix?.(attempt);
   }
@@ -3383,12 +3438,17 @@ function runCodexReviewFix({
   review,
   attempt,
   targetBaseSha,
+  allowRebase = true,
 }: LooseRecord) {
+  const headBefore = currentHead(targetDir);
   const prompt = [
     "Address every actionable finding from Codex /review.",
     "",
     "Rules:",
     `- keep all inspection and validation anchored to pinned target base ${targetBaseSha};`,
+    allowRebase
+      ? "- preserve the existing repair policy for any permitted base reconciliation;"
+      : "- rebase, merge, reset, cherry-pick, and any other HEAD/ancestry rewrite are forbidden for this pass; preserve the current HEAD and treat stale-base conflicts as external blockers;",
     "- keep the patch narrow;",
     "- keep shell output bounded; inspect targeted files and avoid broad repo-wide dumps;",
     "- do not commit, push, open PRs, close PRs, or call gh;",
@@ -3436,6 +3496,12 @@ function runCodexReviewFix({
       stderrPath: path.join(workRoot, `${mode}-codex-review-fix-${attempt}.stderr.log`),
     },
   );
+  assertNoRebaseWritablePassState({
+    allowRebase,
+    targetDir,
+    headBefore,
+    label: "Codex review-fix worker " + mode + " attempt " + attempt,
+  });
   if ((child.error as JsonValue)?.code === "ETIMEDOUT")
     throw new Error(`Codex review-fix worker timed out after ${reviewFixTimeoutMs}ms`);
   if (child.error) throw new Error(child.error.message || String(child.error));
@@ -3452,7 +3518,9 @@ function runCodexValidationFix({
   validationPlan,
   validationCommands = [],
   targetBaseSha,
+  allowRebase = true,
 }: LooseRecord) {
+  const headBefore = currentHead(targetDir);
   const validationError = compactText(String(error?.message ?? error), 8000);
   const changedFiles = run("git", ["diff", "--name-only"], { cwd: targetDir })
     .split("\n")
@@ -3463,6 +3531,9 @@ function runCodexValidationFix({
     "",
     "Rules:",
     `- keep all inspection and validation anchored to pinned target base ${targetBaseSha};`,
+    allowRebase
+      ? "- preserve the existing repair policy for any permitted base reconciliation;"
+      : "- rebase, merge, reset, cherry-pick, and any other HEAD/ancestry rewrite are forbidden for this pass; preserve the current HEAD and treat stale-base conflicts as external blockers;",
     "- keep the patch narrow;",
     "- fix only issues introduced by the current repair branch or required to make its changed gate pass;",
     "- keep shell output bounded; inspect targeted files and avoid broad repo-wide dumps;",
@@ -3517,6 +3588,12 @@ function runCodexValidationFix({
       stderrPath: path.join(workRoot, `${mode}-codex-validation-fix-${attempt}.stderr.log`),
     },
   );
+  assertNoRebaseWritablePassState({
+    allowRebase,
+    targetDir,
+    headBefore,
+    label: "Codex validation-fix worker " + mode + " attempt " + attempt,
+  });
   if ((child.error as JsonValue)?.code === "ETIMEDOUT")
     throw new Error(`Codex validation-fix worker timed out after ${validationFixTimeoutMs}ms`);
   if (child.error) throw new Error(child.error.message || String(child.error));

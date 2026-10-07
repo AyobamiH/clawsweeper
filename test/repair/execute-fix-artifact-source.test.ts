@@ -551,6 +551,27 @@ test("repair contributor branch honors allow_rebase false before edit and final 
   assert.match(source, /status: "skipped-by-job-policy"/);
   assert.match(source, /reason: "rebase forbidden by job frontmatter"/);
   assert.match(source, /if \(allowRebase && sync\.status !== "already-current"\)/);
+  assert.match(
+    source,
+    /validateAndReviewLoop\(\{[\s\S]*?sourceHead: repairDeltaBaseHead,[\s\S]*?allowRebase,/,
+  );
+  assert.match(
+    source,
+    /runCodexValidationFix\(\{[\s\S]*?targetBaseSha,[\s\S]*?allowRebase,[\s\S]*?\}\)/,
+  );
+  assert.match(
+    source,
+    /runCodexReviewFix\(\{[\s\S]*?targetBaseSha,[\s\S]*?allowRebase,[\s\S]*?\}\)/,
+  );
+  assert.match(source, /if \(allowRebase\) \{[\s\S]*?completeTargetRebaseWithIsolation\(\{/);
+  assert.match(source, /label: "pre-checkpoint no-rebase policy"/);
+  assert.match(source, /noRebasePublicationBlockReason\(\{/);
+  assert.match(source, /sourceRewritten: branchUpdate\.rewritten/);
+  assert.match(source, /rebase, merge, reset, cherry-pick/);
+  assert.ok(
+    [...source.matchAll(/assertNoRebaseWritablePassState\(\{/g)].length >= 4,
+    "initial and follow-up writable passes must enforce the no-rebase state invariant",
+  );
 });
 
 test("same-repository contributor repair comparison is case-insensitive", () => {

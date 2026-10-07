@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  noRebasePublicationBlockReason,
+  noRebaseWritablePassBlockReason,
   shouldCloseSupersededSourcePrs,
   shouldSeedReplacementBranchFromSource,
   sourceBranchWriteBlockReason,
@@ -90,5 +92,57 @@ test("sourceBranchWriteBlockReason blocks missing head details", () => {
       head: { repo: { full_name: "contributor/openclaw" } },
     }),
     "source PR is missing head repo/ref",
+  );
+});
+
+test("no-rebase publication policy rejects rewritten source ancestry", () => {
+  assert.equal(
+    noRebasePublicationBlockReason({ allowRebase: false, sourceRewritten: false }),
+    null,
+  );
+  assert.match(
+    noRebasePublicationBlockReason({ allowRebase: false, sourceRewritten: true }) ?? "",
+    /rewrite source ancestry/,
+  );
+  assert.equal(noRebasePublicationBlockReason({ allowRebase: true, sourceRewritten: true }), null);
+});
+
+test("no-rebase writable pass policy rejects ancestry and merge-state changes", () => {
+  const base = {
+    allowRebase: false,
+    headBefore: "a".repeat(40),
+    headAfter: "a".repeat(40),
+    rebaseInProgress: false,
+    mergeInProgress: false,
+    unmergedPaths: [],
+  };
+
+  assert.equal(noRebaseWritablePassBlockReason(base), null);
+  assert.match(
+    noRebaseWritablePassBlockReason({ ...base, headAfter: "b".repeat(40) }) ?? "",
+    /changed HEAD/,
+  );
+  assert.match(
+    noRebaseWritablePassBlockReason({ ...base, rebaseInProgress: true }) ?? "",
+    /rebase in progress/,
+  );
+  assert.match(
+    noRebaseWritablePassBlockReason({ ...base, mergeInProgress: true }) ?? "",
+    /merge in progress/,
+  );
+  assert.match(
+    noRebaseWritablePassBlockReason({ ...base, unmergedPaths: ["src/a.ts"] }) ?? "",
+    /src\/a\.ts/,
+  );
+  assert.equal(
+    noRebaseWritablePassBlockReason({
+      ...base,
+      allowRebase: true,
+      headAfter: "b".repeat(40),
+      rebaseInProgress: true,
+      mergeInProgress: true,
+      unmergedPaths: ["src/a.ts"],
+    }),
+    null,
   );
 });
