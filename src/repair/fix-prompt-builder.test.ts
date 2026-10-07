@@ -393,3 +393,22 @@ function makeGitRepo(files: Record<string, string>): string {
   execFileSync("git", ["add", "."], { cwd: tmp });
   return tmp;
 }
+
+test("buildFixPrompt forbids base rewrite when allowRebase is false", () => {
+  const prompt = buildFixPrompt({
+    fixArtifact: {
+      repair_strategy: "repair_contributor_branch",
+      validation_commands: ["git diff --check"],
+    },
+    branch: "fixture",
+    mode: "repair",
+    attempt: 1,
+    maxEditAttempts: 1,
+    repositoryContext: "",
+    validationCommands: ["git diff --check"],
+    allowRebase: false,
+  });
+  assert.match(prompt, /rebase is explicitly forbidden by the repair job/);
+  assert.match(prompt, /do not run git rebase/);
+  assert.match(prompt, /preserve the current contributor branch ancestry/);
+});

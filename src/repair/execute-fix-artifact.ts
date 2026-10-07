@@ -963,16 +963,25 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
   const sourceHead = currentHead(targetDir);
   logProgress("preparing target toolchain", { source_head: sourceHead });
   prepareTargetToolchain(targetDir, currentTargetValidationOptions());
+  const allowRebase = job.frontmatter.allow_rebase !== false;
   const codexOwnsInitialRebase =
-    isBranchRepairStatusJob() && fixArtifact.deterministic_rebase_only !== true;
+    allowRebase && isBranchRepairStatusJob() && fixArtifact.deterministic_rebase_only !== true;
   let rebaseResult = null;
   let fastRepair: LooseRecord = {
     status: "disabled",
-    reason: codexOwnsInitialRebase
-      ? "initial automerge rebase is delegated to Codex repair"
-      : "not evaluated",
+    reason: !allowRebase
+      ? "rebase forbidden by job frontmatter"
+      : codexOwnsInitialRebase
+        ? "initial automerge rebase is delegated to Codex repair"
+        : "not evaluated",
   };
-  if (codexOwnsInitialRebase) {
+  if (!allowRebase) {
+    logProgress("skipping source branch rebase by job policy", {
+      branch,
+      base_branch: baseBranch,
+      source_head: sourceHead,
+    });
+  } else if (codexOwnsInitialRebase) {
     logProgress("deferring initial automerge rebase to Codex repair pass", {
       branch,
       base_branch: baseBranch,
@@ -1032,6 +1041,7 @@ function executeRepairBranch({ fixArtifact, targetDir }: LooseRecord) {
     fallbackReason: null,
     sourceHead,
     rebaseResult,
+    allowRebase,
   });
   (prep.merge_preflight as JsonValue).target = `#${sourcePr.number}`;
   return pushRepairBranchAndUpdateStatus({
@@ -2182,6 +2192,7 @@ function editValidatePrepareMerge({
   reconcileWithBase = false,
   sourceHead = null,
   rebaseResult = null,
+  allowRebase = true,
 }: LooseRecord) {
   let producedChanges = allowExistingChanges;
   let previousSummary = "";
@@ -2255,6 +2266,7 @@ function editValidatePrepareMerge({
         validationCommands: validationPreflight.resolved_commands ?? [],
         targetBaseSha,
         isAutomergeRepair: isAutomergeRepairJob(),
+        allowRebase,
       });
       const summaryPath = path.join(workRoot, `${mode}-codex-summary-${attempt}.md`);
       const workerTimeoutMs = currentCodexTimeoutMs(true);

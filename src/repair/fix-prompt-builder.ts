@@ -27,6 +27,7 @@ export function buildFixPrompt({
   validationCommands,
   targetBaseSha,
   isAutomergeRepair = false,
+  allowRebase = true,
 }: LooseRecord) {
   return [
     "You are editing the target repository for ClawSweeper Repair.",
@@ -37,12 +38,18 @@ export function buildFixPrompt({
     "- start by inspecting the repository paths below with rg/git ls-files/sed;",
     "- keep shell output bounded: prefer targeted rg/sed/git commands, add --max-count/head/tail where useful, and do not dump broad repo-wide matches or huge files into the transcript;",
     "- if likely_files are stale, missing, or glob-like, discover the real nearby files and edit those;",
-    "- establish one base snapshot for this Codex edit pass: use the supplied deterministic pre-edit rebase when it already succeeded, otherwise fetch origin/main once and rebase or otherwise sync once;",
-    "- pin that base SHA while editing and validating; do not refetch, rebase, or rerun validation solely because origin/main advances during this edit pass;",
+    allowRebase
+      ? "- establish one base snapshot for this Codex edit pass: use the supplied deterministic pre-edit rebase when it already succeeded, otherwise fetch origin/main once and rebase or otherwise sync once;"
+      : "- rebase is explicitly forbidden by the repair job: do not run git rebase, merge origin/main, reset onto main, or otherwise rewrite the contributor branch base; edit only the requested files on the current source head;",
+    allowRebase
+      ? "- pin that base SHA while editing and validating; do not refetch, rebase, or rerun validation solely because origin/main advances during this edit pass;"
+      : "- preserve the current contributor branch ancestry and source head while editing; validation must run on that unchanged ancestry plus the requested repair;",
     "- rebasing can temporarily stale the prepared dependencies when package manifests or lockfiles change; never install or refresh them yourself; ClawSweeper refreshes them through its trusted isolated installer before independent validation, so treat earlier dependency-resolution failures as provisional;",
     "- after validation passes against the pinned base, return the repair; ClawSweeper performs one deterministic final base sync, then exact-head review and GitHub checks provide the final proof;",
     "- keep built runtime outputs needed for validation, but place generated archives under TMPDIR and remove checkout-local temporary archives or incremental validation caches you created before returning; independent validation must preserve the target checkout identity;",
-    "- run local git status/diff/log/rebase/merge commands needed to reconcile this branch with the pinned base;",
+    allowRebase
+      ? "- run local git status/diff/log/rebase/merge commands needed to reconcile this branch with the pinned base;"
+      : "- use git status/diff/log for inspection only; do not run rebase or merge commands;",
     "- use the dependency toolchain ClawSweeper already prepared; never run an unrestricted package-manager install, hook installer, git config, or git config write; every package-manager install or deploy must include --ignore-scripts; never change core.hooksPath or other Git callback settings;",
     "- when git conflicts exist, resolve every conflict marker and leave the checkout in a normal non-rebasing state;",
     "- use one repair loop against the pinned base: inspect review comments and failing checks, make the narrowest fix, run validation, and repeat only for actionable failures until the branch is merge-ready or a concrete external blocker is proven;",

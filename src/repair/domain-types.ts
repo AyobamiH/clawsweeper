@@ -19,6 +19,7 @@ export type RepairJobFrontmatter = JsonObject & {
   allow_low_signal_pr_close?: boolean;
   allow_merge?: boolean;
   allow_post_merge_close?: boolean;
+  allow_rebase?: boolean;
   allow_unmerged_fix_close?: boolean;
   blocked_actions?: JsonArray;
   candidates?: JsonArray;

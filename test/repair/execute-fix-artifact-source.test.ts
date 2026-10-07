@@ -539,3 +539,10 @@ test("repair workflow renews target credentials before deferred outcome publicat
   );
   assert.match(workflow.slice(publishIndex, postFlightIndex), /--latest --publish-report-only/);
 });
+
+test("repair contributor branch honors allow_rebase false before edit", () => {
+  const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
+  assert.match(source, /const allowRebase = job\.frontmatter\.allow_rebase !== false/);
+  assert.match(source, /skipping source branch rebase by job policy/);
+  assert.match(source, /allowRebase,/);
+});
