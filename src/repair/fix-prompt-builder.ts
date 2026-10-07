@@ -58,7 +58,7 @@ export function buildFixPrompt({
     "- resolve actionable human review comments, bot comments, and requested changes named in the artifact;",
     "- fix relevant failing CI/check output named in the artifact; do not leave known changed-surface CI failures for a later pass;",
     "- Live behavior: use Telegram as the primary proof surface whenever it can exercise the changed behavior, including shared core behavior; after base sync read and use `.agents/skills/telegram-e2e-userbot/SKILL.md` to exercise the exact change; extend its harness or recipes when needed;",
-    isAutomergeRepair ? renderAutomergeRepairGuidance() : "",
+    isAutomergeRepair ? renderAutomergeRepairGuidance(allowRebase) : "",
     renderChangelogRule(fixArtifact),
     "- prepare the PR so it can pass the ClawSweeper Repair merge_preflight gate;",
     renderGitHubToolRule(isAutomergeRepair),
@@ -219,11 +219,13 @@ function renderGitHubToolRule(isAutomergeRepair: boolean) {
   return "- do not push, open PRs, close PRs, comment, label, or merge; read-only `gh` commands are allowed for PR comments, review threads, check status, and check logs when available;";
 }
 
-function renderAutomergeRepairGuidance() {
+function renderAutomergeRepairGuidance(allowRebase: boolean) {
   return [
     "- automerge repair loop: treat this as direct PR repair work, not a planning exercise;",
     "- inspect the PR comments, review threads, ClawSweeper verdict, and failing check evidence already provided; if read-only `gh` is available, use it to inspect missing PR comments, reviews, checks, and logs;",
-    "- if no successful deterministic pre-edit rebase was supplied, fetch origin/main and rebase this branch once, then resolve conflicts;",
+    allowRebase
+      ? "- if no successful deterministic pre-edit rebase was supplied, fetch origin/main and rebase this branch once, then resolve conflicts;"
+      : "- rebase remains forbidden for this automerge repair: preserve the contributor branch ancestry and leave any later base movement to ClawSweeper;",
     "- address actionable PR comments and review findings;",
     "- fix failing CI/checks for this PR;",
     "- failed exact-head checks are repair scope for automerge even when the failing file is outside likely_files; fix the narrow failure against the pinned base or prove it is an external blocker there, leaving later origin/main movement to ClawSweeper's deterministic final base sync;",
