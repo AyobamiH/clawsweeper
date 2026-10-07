@@ -1,0 +1,68 @@
+name: Workers AI PR91 acceptance dispatch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/workers-ai-pr91-acceptance.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: workers-ai-pr91-acceptance-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'AyobamiH/clawsweeper' &&
+      github.actor == 'AyobamiH' &&
+      github.event.pull_request.number == 79 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/repair-command-execution-gate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fence source and dispatch one Workers AI-only repair
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ github.event.pull_request.head.ref }}
+          CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          expected_base=57c15cb9744e3657e3e4699e5d965fea3a1fa93b
+          expected_target=dd8e24d9f8c5e7dfafa03055cb0059ebef5c878d
+          expected_job=679cf0561b147020c167dee02d78525227b276d4
+          job=jobs/ayobamih/inbox/automerge-ayobamih-wagging-web-wins-91.md
+          key=workers-ai-pr91-57c15cb-20261007
+          # This is a one-off dispatch of the existing guarded repair worker, not a
+          # substitute editor. The bridge cannot publish to the target repository.
+          test "$GITHUB_REPOSITORY" = AyobamiH/clawsweeper
+          test "$CANDIDATE_REF" = fix/repair-command-execution-gate
+          test "$GITHUB_ACTOR" = AyobamiH
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          pr="$(gh api repos/AyobamiH/clawsweeper/pulls/79)"
+          jq -e --arg head "$CANDIDATE_HEAD" '.state == "open" and .head.sha == $head and .head.repo.full_name == "AyobamiH/clawsweeper" and .head.ref == "fix/repair-command-execution-gate"' <<<"$pr" >/dev/null
+          # The only difference from the validated source must be this dispatch bridge.
+          gh api "repos/$GITHUB_REPOSITORY/compare/$expected_base...$CANDIDATE_HEAD" \
+            --jq '.files[].filename' > "$RUNNER_TEMP/acceptance-changed-paths.txt"
+          test "$(cat "$RUNNER_TEMP/acceptance-changed-paths.txt")" = .github/workflows/workers-ai-pr91-acceptance.yml
+          source="$(gh api repos/AyobamiH/wagging-web-wins/pulls/91)"
+          jq -e --arg head "$expected_target" '.state == "open" and .head.sha == $head and .merged == false and .auto_merge == null' <<<"$source" >/dev/null
+          actual_job="$(gh api "repos/AyobamiH/clawsweeper-state/contents/$job?ref=state" --jq '.sha')"
+          test "$actual_job" = "$expected_job"
+          # Never automatically replay even a failed acceptance attempt.
+          existing="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/repair-cluster-worker.yml/runs" -f event=workflow_dispatch -f per_page=100 --jq ".workflow_runs[] | select(.display_title | contains(\"$key\")) | .id")"
+          if [ -n "$existing" ]; then
+            echo 'Acceptance dispatch already exists; refusing duplicate model execution.'
+            exit 1
+          fi
+          gh workflow run repair-cluster-worker.yml --repo "$GITHUB_REPOSITORY" --ref "$CANDIDATE_REF" \
+            -f "job=$job" -f "dispatch_key=$key" -f mode=autonomous \
+            -f runner=clawsweeper-cloudflare -f execution_runner=clawsweeper-cloudflare \
+            -f planner_sandbox=read-only -f model=internal -f inference_policy=workers-ai \
+            -f authorize_execute=true -f authorize_fix_pr=true -f dry_run=false
+          printf 'Workers AI-only repair dispatched for #91 at %s. No merge or deploy authorised.\n' "$expected_target" >> "$GITHUB_STEP_SUMMARY"
