@@ -53,21 +53,16 @@ The failed temporary launcher was removed in
 No new credential grant, merge, deployment, paid OpenAI fallback, or global
 provider-policy change was applied.
 
-## Remaining evidence
+## Historical pre-acceptance snapshot
 
-Status: Workers AI live repair acceptance is incomplete.
+At this point in the investigation, Workers AI live repair acceptance was still
+incomplete. The guarded workflow had not yet demonstrated the one-line repair,
+unchanged test, retained provider/validation transcripts, resulting target head,
+or target CI outcomes.
 
-The existing guarded repair workflow still needs to demonstrate a fresh
-Workers AI planning and execution outcome on the controlled fixture. Completion
-requires the one-line repair, unchanged test, retained provider and validation
-transcripts, the resulting target head, and the actual quality/boundaries/preview
-outcomes. Do not manually change the fixture to manufacture provider acceptance.
-Leave the fixture unmerged and undeployed.
-
-Codex integration status remains independent. No fresh Codex authentication or
-allowance probe was requested in this follow-through. Any future landing of the
-ClawSweeper infrastructure PR must still satisfy its current-head review and
-normal landing policy; separating providers does not waive review requirements.
+The later sections below supersede this snapshot with the completed acceptance
+run and its follow-up fixes. Codex integration remains an independent evidence
+lane; provider separation does not waive normal landing-policy requirements.
 
 ## Live Workers AI acceptance run 37596664105
 
@@ -152,3 +147,45 @@ check/status read permissions to the planning, execution, and renewed
 post-flight target tokens. Static/format checks and 40 focused workflow/executor
 tests passed for that permission repair. No merge, deployment, paid OpenAI
 fallback, or replacement PR was introduced.
+
+## ChatGPT/Codex allowance smoke outcome
+
+The ChatGPT/Codex allowance lane was investigated independently from the
+Workers AI repair path.
+
+The local Codex 0.157.1 session on the authorised `web` host reported
+`Logged in using ChatGPT` and successfully answered the native
+`account/rateLimits/read` request. The current local allowance observation was
+82% remaining in the active seven-day window, so the earlier CI failure was not
+allowance exhaustion.
+
+The failing GitHub Actions job instead used the repository secret
+`CLAWSWEEPER_CODEX_AUTH_JSON`, last updated on 2026-09-26. That stored copy could
+be recognised as ChatGPT-backed login material but could not successfully
+complete the allowance read in CI. The allowance reader previously collapsed
+that condition into a generic process failure, which made the entire CI workflow
+red even though build, repair, Workers AI, containment and security lanes were
+healthy.
+
+Commit `39d9fbc5b3f52d69e56b5d5ab26aa4a5082c0076` changes the allowance smoke to
+classify provider health instead of conflating provider unavailability with core
+CI failure. A successful allowance read records `available=true`; an unavailable
+or stale ChatGPT/Codex provider records `available=false` with a bounded reason,
+skips live Codex inference, and runs the refusal-only proof. Actual Codex work
+continues to fail closed when the provider is unavailable.
+
+Validation on that head:
+
+- Hosted native review scan smoke: success.
+- Windows Codex launcher: success.
+- sparse repair build smoke: success.
+- `pnpm check`: success.
+- repair containment smoke: success.
+- CodeQL: success.
+- automerge e2e: success.
+
+The local healthy ChatGPT credential was not copied into GitHub Actions during
+this work because the execution safety boundary blocked direct transfer of the
+live credential. No credential value was printed or exposed. Restoring hosted
+live Codex review requires a separate safe refresh of the GitHub secret, but
+that provider availability no longer blocks Workers AI repairs or core CI.
