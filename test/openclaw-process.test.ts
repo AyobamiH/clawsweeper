@@ -91,6 +91,70 @@ test("OpenClaw process serializes worker setup failures instead of losing diagno
   }
 });
 
+test("OpenClaw retries once with fresh state after cleanup ownership failure", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-cleanup-retry-test-"));
+  const binary = join(root, "fake-openclaw-cleanup-retry");
+  const attemptsPath = join(root, "attempts.txt");
+  try {
+    writeFileSync(
+      binary,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const attemptsPath = process.env.OPENCLAW_TEST_ATTEMPTS;
+const previous = fs.existsSync(attemptsPath)
+  ? fs.readFileSync(attemptsPath, "utf8").split("\\n").filter(Boolean)
+  : [];
+fs.appendFileSync(attemptsPath, process.env.OPENCLAW_STATE_DIR + "\\n");
+if (previous.length === 0) {
+  process.stdout.write(JSON.stringify({
+    ok: false,
+    status: "error",
+    final: "",
+    payloads: [],
+    error: {
+      message: "Agent exec cleanup failed: Agent runtime cleanup did not settle; state ownership retained until this process exits",
+      kind: "exception"
+    }
+  }));
+  process.exitCode = 1;
+} else {
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    status: "ok",
+    final: "recovered",
+    payloads: [{ text: "recovered" }]
+  }));
+}
+`,
+    );
+    chmodSync(binary, 0o755);
+
+    const result = runOpenclawProcess({
+      label: "cleanup-retry",
+      prompt: "prompt",
+      model: "openai/test",
+      cwd: root,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_OPENCLAW_BIN: binary,
+        OPENCLAW_TEST_ATTEMPTS: attemptsPath,
+      },
+      timeoutMs: 10_000,
+    });
+
+    assert.equal(result.status, 0, result.error?.message);
+    assert.equal(result.stdout, "recovered");
+    assert.match(result.stderr, /retried OpenClaw once/);
+    const states = readFileSync(attemptsPath, "utf8").split("\n").filter(Boolean);
+    assert.equal(states.length, 2);
+    assert.notEqual(states[0], states[1]);
+    assert.equal(existsSync(states[0]), false);
+    assert.equal(existsSync(states[1]), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OpenClaw process emits isolated config and invocation, joins payloads, and cleans state", () => {
   const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-test-"));
   const recordPath = join(root, "record.json");
