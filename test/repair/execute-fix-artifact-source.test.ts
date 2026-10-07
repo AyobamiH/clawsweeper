@@ -565,9 +565,40 @@ test("same-repository contributor repair comparison is case-insensitive", () => 
   );
 });
 
-test("repair job may deterministically forbid replacement fallback", () => {
+test("repair job may deterministically forbid every replacement fallback", () => {
   const source = readText(path.join(process.cwd(), "src/repair/execute-fix-artifact.ts"));
   assert.match(source, /job\.frontmatter\.allow_replacement_pr === false/);
   assert.match(source, /replacement fallback blocked by job policy/);
   assert.match(source, /replacement PR is forbidden by job frontmatter/);
+  assert.match(source, /repair branch push blocked; replacement fallback forbidden by job policy/);
+  assert.match(source, /replacement PR is forbidden by job \(\?:frontmatter\|policy\)/);
+
+  const pushStart = source.indexOf("function pushRepairBranchAndUpdateStatus(");
+  const pushEnd = source.indexOf("function repairPushSettleBlock(", pushStart);
+  assert.notEqual(pushStart, -1);
+  assert.notEqual(pushEnd, -1);
+  const pushRepair = source.slice(pushStart, pushEnd);
+  const pushPolicyGuard = pushRepair.indexOf("job.frontmatter.allow_replacement_pr === false");
+  const preservedThrow = pushRepair.indexOf("throw error;", pushPolicyGuard);
+  const preparedFallback = pushRepair.indexOf(
+    "openReplacementPrFromPreparedRepairCheckout({",
+    pushPolicyGuard,
+  );
+  assert.ok(pushPolicyGuard >= 0);
+  assert.ok(preservedThrow > pushPolicyGuard);
+  assert.ok(preparedFallback > preservedThrow);
+
+  const preparedStart = source.indexOf("function openReplacementPrFromPreparedRepairCheckout(");
+  const preparedEnd = source.indexOf("function executeReplacementBranch(", preparedStart);
+  assert.notEqual(preparedStart, -1);
+  assert.notEqual(preparedEnd, -1);
+  const preparedReplacement = source.slice(preparedStart, preparedEnd);
+  const guardIndex = preparedReplacement.indexOf("job.frontmatter.allow_replacement_pr === false");
+  const firstMutationIndex = preparedReplacement.indexOf("switchTargetBranchWithPlumbing({");
+  const pushIndex = preparedReplacement.indexOf("pushRecoverableBranch({");
+  const createIndex = preparedReplacement.indexOf('"pr",\n        "create"');
+  assert.ok(guardIndex >= 0);
+  assert.ok(firstMutationIndex > guardIndex);
+  assert.ok(pushIndex > guardIndex);
+  assert.ok(createIndex > guardIndex);
 });

@@ -766,7 +766,7 @@ function isBlockedFixError(error: JsonValue) {
   if (isRepairBranchPushBlocked(error)) return true;
   if (isRetryableCodexErrorMessage(String(error?.message ?? error))) return true;
   if (isCodexContextLimitError(String(error?.message ?? error))) return true;
-  return /external base blocker|Codex produced no target repo changes|Codex \/review did not pass|Codex (?:fix worker|review-fix worker|\/review) timed out|Codex (?:fix worker|review-fix worker|\/review) failed|validation command failed|command timed out after \d+ms: git (?:fetch|push)|rebase (?:conflicts remain unresolved|produced additional conflicts)/i.test(
+  return /external base blocker|replacement PR is forbidden by job (?:frontmatter|policy)|Codex produced no target repo changes|Codex \/review did not pass|Codex (?:fix worker|review-fix worker|\/review) timed out|Codex (?:fix worker|review-fix worker|\/review) failed|validation command failed|command timed out after \d+ms: git (?:fetch|push)|rebase (?:conflicts remain unresolved|produced additional conflicts)/i.test(
     String(error?.message ?? error),
   );
 }
@@ -1139,6 +1139,17 @@ function pushRepairBranchAndUpdateStatus({
   } catch (error) {
     const blockedReason = repairBranchPushBlockedReason(error);
     if (blockedReason && !sameRepoBranch) {
+      if (job.frontmatter.allow_replacement_pr === false) {
+        logProgress("repair branch push blocked; replacement fallback forbidden by job policy", {
+          source_pr: sourcePr.url,
+          head_repo: pull.head.repo.full_name,
+          head_ref: pull.head.ref,
+          reason: blockedReason,
+        });
+        // Preserve the original classified push error so the outer repair
+        // boundary records a durable blocked outcome instead of losing the report.
+        throw error;
+      }
       logProgress("repair branch push blocked; publishing prepared repair as replacement PR", {
         source_pr: sourcePr.url,
         head_repo: pull.head.repo.full_name,
@@ -1265,6 +1276,9 @@ function openReplacementPrFromPreparedRepairCheckout({
   fallbackReason,
   expectedRemoteSha,
 }: LooseRecord) {
+  if (job.frontmatter.allow_replacement_pr === false) {
+    throw new Error("replacement PR is forbidden by job frontmatter");
+  }
   const baseBranch = String(process.env.CLAWSWEEPER_FIX_BASE_BRANCH ?? DEFAULT_BASE_BRANCH);
   const contributorCredits = sourceContributorCredits({
     fixArtifact,
