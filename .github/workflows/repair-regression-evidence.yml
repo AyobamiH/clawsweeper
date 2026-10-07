@@ -1,0 +1,62 @@
+name: repair regression evidence
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/repair-regression-evidence.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evidence:
+    if: github.event.pull_request.number == 79 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Capture the completed failing check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/repair-regression
+          gh api repos/AyobamiH/clawsweeper/actions/jobs/112637596244/logs > .artifacts/repair-regression/full-validation.log
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('.artifacts/repair-regression')
+          lines = (root / 'full-validation.log').read_text().splitlines()
+          selected = set()
+          for i, line in enumerate(lines):
+              if 'not ok ' in line or 'AssertionError' in line or 'ERR_ASSERTION' in line:
+                  selected.update(range(max(0, i - 5), min(len(lines), i + 90)))
+          summary = '\n'.join(lines[i] for i in sorted(selected))
+          (root / 'failure-summary.txt').write_text(summary + '\n')
+          print(summary[-24000:] or 'No TAP assertion failure found; inspect the archived transcript.')
+          PY
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          node-version: '24'
+          build-script: build:all
+      - name: Package isolated validation workspace
+        run: |
+          set -euo pipefail
+          git archive HEAD | gzip > .artifacts/repair-regression/source.tar.gz
+          mkdir -p .artifacts/repair-regression/runtime
+          cp "$(command -v node)" .artifacts/repair-regression/runtime/node
+          tar -czf .artifacts/repair-regression/dependencies.tar.gz node_modules dist
+          npm pack pnpm@11.10.0 --pack-destination .artifacts/repair-regression/runtime --ignore-scripts
+          git rev-parse HEAD > .artifacts/repair-regression/revision.txt
+          node --version > .artifacts/repair-regression/node-version.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-regression-evidence
+          path: .artifacts/repair-regression/
+          retention-days: 3
+          include-hidden-files: true
+          if-no-files-found: error
