@@ -1,19 +1,39 @@
 import { admitSubscription, quotaCall, readChatGPTAllowance } from "./subscription-quota-client.js";
+
+const command = process.argv[2];
 try {
-  if (process.argv[2] === "exhausted") {
+  if (command === "exhausted") {
     await quotaCall({ action: "exhausted" });
-  } else if (process.argv[2] === "read") {
+  } else if (command === "read") {
+    const windows = await readChatGPTAllowance();
     process.stdout.write(
-      JSON.stringify({ observedAt: Date.now(), windows: await readChatGPTAllowance() }),
+      JSON.stringify({
+        observedAt: Date.now(),
+        available: windows.length > 0 && windows.every((window) => window.remainingPercent > 0),
+        windows,
+      }),
     );
   } else {
     process.stdout.write(
       JSON.stringify({
-        allowed: await admitSubscription(process.env, process.argv[2] === "refresh"),
+        allowed: await admitSubscription(process.env, command === "refresh"),
       }),
     );
   }
 } catch {
-  process.stdout.write(JSON.stringify({ allowed: false, error: "subscription_quota_unavailable" }));
-  process.exitCode = 1;
+  if (command === "read") {
+    process.stdout.write(
+      JSON.stringify({
+        observedAt: Date.now(),
+        available: false,
+        windows: [],
+        error: "chatgpt_allowance_unavailable",
+      }),
+    );
+  } else {
+    process.stdout.write(
+      JSON.stringify({ allowed: false, error: "subscription_quota_unavailable" }),
+    );
+    process.exitCode = 1;
+  }
 }
