@@ -70,6 +70,23 @@ test("repair mutation authority is bounded per run and defaults off", () => {
   assert.equal(clusterEnv.CLAWSWEEPER_ALLOW_MERGE, "0");
 });
 
+test("classified repair dispatches carry bounded per-run mutation authority", () => {
+  const source = fs.readFileSync("src/repair/comment-router.ts", "utf8");
+  const guardStart = source.indexOf("function repairDispatchAuthorizationInputs");
+  const dispatchStart = source.indexOf("function dispatchRepair(", guardStart);
+  const dispatchEnd = source.indexOf("function dispatchRepairActionStatus", dispatchStart);
+  const guard = source.slice(guardStart, dispatchStart);
+  const dispatch = source.slice(dispatchStart, dispatchEnd);
+
+  assert.ok(guardStart >= 0);
+  assert.ok(dispatchStart > guardStart);
+  assert.ok(dispatchEnd > dispatchStart);
+  assert.match(guard, /command\.maintainer_authorized !== true && command\.trusted_bot !== true/);
+  assert.match(guard, /authorize_execute=true/);
+  assert.match(guard, /authorize_fix_pr=true/);
+  assert.match(dispatch, /repairDispatchAuthorizationInputs\(command\)/);
+});
+
 test("repair inference policy override is bounded and defaults to auto", () => {
   const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
   const workflow = parse(source) as Workflow;
