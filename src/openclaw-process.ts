@@ -13,6 +13,9 @@ const OPENCLAW_PROCESS_WORKER_PATH = fileURLToPath(
   new URL("./openclaw-process-worker.js", import.meta.url),
 );
 const STDERR_FAILURE_TAIL_BYTES = 8 * 1024;
+const OPENCLAW_CLEANUP_RETRY_MIN_BUDGET_MS = 1_000;
+const OPENCLAW_UNCERTAIN_CLEANUP_PATTERN =
+  /Agent exec cleanup failed: Agent runtime cleanup did not settle; state ownership retained until this process exits/i;
 
 interface SerializedProcessResult {
   status: number | null;
@@ -38,6 +41,34 @@ export interface OpenClawProcessOptions {
 }
 
 export function runOpenclawProcess(options: OpenClawProcessOptions): CodexProcessResult {
+  const startedAt = Date.now();
+  const firstAttempt = runOpenclawProcessAttempt(options);
+  if (!isRetryableOpenclawCleanupFailure(firstAttempt)) return firstAttempt;
+
+  const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs < OPENCLAW_CLEANUP_RETRY_MIN_BUDGET_MS) return firstAttempt;
+
+  const retry = runOpenclawProcessAttempt({ ...options, timeoutMs: remainingMs });
+  return {
+    ...retry,
+    stderr: [
+      "ClawSweeper retried OpenClaw once after an isolated runtime cleanup ownership failure.",
+      retry.stderr,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
+function isRetryableOpenclawCleanupFailure(result: CodexProcessResult): boolean {
+  return (
+    result.status === 1 &&
+    Boolean(result.error && OPENCLAW_UNCERTAIN_CLEANUP_PATTERN.test(result.error.message)) &&
+    result.stdout.trim() === ""
+  );
+}
+
+function runOpenclawProcessAttempt(options: OpenClawProcessOptions): CodexProcessResult {
   const stateDir = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-process-"));
   const configPath = join(stateDir, "openclaw.json");
   const promptPath = join(stateDir, "prompt.md");
