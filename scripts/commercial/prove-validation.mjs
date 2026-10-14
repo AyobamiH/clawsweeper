@@ -69,7 +69,12 @@ const snapshot = {
     { path: "test.mjs", content: fixtureTest, mode: "100644" },
   ],
 };
-async function fixture(directory, greeting) {
+async function fixture(directory, positive) {
+  assert.equal(typeof positive, "boolean");
+  // Static source fixtures avoid constructing executable text from a value.
+  const source = positive
+    ? "export const greet = () => 'Hello commercial fulfilment.';\n"
+    : "export const greet = () => 'wrong';\n";
   await mkdir(directory, { recursive: true });
   for (const [name, value] of Object.entries({
     "contract.json": contract,
@@ -79,7 +84,7 @@ async function fixture(directory, greeting) {
       changes: [
         {
           path: "src/greet.mjs",
-          content: `export const greet = () => ${JSON.stringify(greeting)};\n`,
+          content: source,
           mode: "100644",
         },
       ],
@@ -88,12 +93,12 @@ async function fixture(directory, greeting) {
     await writeFile(path.join(directory, name), JSON.stringify(value));
 }
 process.env.TW_PROOF_SECRET = "SYNTHETIC_NOT_A_SECRET";
-await fixture(root, "Hello commercial fulfilment.");
+await fixture(root, true);
 await validate(root);
 const result = JSON.parse(await readFile(path.join(root, "validated-candidate.json"), "utf8"));
 assert.equal(result.validation.passed, true);
 const negative = path.join(root, "negative");
-await fixture(negative, "wrong");
+await fixture(negative, false);
 await assert.rejects(() => validate(negative), /credential-free acceptance tests failed/);
 const evidence = {
   schema: "tw.commercial-docker-proof.v1",
