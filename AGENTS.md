@@ -119,6 +119,34 @@ not split reports into issue/PR subtrees.
   in the current conversation; agents must not merge or enable/execute
   automerge without it.
 
+## Commercial release: recorded implementation examination
+
+For this AyobamiH commercial-fulfilment proposal, the project owner has requested
+an examination recorded in the current development session, not a mandatory
+Codex or external-provider review. This section supersedes provider-specific,
+separate-session and named-reviewer release prerequisites above for this proposal
+only, including its supporting fixture, documentation and review-tool changes.
+The prior heading attributing the additional independent-provider rule to the
+owner was inaccurate and has been removed.
+
+Record the reviewer and relationship to the implementation truthfully. Examination
+by the implementing assistant is an implementation review, not an independent
+auditor's verdict. Record exact source baselines, file contents/modes or hashes,
+examined areas, concrete findings and dispositions, tests and limits. Unresolved
+material defects remain blockers. Review the committed delta against that record
+before landing; changed code requires an updated examination and affected tests.
+A provider refusal is not a code-review finding and an unavailable optional
+review service is not by itself a release blocker.
+
+This change does not weaken customer-order verification: distinct generation
+and semantic-review invocations, approved model routing, credential confinement,
+no automatic effect replay, payment/repository authority, deterministic tests,
+and exact-head delivery checks remain required. Do not retry or disguise any
+source-transfer operation refused by platform safety controls. No independent
+provider verdict may be fabricated. Paid OpenAI fallback remains prohibited.
+Required CI, existing merge approval, and real provider/production activation
+acceptance remain separate requirements. Other repository work is unchanged.
+
 ## Commands
 
 ```bash

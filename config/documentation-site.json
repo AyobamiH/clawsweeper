@@ -76,6 +76,11 @@
       "prefix": "proof/",
       "lifecycle": "historical proof",
       "banner": "This immutable proof records behavior at its stated revision and does not override current documentation."
+    },
+    {
+      "path": "pr-behavior-proofs/commercial-fulfilment.md",
+      "lifecycle": "proposed",
+      "banner": "This proposed commercial execution proof records its tested revision and limits; it does not authorise a production release."
     }
   ]
 }
