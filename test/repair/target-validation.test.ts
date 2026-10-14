@@ -3651,7 +3651,11 @@ test(
     git(cwd, "add", ".");
     git(cwd, "commit", "-m", "initial");
     attachOrigin(cwd);
-    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-bun-setup-containment-"));
+    // Use a real bin directory on PATH: the containment policy deliberately
+    // does not expose arbitrary host temporary directories to target code.
+    const binRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-bun-setup-containment-"));
+    const binDir = path.join(binRoot, "bin");
+    fs.mkdirSync(binDir);
     writeNodeCommandShim(
       binDir,
       "bun",
@@ -3687,6 +3691,7 @@ if (process.argv[2] === "--version") {
       assert.equal(fs.existsSync(marker), false);
     } finally {
       restoreEnv("CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT", previousForceContainment);
+      fs.rmSync(binRoot, { recursive: true, force: true });
     }
   },
 );
@@ -3705,7 +3710,11 @@ test(
     git(cwd, "add", ".");
     git(cwd, "commit", "-m", "initial");
     attachOrigin(cwd);
-    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-npm-setup-containment-"));
+    // Use a real bin directory on PATH: the containment policy deliberately
+    // does not expose arbitrary host temporary directories to target code.
+    const binRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-npm-setup-containment-"));
+    const binDir = path.join(binRoot, "bin");
+    fs.mkdirSync(binDir);
     writeNodeCommandShim(
       binDir,
       "npm",
@@ -3743,6 +3752,7 @@ child.unref();
       assert.equal(fs.existsSync(marker), false);
     } finally {
       restoreEnv("CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT", previousForceContainment);
+      fs.rmSync(binRoot, { recursive: true, force: true });
     }
   },
 );
@@ -8755,7 +8765,11 @@ test(
     git(cwd, "add", ".");
     git(cwd, "commit", "-m", "initial");
     attachOrigin(cwd);
-    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-detached-pnpm-"));
+    // Use a real bin directory on PATH: the containment policy deliberately
+    // does not expose arbitrary host temporary directories to target code.
+    const binRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-detached-pnpm-"));
+    const binDir = path.join(binRoot, "bin");
+    fs.mkdirSync(binDir);
     const pnpmPath = path.join(binDir, "pnpm.js");
     fs.writeFileSync(
       pnpmPath,
@@ -8775,17 +8789,19 @@ child.unref();
     try {
       assert.throws(
         () =>
-          withMockCommand("pnpm", pnpmPath, () =>
-            runAllowedValidationCommands(
-              ["pnpm verify"],
-              cwd,
-              validationOptions("steipete/example", {
-                toolchain: {
-                  packageManager: "pnpm",
-                  baseValidationCommands: [],
-                  changedGate: null,
-                },
-              }),
+          withPathOnlyPrefix(binDir, () =>
+            withMockCommand("pnpm", pnpmPath, () =>
+              runAllowedValidationCommands(
+                ["pnpm verify"],
+                cwd,
+                validationOptions("steipete/example", {
+                  toolchain: {
+                    packageManager: "pnpm",
+                    baseValidationCommands: [],
+                    changedGate: null,
+                  },
+                }),
+              ),
             ),
           ),
         /background process/,
@@ -8794,6 +8810,7 @@ child.unref();
       assert.equal(fs.existsSync(marker), false);
     } finally {
       restoreEnv("CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT", previousForceContainment);
+      fs.rmSync(binRoot, { recursive: true, force: true });
       fs.rmSync(marker, { force: true });
     }
   },

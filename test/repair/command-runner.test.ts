@@ -24,11 +24,16 @@ const WRITE_MARKER_AFTER_DELAY_SCRIPT = [
 ].join(" ");
 
 const SPAWN_DETACHED_MARKER_SCRIPT = [
+  'const assert = require("node:assert/strict");',
+  'const { writeFileSync } = require("node:fs");',
   'const { spawn } = require("node:child_process");',
-  `const child = spawn(process.execPath, ["-e", ${JSON.stringify(WRITE_MARKER_AFTER_DELAY_SCRIPT)}, process.argv[1], "1000"], { detached: true, stdio: "ignore" });`,
+  // Never attempt this synthetic attack outside the delegated PID namespace.
+  'assert.equal(process.ppid, 1, "fixture requires namespace init as parent");',
+  `const child = spawn(process.execPath, ["-e", ${JSON.stringify(WRITE_MARKER_AFTER_DELAY_SCRIPT)}, process.argv[1], "2000"], { detached: true, stdio: "ignore" });`,
   "child.unref();",
   'process.kill(process.ppid, "SIGKILL");',
-  "setInterval(() => {}, 1000);",
+  "process.kill(process.ppid, 0);",
+  'writeFileSync(process.argv[2], "namespace-init-survived");',
 ].join(" ");
 
 test("runCommand handles validation output larger than Node's sync spawn default", () => {
@@ -211,21 +216,27 @@ test(
     }
     const root = mkdtempSync(join(tmpdir(), "clawsweeper-supervisor-kill-"));
     const marker = join(root, "escaped");
+    const survived = join(root, "supervisor-survived");
     try {
       assert.throws(
         () =>
-          runContainedCommand(process.execPath, ["-e", SPAWN_DETACHED_MARKER_SCRIPT, marker], {
-            cwd: root,
-            env: {
-              ...process.env,
-              CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
+          runContainedCommand(
+            process.execPath,
+            ["-e", SPAWN_DETACHED_MARKER_SCRIPT, marker, survived],
+            {
+              cwd: root,
+              env: {
+                ...process.env,
+                CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
+              },
+              timeoutMs: 5_000,
+              writableRoots: [root],
             },
-            timeoutMs: 250,
-            writableRoots: [root],
-          }),
-        /command timed out after 250ms/,
+          ),
+        /validation command left [1-9]\d* background process/,
       );
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_250);
+      assert.equal(readFileSync(survived, "utf8"), "namespace-init-survived");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_250);
       assert.equal(existsSync(marker), false);
     } finally {
       rmSync(root, { recursive: true, force: true });

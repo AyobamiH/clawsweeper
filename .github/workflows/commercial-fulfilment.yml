@@ -1,0 +1,310 @@
+name: Commercial fulfilment
+run-name: commercial-${{ inputs.operation_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      order_id:
+        description: Immutable authorised merchant order UUID
+        required: true
+        type: string
+      operation_id:
+        description: Idempotent merchant execution operation UUID
+        required: true
+        type: string
+      api_origin:
+        description: Authorised merchant broker
+        required: true
+        type: choice
+        options:
+          - https://tailwaggingwebdesign.com
+
+permissions:
+  contents: read
+
+# Share the real two-container capacity boundary with existing repair jobs.
+# Cancelling admission never implies an old runner has stopped.
+concurrency:
+  group: cloudflare-repair-compute
+  cancel-in-progress: false
+
+env:
+  OPENAI_API_KEY: ""
+  CODEX_API_KEY: ""
+  PROXY_API_KEY: ""
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  TW_API_ORIGIN: ${{ inputs.api_origin }}
+  TW_ORDER_ID: ${{ inputs.order_id }}
+  TW_OPERATION_ID: ${{ inputs.operation_id }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - name: Claim the exact authorised run and obtain a bounded snapshot
+        run: node scripts/commercial/broker.mjs prepare "$RUNNER_TEMP/commercial-input"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: commercial-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input/*.json
+          retention-days: 1
+          if-no-files-found: error
+
+  provision:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      plan: ${{ steps.runners.outputs.plan }}
+      execute: ${{ steps.runners.outputs.execute }}
+      attempt: ${{ steps.runners.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - name: Build the existing trusted subscription allowance client
+        run: |
+          corepack pnpm install --frozen-lockfile --ignore-scripts
+          corepack pnpm run build
+      - name: Prove compiled admission startup before provisioning compute
+        run: node scripts/commercial/prove-bootstrap.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: commercial-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Create scoped runner lifecycle token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        id: runners
+        with:
+          operation: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+  generate:
+    needs: [prepare, provision]
+    runs-on: ${{ needs.provision.outputs.execute }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Refuse stale provisioned compute
+        env:
+          PROVISIONED_ATTEMPT: ${{ needs.provision.outputs.attempt }}
+        run: test "$PROVISIONED_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - name: Select an approved provider before inference
+        id: route
+        env:
+          CLAWSWEEPER_INFERENCE_POLICY: auto
+          CLAWSWEEPER_QUOTA_ENABLED: "1"
+          CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+          CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
+        run: node scripts/commercial/inference.mjs "$RUNNER_TEMP/commercial-input" generate
+      - uses: ./.github/actions/setup-codex
+        if: ${{ steps.route.outputs.provider == 'chatgpt-codex' }}
+        with:
+          auth-mode: chatgpt
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+      - name: Generate bounded changes without target publication authority
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+        run: node scripts/commercial/generate.mjs "$RUNNER_TEMP/commercial-input"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: commercial-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input/candidate.json
+          retention-days: 1
+          if-no-files-found: error
+
+  validate:
+    needs: [prepare, generate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - name: Validate in a separate container without credentials or test network access
+        run: node scripts/commercial/validate.mjs "$RUNNER_TEMP/commercial-input"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: commercial-validated-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input/validated-candidate.json
+          retention-days: 1
+          if-no-files-found: error
+
+  semantic-review:
+    needs: [prepare, provision, validate]
+    runs-on: ${{ needs.provision.outputs.plan }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Refuse stale provisioned compute
+        env:
+          PROVISIONED_ATTEMPT: ${{ needs.provision.outputs.attempt }}
+        run: test "$PROVISIONED_ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-validated-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - name: Select an approved provider before inference
+        id: route
+        env:
+          CLAWSWEEPER_INFERENCE_POLICY: auto
+          CLAWSWEEPER_QUOTA_ENABLED: "1"
+          CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
+          CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+          CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
+        run: node scripts/commercial/inference.mjs "$RUNNER_TEMP/commercial-input" review
+      - uses: ./.github/actions/setup-codex
+        if: ${{ steps.route.outputs.provider == 'chatgpt-codex' }}
+        with:
+          auth-mode: chatgpt
+        env:
+          CLAWSWEEPER_CODEX_AUTH_JSON: ${{ secrets.CLAWSWEEPER_CODEX_AUTH_JSON }}
+      - name: Independently inspect the exact candidate against every acceptance criterion
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+        run: node scripts/commercial/review.mjs "$RUNNER_TEMP/commercial-input"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: commercial-reviewed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input/reviewed-candidate.json
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, semantic-review]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: commercial-reviewed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/commercial-input
+      - name: Submit candidate to the trusted merchant publication broker
+        run: node scripts/commercial/broker.mjs publish "$RUNNER_TEMP/commercial-input"
+
+  cleanup:
+    needs: [prepare, provision, generate, validate, semantic-review, publish]
+    if: ${{ always() && needs.provision.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - name: Create scoped runner lifecycle token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+      - uses: ./.github/actions/cloudflare-runners
+        with:
+          operation: stop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+  report-failure:
+    needs: [prepare, provision, generate, validate, semantic-review, publish, cleanup]
+    if: ${{ always() && (needs.publish.result != 'success' || needs.cleanup.result != 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.18.1"
+      - name: Record failure without claiming the runner has stopped
+        env:
+          TW_FAILURE_REASON: ${{ needs.cleanup.result == 'failure' && 'cleanup_unconfirmed' || needs.prepare.result != 'success' && 'prepare_failed' || needs.generate.result != 'success' && 'generation_failed' || needs.validate.result != 'success' && 'validation_failed' || 'publication_unconfirmed' }}
+        run: node scripts/commercial/broker.mjs failed
