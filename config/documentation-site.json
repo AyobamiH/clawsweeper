@@ -81,6 +81,11 @@
       "path": "pr-behavior-proofs/commercial-fulfilment.md",
       "lifecycle": "proposed",
       "banner": "This proposed commercial execution proof records its tested revision and limits; it does not authorise a production release."
+    },
+    {
+      "path": "pr-behavior-proofs/commercial-node-setup.md",
+      "lifecycle": "historical proof",
+      "banner": "This proof records the commercial bootstrap behavior at its stated revision and does not establish completed customer delivery."
     }
   ]
 }
