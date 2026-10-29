@@ -201,7 +201,11 @@ for (const [name, options, message] of [
   ["milestone", { milestone: { title: "Next" } }, /milestoned issue/],
   ["reactions", { reactions: 20 }, /20 or more reactions/],
   ["missing reaction count", { omitReactions: true }, /reaction count is unavailable/],
-  ["live age", { createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }, /older than 120 days/],
+  [
+    "live age",
+    { createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() },
+    /older than 120 days/,
+  ],
   ["security label", { labels: ["topic:security-regression"] }, /protected label/],
   ["protected label", { labels: ["clawsweeper:human-review"] }, /protected label/],
   ["linked PR", { labels: ["clawsweeper:linked-pr-open"] }, /linked-pr-open/],
