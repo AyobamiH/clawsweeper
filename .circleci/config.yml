@@ -40,7 +40,11 @@ jobs:
       - run:
           name: Full repository validation
           no_output_timeout: 15m
-          command: corepack pnpm run check
+          command: |
+            set -euo pipefail
+            command -v jq >/dev/null || { echo "jq missing from CircleCI image"; exit 1; }
+            jq --version
+            corepack pnpm run check
       - run:
           name: Sparse repair checkout acceptance
           command: corepack pnpm run test:workflow-sparse-checkout
