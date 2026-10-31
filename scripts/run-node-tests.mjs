@@ -22,6 +22,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const MAX_TEST_CONCURRENCY = 16;
+const CI_TEST_CONCURRENCY_CAP = 2;
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM"];
 const TARGET_PATTERNS = Object.freeze({
   unit: ["test/*.test.ts"],
@@ -66,7 +67,10 @@ export function calculateTestConcurrency(parallelism = availableParallelism()) {
   // Measurements on this suite show that higher fan-out increases Git fixture,
   // subprocess, and filesystem contention even on large hosts. Sixteen retains
   // useful parallelism without making that host-specific result a fixed demand.
-  return Math.min(parallelism, MAX_TEST_CONCURRENCY);
+  return Math.min(
+    parallelism,
+    process.env.CI === "true" ? CI_TEST_CONCURRENCY_CAP : MAX_TEST_CONCURRENCY,
+  );
 }
 
 export function parseArguments(argv) {

@@ -24,9 +24,9 @@ function createFixture(files: string[]) {
 
 test("test runner caps adaptive concurrency at sixteen", () => {
   assert.equal(calculateTestConcurrency(1), 1);
-  assert.equal(calculateTestConcurrency(4), 4);
-  assert.equal(calculateTestConcurrency(16), 16);
-  assert.equal(calculateTestConcurrency(32), 16);
+  assert.equal(calculateTestConcurrency(4), process.env.CI === "true" ? 2 : 4);
+  assert.equal(calculateTestConcurrency(16), process.env.CI === "true" ? 2 : 16);
+  assert.equal(calculateTestConcurrency(32), process.env.CI === "true" ? 2 : 16);
 });
 
 test("test runner expands named targets with sorted de-duplicated files", () => {
