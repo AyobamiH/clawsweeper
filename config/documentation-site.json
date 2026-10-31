@@ -86,6 +86,11 @@
       "path": "pr-behavior-proofs/commercial-node-setup.md",
       "lifecycle": "historical proof",
       "banner": "This proof records the commercial bootstrap behavior at its stated revision and does not establish completed customer delivery."
+    },
+    {
+      "path": "CI-EXECUTION-POLICY.md",
+      "lifecycle": "proposed",
+      "banner": "CircleCI fallback is not active until provider, free-budget, exact-SHA and recovery acceptance are verified."
     }
   ]
 }

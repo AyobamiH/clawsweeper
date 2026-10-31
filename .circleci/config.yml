@@ -1,0 +1,103 @@
+version: 2.1
+
+# On-demand only. A trusted local controller dispatches fallback_ci=true
+# after confirming infrastructure unavailability and an exact commit SHA.
+parameters:
+  fallback_ci:
+    type: boolean
+    default: false
+  expected_sha:
+    type: string
+    default: ""
+  macos_ci:
+    type: boolean
+    default: false
+
+jobs:
+  full-linux-node24:
+    docker:
+      - image: cimg/node:24.13
+    resource_class: medium
+    working_directory: ~/project
+    environment:
+      CI: "true"
+    steps:
+      - checkout
+      - run:
+          name: Enforce exact commit and explicit fallback request
+          command: |
+            set -euo pipefail
+            test -n '<< pipeline.parameters.expected_sha >>'
+            test "$(git rev-parse HEAD)" = '<< pipeline.parameters.expected_sha >>'
+            test "$(uname -s)" = Linux
+            node -e 'if (process.versions.node.split(".")[0] !== "24") process.exit(1)'
+      - run:
+          name: Install pinned pnpm and dependencies
+          command: |
+            set -euo pipefail
+            corepack enable
+            corepack pnpm install --frozen-lockfile
+      - run:
+          name: Full repository validation
+          no_output_timeout: 15m
+          command: |
+            set -euo pipefail
+            command -v jq >/dev/null || { echo "jq missing from CircleCI image"; exit 1; }
+            jq --version
+            corepack pnpm run check
+      - run:
+          name: Sparse repair checkout acceptance
+          command: corepack pnpm run test:workflow-sparse-checkout
+      - run:
+          name: Verify workflow syntax
+          command: |
+            set -euo pipefail
+            # CircleCI validates this file at pipeline creation. GitHub
+            # actionlint remains on the self-hosted primary controller.
+            test -s .github/workflows/ci.yml
+
+  genuine-macos-node24:
+    macos:
+      xcode: "26.4.1"
+    resource_class: m4pro.medium
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Verify genuine macOS and exact commit
+          command: |
+            set -euo pipefail
+            test -n '<< pipeline.parameters.expected_sha >>'
+            test "$(git rev-parse HEAD)" = '<< pipeline.parameters.expected_sha >>'
+            test "$(uname -s)" = Darwin
+            test "$(uname -m)" = arm64
+      - run:
+          name: Install checksum-verified Node 24
+          command: |
+            set -euo pipefail
+            NODE_VERSION=v24.22.2
+            FILE="node-${NODE_VERSION}-darwin-arm64.tar.gz"
+            curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o /tmp/node-SHASUMS256.txt
+            curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/${FILE}" -o "/tmp/${FILE}"
+            grep "  ${FILE}$" /tmp/node-SHASUMS256.txt | (cd /tmp && shasum -a 256 -c -)
+            mkdir -p "$HOME/.local/node24"
+            tar -xzf "/tmp/${FILE}" -C "$HOME/.local/node24" --strip-components=1
+            echo 'export PATH="$HOME/.local/node24/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Native macOS ClawSweeper validation
+          command: |
+            set -euo pipefail
+            export PATH="$HOME/.local/node24/bin:$PATH"
+            corepack enable
+            corepack pnpm install --frozen-lockfile
+            corepack pnpm run check
+
+workflows:
+  circleci-free-fallback:
+    when: << pipeline.parameters.fallback_ci >>
+    jobs:
+      - full-linux-node24
+  genuine-macos-evidence:
+    when: << pipeline.parameters.macos_ci >>
+    jobs:
+      - genuine-macos-node24
