@@ -32,6 +32,7 @@ const TARGET_PATTERNS = Object.freeze({
   "timing-sensitive": [
     "test/failed-review-retry.test.ts",
     "test/github-webhook-read-model.test.ts",
+    "test/apply-runtime-budget.test.ts",
   ],
 });
 
