@@ -9,6 +9,17 @@ file. This repository does not currently maintain `AGENT.md`, `CLAUDE.md`, or
 Cursor aliases; agents that do not discover `AGENTS.md` automatically must be
 directed here rather than given a duplicated policy copy.
 
+## Development CI authority
+
+For all agents operating on the owner's home machines: read
+[`docs/CI-EXECUTION-POLICY.md`](docs/CI-EXECUTION-POLICY.md) before touching
+CI, runners, CircleCI, GitHub Actions, billing or authentication. Routine CI
+uses the existing local fleet; CircleCI Free is a guarded general Linux fallback
+and specialised macOS executor, **not** a product-runtime replacement. No
+CircleCI fallback is active until its acceptance gates pass. Never convert a
+failed test into provider failover, incur paid usage, or copy Codex subscription
+credentials to CircleCI.
+
 ## Structure
 
 - Main code: `src/clawsweeper.ts`.

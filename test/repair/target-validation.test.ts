@@ -2313,6 +2313,7 @@ test("pinned-base reproduction preserves the source SHA-256 object format", () =
   git(cwd, "init", "--object-format=sha256", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   fs.mkdirSync(path.join(cwd, "src"));
   fs.writeFileSync(
     path.join(cwd, "check.js"),
@@ -7196,6 +7197,7 @@ test("checkpoint plumbing rejects mismatched and dirty submodules", () => {
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -7247,6 +7249,7 @@ test("checkpoint plumbing rejects residual repositories at removed gitlinks", ()
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -7276,6 +7279,7 @@ test("checkpoint plumbing recursively rejects ignored nested submodule dirt", ()
   git(nestedRepo, "init", "-b", "main");
   git(nestedRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(nestedRepo, "config", "user.name", "ClawSweeper Test");
+  git(nestedRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(nestedRepo, "source.txt"), "nested\n");
   git(nestedRepo, "add", ".");
   git(nestedRepo, "commit", "-m", "nested");
@@ -7284,6 +7288,7 @@ test("checkpoint plumbing recursively rejects ignored nested submodule dirt", ()
   git(middleRepo, "init", "-b", "main");
   git(middleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(middleRepo, "config", "user.name", "ClawSweeper Test");
+  git(middleRepo, "config", "commit.gpgsign", "false");
   git(
     middleRepo,
     "-c",
@@ -7328,6 +7333,7 @@ test("checkpoint plumbing preserves clean uninitialized gitlinks", () => {
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -9173,6 +9179,7 @@ function gitBunPackageFixture(scripts) {
   git(cwd, "init", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   return cwd;
 }
 
@@ -9425,6 +9432,7 @@ function gitPackageFixture(scripts) {
   git(cwd, "init", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   return cwd;
 }
 
