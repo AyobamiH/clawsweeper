@@ -3,6 +3,7 @@
  * Read-only local CI feedback-loop audit. It reports actual recorded durations;
  * it never treats missing steps or GitHub unavailable checks as passed.
  */
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +33,12 @@ function aggregateDurations(values) {
   };
 }
 
-export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
+export function auditCiReceipts({
+  repo,
+  evidenceDir,
+  logDir = join(evidenceDir, "../../logs/fleet"),
+  limit = 150,
+}) {
   if (typeof repo !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     throw new Error("Provide a repository in owner/name format");
   }
@@ -55,6 +61,7 @@ export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
   const stepDurations = new Map();
   const slowestTests = new Map();
   const outcomes = {};
+  const logIntegrityCounts = { verified: 0, mismatch: 0, unverified: 0, missing: 0 };
   const attempts = entries.map(({ name, receipt }) => {
     const steps = (receipt.steps ?? []).map((step) => {
       const duration = secondsBetween(step.started_at, step.finished_at);
@@ -76,19 +83,38 @@ export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
       : receipt.started_at;
     const unmeasuredRemainder = secondsBetween(priorStepEnd, receipt.finished_at);
     const logName = name.replace(/\.json$/, ".log");
+    let logIntegrity = "missing";
     try {
-      const log = readFileSync(join(evidenceDir, "../../logs/fleet", logName), "utf8");
-      for (const line of log.split("\n")) {
-        const match = /^[\s]*[✔✖] (.{1,160}) \(([0-9.]+)ms\)$/.exec(line);
-        if (!match) continue;
-        const duration = Number(match[2]) / 1000;
-        if (!Number.isFinite(duration)) continue;
-        const prior = slowestTests.get(match[1]) ?? 0;
-        slowestTests.set(match[1], Math.max(prior, duration));
+      const rawLog = readFileSync(join(logDir, logName));
+      // A plausible file name alone does not establish that its test output
+      // belongs to this attempt. Only checksum-verified logs are analysed.
+      const metadataValid =
+        typeof receipt.log_sha256 === "string" &&
+        /^[a-f0-9]{64}$/.test(receipt.log_sha256) &&
+        Number.isSafeInteger(receipt.log_bytes) &&
+        receipt.log_bytes >= 0;
+      if (!metadataValid) {
+        logIntegrity = "unverified";
+      } else if (
+        rawLog.length !== receipt.log_bytes ||
+        createHash("sha256").update(rawLog).digest("hex") !== receipt.log_sha256
+      ) {
+        logIntegrity = "mismatch";
+      } else {
+        logIntegrity = "verified";
+        for (const line of rawLog.toString("utf8").split("\n")) {
+          const match = /^[\s]*[✔✖] (.{1,160}) \(([0-9.]+)ms\)$/.exec(line);
+          if (!match) continue;
+          const duration = Number(match[2]) / 1000;
+          if (!Number.isFinite(duration)) continue;
+          const prior = slowestTests.get(match[1]) ?? 0;
+          slowestTests.set(match[1], Math.max(prior, duration));
+        }
       }
     } catch {
-      // No raw log: only receipt stage timing can be substantiated.
+      // Missing or unreadable log: retain the receipt, never infer test success.
     }
+    logIntegrityCounts[logIntegrity] += 1;
     return {
       id: receipt.id ?? name,
       attempt: receipt.attempt ?? null,
@@ -100,6 +126,7 @@ export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
       steps,
       unmeasured_remainder_seconds: unmeasuredRemainder,
       receipt_file: name,
+      log_integrity: logIntegrity,
     };
   });
   // Interruption and unrun policy changes do not establish a meaningful
@@ -129,6 +156,7 @@ export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
     sampled_attempts: attempts.length,
     distinct_commits: new Set(attempts.map((a) => a.sha).filter(Boolean)).size,
     outcomes,
+    log_integrity: logIntegrityCounts,
     end_to_end: aggregateDurations(finished),
     stage_durations: steps,
     slowest_observed_tests: tests,
@@ -138,6 +166,7 @@ export function auditCiReceipts({ repo, evidenceDir, limit = 150 }) {
       "An unmeasured remainder is a lower-bound diagnostic, not an independently timed step.",
       "Provider billing, CircleCI equivalence and merge readiness are not inferred from local receipts.",
       "Historical runs may use different commits, runner versions and policies.",
+      "Slow-test rankings include only logs matching receipt byte count and SHA-256.",
     ],
     attempts,
   };

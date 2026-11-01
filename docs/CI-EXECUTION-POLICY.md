@@ -87,8 +87,9 @@ node scripts/ci-feedback-audit.mjs --repo AyobamiH/clawsweeper --limit 150
 
 This read-only audit uses existing local-fleet receipts and retained test logs.
 It separates measured checkout, setup, validation and sparse-smoke durations,
-highlights slowest observed tests, and marks unavailable queue and incomplete
-validation timing as **unmeasured**. Its output is diagnostic; it cannot turn a
+highlights slowest observed tests **only from receipt-SHA-256 and byte-count
+verified logs**, and reports missing, mismatched or unverified logs separately.
+Unavailable queue and incomplete validation timing remain **unmeasured**. Its output is diagnostic; it cannot turn a
 failed, interrupted, skipped or missing result into a passing check. Preserve
 original receipts, SHA, runner policy and the actual test failures. Never
 optimise by removing correctness scenarios or silently skipping required suites.
