@@ -37,6 +37,21 @@ jobs:
             set -euo pipefail
             corepack pnpm install --frozen-lockfile
       - run:
+          name: Install full-suite terminal and publication utilities
+          no_output_timeout: 10m
+          command: |
+            set -euo pipefail
+            # The official CircleCI Node image lacks tmux and rsync, both of
+            # which are exercised by the unchanged ClawSweeper test contract.
+            # Use its existing non-interactive sudo only for OS package setup;
+            # tests and package-manager execution remain unprivileged.
+            sudo -n apt-get update -qq -o Acquire::Retries=2 -o Acquire::http::Timeout=20
+            sudo -n apt-get install -y -qq --no-install-recommends tmux rsync
+            command -v tmux
+            command -v rsync
+            tmux -V
+            rsync --version | sed -n '1p'
+      - run:
           name: Full repository validation
           no_output_timeout: 15m
           command: |

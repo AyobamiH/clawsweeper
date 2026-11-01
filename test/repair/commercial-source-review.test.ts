@@ -96,6 +96,25 @@ async function repositoryFixture(t) {
   return { directory, root, git, base: git("rev-parse", "HEAD").trim() };
 }
 
+test("source capture trusts only the raw repository origin under global URL rewrites", async (t) => {
+  const f = await repositoryFixture(t);
+  await writeFile(path.join(f.root, "script.js"), "export const value = 2;\n");
+  const rewrittenGlobal = path.join(f.directory, "rewrite.gitconfig");
+  await writeFile(
+    rewrittenGlobal,
+    '[url "ssh://git@github.com/"]\n  insteadOf = https://github.com/\n',
+  );
+  const prior = process.env.GIT_CONFIG_GLOBAL;
+  try {
+    process.env.GIT_CONFIG_GLOBAL = rewrittenGlobal;
+    const bundle = await sourceBundle(f.root, f.base);
+    assert.equal(bundle.repository, "AyobamiH/clawsweeper");
+  } finally {
+    if (prior === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = prior;
+  }
+});
+
 test("source capture binds executable permissions as well as exact text", async (t) => {
   const f = await repositoryFixture(t);
   await writeFile(path.join(f.root, "script.js"), "export const value = 2;\n");

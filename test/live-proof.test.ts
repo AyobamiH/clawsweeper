@@ -57,6 +57,15 @@ import {
   sanitizeUntrustedOutput,
 } from "../dist/live-proof/verification.js";
 
+// Node 24.13 still emits this specific experimental SQLite warning on stderr.
+// Reject any other child stderr so real application diagnostics remain visible.
+function assertOnlyExpectedNodeSqliteWarning(stderr: string): void {
+  assert.match(
+    stderr,
+    /^(?:\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\r?\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\r?\n)?$/,
+  );
+}
+
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const liveProofPlanParser = createDecisionParser({
   isMaintainerAuthorAssociation: () => false,
@@ -3536,7 +3545,7 @@ test("queued publication classifies legacy verification as an invalid artifact b
     { encoding: "utf8" },
   );
   assert.equal(cli.status, 1);
-  assert.equal(cli.stderr, "");
+  assertOnlyExpectedNodeSqliteWarning(cli.stderr);
   assert.deepEqual(JSON.parse(cli.stdout), { status: "invalid_artifact" });
   assert.equal(cli.stdout.trim().split("\n").length, 1);
 });
@@ -3679,7 +3688,7 @@ test("queued publication keeps media probe execution failures retryable", async 
     },
   );
   assert.equal(cli.status, 1);
-  assert.equal(cli.stderr, "");
+  assertOnlyExpectedNodeSqliteWarning(cli.stderr);
   assert.deepEqual(JSON.parse(cli.stdout), { status: "retryable_failure" });
   assert.equal(cli.stdout.trim().split("\n").length, 1);
 });

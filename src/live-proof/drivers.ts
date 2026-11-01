@@ -1202,8 +1202,11 @@ function runTerminalCommand(
       `( /usr/bin/env -u TMUX -u TMUX_PANE -u TMUX_TMPDIR /bin/bash --noprofile --norc "$1"; status=$?; builtin printf "%s\\n" "$status" >"$2"; mv -f -- "$2" "$3" ) ${TERMINAL_LEASE_FD}<&${TERMINAL_LEASE_FD} <"$tty_path" >"$tty_path" 2>&1 &`,
       "while :; do sleep 3600; done",
     ].join("\n");
+    // tmux reports the pane's initial shell PID. Replace that shell with the
+    // bound command runner so its $$ remains the original pane PID, even when
+    // the CircleCI image starts respawned commands through an extra shell.
     const shellCommand =
-      `/bin/bash --noprofile --norc -c ${quote(commandRunner)} ` +
+      `exec /bin/bash --noprofile --norc -c ${quote(commandRunner)} ` +
       [
         "clawsweeper-terminal",
         files.command,
