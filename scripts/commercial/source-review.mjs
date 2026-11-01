@@ -106,7 +106,8 @@ export async function sourceBundle(root, base) {
   root = await realpath(root);
   assert(/^[a-f0-9]{40}$/.test(base), "exact source base required");
   assert(git(root, "cat-file", "-t", base).trim() === "commit", "source base is not a commit");
-  const origin = git(root, "remote", "get-url", "origin").trim();
+  // Resolve the repository-owned raw URL, not caller-controlled url.insteadOf rewrites.
+  const origin = git(root, "config", "--local", "--get", "remote.origin.url").trim();
   const match = origin.match(
     /^(?:https:\/\/github\.com\/|git@github\.com:)(AyobamiH\/(?:clawsweeper|wagging-web-wins))(?:\.git)?$/,
   );
