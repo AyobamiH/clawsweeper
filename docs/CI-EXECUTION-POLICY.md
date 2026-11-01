@@ -11,7 +11,7 @@ read this file and the root `AGENTS.md` before changing CI, release or runners.
    suite, durable SQLite queue, bounded Docker execution, retained receipts and
    GitHub `local-ci/linux-node24` status. Never bypass a failed check.
 2. **Fallback:** CircleCI Free Linux, **full equivalent suite**, only when the
-   primary has an _infrastructure_ hold (offline, capacity, unavailable Docker,
+   primary has an *infrastructure* hold (offline, capacity, unavailable Docker,
    or unavailable execution host), not when code tests fail. An authorised local
    controller must atomically own the job, preserve its original SHA and verify
    that no primary execution is active before dispatch.
@@ -76,42 +76,41 @@ fleet remains authoritative and CircleCI is only a prepared candidate.
 
 **Do not modify the product's operational architecture to satisfy CI cost goals.**
 
-## Feedback-loop optimisation (PR #83 pilot, 2026-11-01)
+## Verified feedback-loop timing audits (PR #84, 2026-11-01)
 
 Before changing providers, runner size, caching or test-selection rules, measure
-existing exact-commit evidence with:
+existing exact-commit local-fleet receipts using the read-only command:
 
 ```sh
 node scripts/ci-feedback-audit.mjs --repo AyobamiH/clawsweeper --limit 150
 ```
 
-This read-only audit uses existing local-fleet receipts and retained test logs.
-It separates measured checkout, setup, validation and sparse-smoke durations,
-highlights slowest observed tests **only from receipt-SHA-256 and byte-count
-verified logs**, and reports missing, mismatched or unverified logs separately.
-Unavailable queue and incomplete validation timing remain **unmeasured**. Its output is diagnostic; it cannot turn a
-failed, interrupted, skipped or missing result into a passing check. Preserve
-original receipts, SHA, runner policy and the actual test failures. Never
-optimise by removing correctness scenarios or silently skipping required suites.
+The audit reads the local fleet's receipts and associated test logs, reports
+measured checkout, setup, full-validation and sparse-smoke durations, and ranks
+slow tests **only when the log SHA-256 and byte count match its receipt**.
+Missing, mismatched and unverified logs are reported separately and must not
+contribute test timings. Queue time and incomplete validation are marked
+**unmeasured**. A failed, skipped, interrupted or missing run is never a pass.
+Retain exact commit hashes, runner policy, source receipts, and negative results.
 
-**Pilot baseline:** 17 local ClawSweeper receipt attempts across 9 commits
-available on 1 November 2026 (different SHAs/policies, not a controlled speed
-comparison). On completed validation steps the median was approximately
-914 seconds, compared with approximately 41 seconds dependency install,
-8 seconds checkout and 2 seconds workflow semantics. Two very expensive
-fixtures concern closeout provenance and the 4097-event shard-import boundary.
-The full-suite exact-head pass for PR #83 remains a separate acceptance gate.
+**Historical baseline (captured 1 November 2026):** 17 local ClawSweeper
+receipt attempts spanning nine commits/policies. Median completed
+full-validation stage was 914 seconds, versus 41 seconds dependency setup,
+8 seconds checkout and 2 seconds workflow syntax validation. The closeout
+provenance and 4,097-event shard-import fixtures were dominant. Comparing
+different commits and environments does not establish any speedup.
 
-The Node test-runner creates a child-only Git configuration that disables
-commit signing for **disposable test fixtures**. This prevents developer
-global signing preferences from generating false failures in local tests.
-The signing-callback security fixture temporarily removes that test-only
-preference so its deliberate signed-commit failure remains observable; the
-original test environment is restored afterwards. Never mask this negative
-control or weaken signing in production code.
-Normal pushes, owner commits, CI source authority and signing requirements
-are unchanged. Tests must still pass on the exact commit in the isolated fleet.
+PR #83 was subsequently merged after successful exact-SHA local-fleet checks.
+Its upstream fixes to test concurrency, timing-sensitive test isolation and
+**local signing isolation inside disposable Git fixtures** are authoritative.
+Do not restore a blanket `GIT_CONFIG_COUNT` signing override to the whole
+Node test process: that obscures tests deliberately exercising malicious or
+failing signing callbacks. Preserve the signing security negative controls.
+No production code, signing policy, billing setting or CI authority needs
+to change for these measurement improvements.
 
-A successful optimisation requires a recorded before/after on comparable
-commit, host, runner limits and suite with identical assertions, without
-adding paid infrastructure or weakening any existing receipt gate.
+Any performance improvement must be demonstrated with before/after
+measurements under comparable exact commits, hosts, resource limits and
+identical required assertions. Do not delete slow tests, hide provider
+failures, silently skip coverage, activate a paid runner or merge without
+the existing review and evidence contract.

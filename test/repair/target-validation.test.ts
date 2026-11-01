@@ -2313,6 +2313,7 @@ test("pinned-base reproduction preserves the source SHA-256 object format", () =
   git(cwd, "init", "--object-format=sha256", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   fs.mkdirSync(path.join(cwd, "src"));
   fs.writeFileSync(
     path.join(cwd, "check.js"),
@@ -6697,31 +6698,6 @@ test("validation rejects target-local publication helpers and redirects", () => 
   }
 });
 
-// The Node test runner suppresses the owner's global commit-signing preference
-// for ordinary disposable fixture commits. This *specific* security test must
-// restore the fixture's local commit.gpgSign=true to effective precedence while
-// proving that Git's signing callback runs for ordinary commits but never for
-// the production repair plumbing. Keep the override tightly scoped and restore it.
-function withEffectiveFixtureSigning<T>(run: () => T): T {
-  const originalCount = process.env.GIT_CONFIG_COUNT;
-  const lastSlot = Number(originalCount) - 1;
-  if (
-    originalCount === undefined ||
-    !Number.isSafeInteger(lastSlot) ||
-    lastSlot < 0 ||
-    process.env[`GIT_CONFIG_KEY_${lastSlot}`]?.toLowerCase() !== "commit.gpgsign" ||
-    process.env[`GIT_CONFIG_VALUE_${lastSlot}`] !== "false"
-  ) {
-    return run();
-  }
-  process.env.GIT_CONFIG_COUNT = String(lastSlot);
-  try {
-    return run();
-  } finally {
-    process.env.GIT_CONFIG_COUNT = originalCount;
-  }
-}
-
 test("repair commit plumbing bypasses target hooks and signing callbacks", () => {
   const cwd = gitPackageFixture({ check: 'node -e ""' });
   fs.writeFileSync(path.join(cwd, "source.txt"), "initial\n");
@@ -6760,31 +6736,25 @@ test("repair commit plumbing bypasses target hooks and signing callbacks", () =>
   git(cwd, "config", "gpg.program", signingProgram);
   fs.writeFileSync(path.join(cwd, "source.txt"), "validated\n");
   git(cwd, "add", "source.txt");
-  const originalTestConfigCount = process.env.GIT_CONFIG_COUNT;
-  const commit = withEffectiveFixtureSigning(() => {
-    // Prove that normal Git commits invoke the deliberately failing signing
-    // program before checking that the repair plumbing bypasses it.
-    assert.throws(() =>
-      execFileSync("git", ["commit", "-m", "unsafe signed commit"], {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    );
-    assert.equal(fs.existsSync(signingMarker), true);
-    fs.rmSync(signingMarker);
-    fs.rmSync(prepareMarker);
-
-    return commitTargetCheckoutWithPlumbing({
+  assert.throws(() =>
+    execFileSync("git", ["commit", "-m", "unsafe signed commit"], {
       cwd,
-      messages: ["validated repair", "Co-authored-by: Example <example@example.invalid>"],
-      identity: {
-        name: "clawsweeper",
-        email: "274271284+clawsweeper[bot]@users.noreply.github.com",
-      },
-    });
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+  assert.equal(fs.existsSync(signingMarker), true);
+  fs.rmSync(signingMarker);
+  fs.rmSync(prepareMarker);
+
+  const commit = commitTargetCheckoutWithPlumbing({
+    cwd,
+    messages: ["validated repair", "Co-authored-by: Example <example@example.invalid>"],
+    identity: {
+      name: "clawsweeper",
+      email: "274271284+clawsweeper[bot]@users.noreply.github.com",
+    },
   });
-  assert.equal(process.env.GIT_CONFIG_COUNT, originalTestConfigCount);
 
   assert.equal(git(cwd, "rev-parse", "HEAD"), commit);
   assert.equal(git(cwd, "status", "--porcelain"), "");
@@ -7227,6 +7197,7 @@ test("checkpoint plumbing rejects mismatched and dirty submodules", () => {
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -7278,6 +7249,7 @@ test("checkpoint plumbing rejects residual repositories at removed gitlinks", ()
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -7307,6 +7279,7 @@ test("checkpoint plumbing recursively rejects ignored nested submodule dirt", ()
   git(nestedRepo, "init", "-b", "main");
   git(nestedRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(nestedRepo, "config", "user.name", "ClawSweeper Test");
+  git(nestedRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(nestedRepo, "source.txt"), "nested\n");
   git(nestedRepo, "add", ".");
   git(nestedRepo, "commit", "-m", "nested");
@@ -7315,6 +7288,7 @@ test("checkpoint plumbing recursively rejects ignored nested submodule dirt", ()
   git(middleRepo, "init", "-b", "main");
   git(middleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(middleRepo, "config", "user.name", "ClawSweeper Test");
+  git(middleRepo, "config", "commit.gpgsign", "false");
   git(
     middleRepo,
     "-c",
@@ -7359,6 +7333,7 @@ test("checkpoint plumbing preserves clean uninitialized gitlinks", () => {
   git(submoduleRepo, "init", "-b", "main");
   git(submoduleRepo, "config", "user.email", "clawsweeper@example.invalid");
   git(submoduleRepo, "config", "user.name", "ClawSweeper Test");
+  git(submoduleRepo, "config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(submoduleRepo, "source.txt"), "initial\n");
   git(submoduleRepo, "add", ".");
   git(submoduleRepo, "commit", "-m", "initial");
@@ -9204,6 +9179,7 @@ function gitBunPackageFixture(scripts) {
   git(cwd, "init", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   return cwd;
 }
 
@@ -9456,6 +9432,7 @@ function gitPackageFixture(scripts) {
   git(cwd, "init", "-b", "main");
   git(cwd, "config", "user.email", "clawsweeper@example.invalid");
   git(cwd, "config", "user.name", "ClawSweeper Test");
+  git(cwd, "config", "commit.gpgsign", "false");
   return cwd;
 }
 

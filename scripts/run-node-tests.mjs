@@ -22,13 +22,18 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const MAX_TEST_CONCURRENCY = 16;
-const CI_TEST_CONCURRENCY_CAP = 2;
+const CI_TEST_CONCURRENCY_CAP = 4;
 const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM"];
 const TARGET_PATTERNS = Object.freeze({
   unit: ["test/*.test.ts"],
   repair: ["test/repair/*.test.ts", "dist/repair/*.test.js"],
   all: ["test/*.test.ts", "test/repair/*.test.ts", "dist/repair/*.test.js"],
   "fix-prompt-builder": ["dist/repair/fix-prompt-builder.test.js"],
+  "timing-sensitive": [
+    "test/failed-review-retry.test.ts",
+    "test/github-webhook-read-model.test.ts",
+    "test/apply-runtime-budget.test.ts",
+  ],
 });
 
 const HELP = `Usage:
@@ -127,24 +132,12 @@ export function resolveTestFiles(target, cwd = process.cwd()) {
   const patterns = TARGET_PATTERNS[target];
   if (!patterns) throw new Error(`Unknown test target: ${target}.`);
 
-  return [...new Set(patterns.flatMap((pattern) => globSync(pattern, { cwd })))].sort();
-}
-
-/** Prevent developer-machine signing settings from breaking disposable test Git repos.
- * This environment is passed only to the child running tests. Normal Git
- * commits and signing, including release commits, remain untouched.
- */
-export function isolatedTestGitEnvironment(env = process.env) {
-  const count = env.GIT_CONFIG_COUNT === undefined ? 0 : Number(env.GIT_CONFIG_COUNT);
-  if (!Number.isSafeInteger(count) || count < 0 || count > 999) {
-    throw new Error("Invalid existing GIT_CONFIG_COUNT for isolated test runner");
+  const files = [...new Set(patterns.flatMap((pattern) => globSync(pattern, { cwd })))].sort();
+  if (target === "all") {
+    const isolated = new Set(resolveTestFiles("timing-sensitive", cwd));
+    return files.filter((file) => !isolated.has(file));
   }
-  return {
-    ...env,
-    GIT_CONFIG_COUNT: String(count + 1),
-    [`GIT_CONFIG_KEY_${count}`]: "commit.gpgsign",
-    [`GIT_CONFIG_VALUE_${count}`]: "false",
-  };
+  return files;
 }
 
 export async function runNodeTests({
@@ -166,7 +159,7 @@ export async function runNodeTests({
   const child = spawnProcess(
     process.execPath,
     ["--test", `--test-concurrency=${concurrency}`, ...nodeArguments, ...files],
-    { cwd, stdio: "inherit", env: isolatedTestGitEnvironment() },
+    { cwd, stdio: "inherit" },
   );
 
   return new Promise((resolve, reject) => {
