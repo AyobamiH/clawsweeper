@@ -105,6 +105,10 @@ The full-suite exact-head pass for PR #83 remains a separate acceptance gate.
 The Node test-runner creates a child-only Git configuration that disables
 commit signing for **disposable test fixtures**. This prevents developer
 global signing preferences from generating false failures in local tests.
+The signing-callback security fixture temporarily removes that test-only
+preference so its deliberate signed-commit failure remains observable; the
+original test environment is restored afterwards. Never mask this negative
+control or weaken signing in production code.
 Normal pushes, owner commits, CI source authority and signing requirements
 are unchanged. Tests must still pass on the exact commit in the isolated fleet.
 
