@@ -19,6 +19,7 @@ test("moving main cannot change the base used by four inner review attempts", ()
   git("init", "-b", "main");
   git("config", "user.email", "clawsweeper@example.invalid");
   git("config", "user.name", "ClawSweeper Test");
+  git("config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(directory, "moving.txt"), "base\n");
   git("add", "moving.txt");
   git("commit", "-m", "base");

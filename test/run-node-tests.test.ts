@@ -24,9 +24,9 @@ function createFixture(files: string[]) {
 
 test("test runner caps adaptive concurrency at sixteen", () => {
   assert.equal(calculateTestConcurrency(1), 1);
-  assert.equal(calculateTestConcurrency(4), process.env.CI === "true" ? 2 : 4);
-  assert.equal(calculateTestConcurrency(16), process.env.CI === "true" ? 2 : 16);
-  assert.equal(calculateTestConcurrency(32), process.env.CI === "true" ? 2 : 16);
+  assert.equal(calculateTestConcurrency(4), 4);
+  assert.equal(calculateTestConcurrency(16), process.env.CI === "true" ? 4 : 16);
+  assert.equal(calculateTestConcurrency(32), process.env.CI === "true" ? 4 : 16);
 });
 
 test("test runner expands named targets with sorted de-duplicated files", () => {
@@ -39,6 +39,13 @@ test("test runner expands named targets with sorted de-duplicated files", () => 
   ]);
   try {
     assert.deepEqual(resolveTestFiles("unit", root), ["test/a.test.ts", "test/z.test.ts"]);
+    assert.deepEqual(resolveTestFiles("all", root), [
+      "dist/repair/fix-prompt-builder.test.js",
+      "dist/repair/z.test.js",
+      "test/a.test.ts",
+      "test/repair/b.test.ts",
+      "test/z.test.ts",
+    ]);
     assert.deepEqual(resolveTestFiles("repair", root), [
       "dist/repair/fix-prompt-builder.test.js",
       "dist/repair/z.test.js",

@@ -4115,45 +4115,32 @@ async function revalidateStaleWorkflowHealthRuns({
     }),
   );
 
-  const outcomes = await mapWithConcurrency(recheckBatch, 5, async (value) => {
-    const snapshotRun = objectValue(value);
-    const runId = Number(snapshotRun.id);
-    if (!Number.isSafeInteger(runId) || runId <= 0) {
-      return { runId, error: "snapshot run has no valid id" };
-    }
-    const verificationStartedAt = new Date().toISOString();
-    try {
-      const liveRun = objectValue(await github(`/repos/${repo}/actions/runs/${runId}`));
-      if (Number(liveRun.id) !== runId) {
-        return { runId, error: "live workflow response id mismatch" };
+  const outcomes = await mapWithConcurrency(
+    recheckBatch,
+    STALE_WORKFLOW_HEALTH_RECHECK_BATCH_SIZE,
+    async (value) => {
+      const snapshotRun = objectValue(value);
+      const runId = Number(snapshotRun.id);
+      if (!Number.isSafeInteger(runId) || runId <= 0) {
+        return { runId, error: "snapshot run has no valid id" };
       }
-      if (isActiveWorkflowRun(liveRun)) {
-        const object = githubWebhookReadModelWorkflowObject(repo, "workflow_run", liveRun);
-        if (object) {
-          await githubWebhookReadModelQueuePost(env, "repair", {
-            repository: repo,
-            repair_kind: "workflows",
-            objects: [object],
-          }).catch(() => null);
+      const verificationStartedAt = new Date().toISOString();
+      try {
+        const liveRun = objectValue(await github(`/repos/${repo}/actions/runs/${runId}`));
+        if (Number(liveRun.id) !== runId) {
+          return { runId, error: "live workflow response id mismatch" };
         }
-        return { runId, liveRun };
-      }
-      const repair = await githubWebhookReadModelQueuePost(env, "repair", {
-        repository: repo,
-        repair_kind: "workflows",
-        workflow_run_verification_started_at: verificationStartedAt,
-        evict_workflow_run_ids: [runId],
-        objects: [],
-      }).catch(() => null);
-      const verdict = String(liveRun.status || "completed");
-      reportGithubReadModelWorkflowRunEvicted({
-        snapshotRun,
-        verdict,
-        evicted: Number(repair?.evicted_workflow_runs || 0) > 0,
-      });
-      return { runId, evicted: true };
-    } catch (error) {
-      if (/GitHub 404 for /.test(String(error instanceof Error ? error.message : error))) {
+        if (isActiveWorkflowRun(liveRun)) {
+          const object = githubWebhookReadModelWorkflowObject(repo, "workflow_run", liveRun);
+          if (object) {
+            await githubWebhookReadModelQueuePost(env, "repair", {
+              repository: repo,
+              repair_kind: "workflows",
+              objects: [object],
+            }).catch(() => null);
+          }
+          return { runId, liveRun };
+        }
         const repair = await githubWebhookReadModelQueuePost(env, "repair", {
           repository: repo,
           repair_kind: "workflows",
@@ -4161,16 +4148,33 @@ async function revalidateStaleWorkflowHealthRuns({
           evict_workflow_run_ids: [runId],
           objects: [],
         }).catch(() => null);
+        const verdict = String(liveRun.status || "completed");
         reportGithubReadModelWorkflowRunEvicted({
           snapshotRun,
-          verdict: "absent",
+          verdict,
           evicted: Number(repair?.evicted_workflow_runs || 0) > 0,
         });
         return { runId, evicted: true };
+      } catch (error) {
+        if (/GitHub 404 for /.test(String(error instanceof Error ? error.message : error))) {
+          const repair = await githubWebhookReadModelQueuePost(env, "repair", {
+            repository: repo,
+            repair_kind: "workflows",
+            workflow_run_verification_started_at: verificationStartedAt,
+            evict_workflow_run_ids: [runId],
+            objects: [],
+          }).catch(() => null);
+          reportGithubReadModelWorkflowRunEvicted({
+            snapshotRun,
+            verdict: "absent",
+            evicted: Number(repair?.evicted_workflow_runs || 0) > 0,
+          });
+          return { runId, evicted: true };
+        }
+        return { runId, error: error instanceof Error ? error.message : String(error) };
       }
-      return { runId, error: error instanceof Error ? error.message : String(error) };
-    }
-  });
+    },
+  );
   const byRunId = new Map(outcomes.map((outcome) => [outcome.runId, outcome]));
   return {
     runs: runs.flatMap((value) => {
