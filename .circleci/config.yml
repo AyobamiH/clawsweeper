@@ -35,7 +35,6 @@ jobs:
           name: Install pinned pnpm and dependencies
           command: |
             set -euo pipefail
-            corepack enable
             corepack pnpm install --frozen-lockfile
       - run:
           name: Full repository validation
