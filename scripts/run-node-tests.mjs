@@ -130,6 +130,23 @@ export function resolveTestFiles(target, cwd = process.cwd()) {
   return [...new Set(patterns.flatMap((pattern) => globSync(pattern, { cwd })))].sort();
 }
 
+/** Prevent developer-machine signing settings from breaking disposable test Git repos.
+ * This environment is passed only to the child running tests. Normal Git
+ * commits and signing, including release commits, remain untouched.
+ */
+export function isolatedTestGitEnvironment(env = process.env) {
+  const count = env.GIT_CONFIG_COUNT === undefined ? 0 : Number(env.GIT_CONFIG_COUNT);
+  if (!Number.isSafeInteger(count) || count < 0 || count > 999) {
+    throw new Error("Invalid existing GIT_CONFIG_COUNT for isolated test runner");
+  }
+  return {
+    ...env,
+    GIT_CONFIG_COUNT: String(count + 1),
+    [`GIT_CONFIG_KEY_${count}`]: "commit.gpgsign",
+    [`GIT_CONFIG_VALUE_${count}`]: "false",
+  };
+}
+
 export async function runNodeTests({
   target,
   concurrency = calculateTestConcurrency(),
@@ -149,7 +166,7 @@ export async function runNodeTests({
   const child = spawnProcess(
     process.execPath,
     ["--test", `--test-concurrency=${concurrency}`, ...nodeArguments, ...files],
-    { cwd, stdio: "inherit" },
+    { cwd, stdio: "inherit", env: isolatedTestGitEnvironment() },
   );
 
   return new Promise((resolve, reject) => {
