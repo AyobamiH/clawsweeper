@@ -15,10 +15,12 @@ For all agents operating on the owner's home machines: read
 [`docs/CI-EXECUTION-POLICY.md`](docs/CI-EXECUTION-POLICY.md) before touching
 CI, runners, CircleCI, GitHub Actions, billing or authentication. Routine CI
 uses the existing local fleet; CircleCI Free is a guarded general Linux fallback
-and specialised macOS executor, **not** a product-runtime replacement. No
-CircleCI fallback is active until its acceptance gates pass. Never convert a
-failed test into provider failover, incur paid usage, or copy Codex subscription
-credentials to CircleCI.
+and specialised macOS executor, **not** a product-runtime replacement. As of
+2 November 2026, Linux fallback is enabled on genuine infrastructure holds only:
+PR #86 and CircleCI pipeline #10 have exact-SHA success and independent GitHub
+status proof. A naturally occurring primary outage and the ClawSweeper macOS
+job remain unverified. Never convert a failed test into provider failover,
+incur paid usage, or copy Codex subscription credentials to CircleCI.
 
 ## Structure
 
