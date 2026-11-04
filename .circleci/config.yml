@@ -63,12 +63,21 @@ jobs:
           name: Sparse repair checkout acceptance
           command: corepack pnpm run test:workflow-sparse-checkout
       - run:
-          name: Verify workflow syntax
+          name: Verify GitHub Actions semantics with pinned actionlint
+          no_output_timeout: 5m
           command: |
             set -euo pipefail
-            # CircleCI validates this file at pipeline creation. GitHub
-            # actionlint remains on the self-hosted primary controller.
-            test -s .github/workflows/ci.yml
+            # Match the GitHub CI actionlint version, checksum and accepted
+            # diagnostics, without running GitHub Actions or using secrets.
+            ACTIONLINT_VERSION=1.7.12
+            ACTIONLINT_LINUX_AMD64_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+            actionlint_dir="$(mktemp -d)"
+            trap 'rm -rf "$actionlint_dir"' EXIT
+            actionlint_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            curl --fail --show-error --silent --location "$actionlint_url" --output "$actionlint_dir/actionlint.tar.gz"
+            printf '%s  %s\n' "$ACTIONLINT_LINUX_AMD64_SHA256" "$actionlint_dir/actionlint.tar.gz" | sha256sum --check -
+            tar -xzf "$actionlint_dir/actionlint.tar.gz" -C "$actionlint_dir" actionlint
+            "$actionlint_dir/actionlint"               -shellcheck=               -ignore 'unexpected key "queue" for "concurrency" section'               .github/workflows/*.yml
 
   genuine-macos-node24:
     macos:
@@ -104,7 +113,13 @@ jobs:
             export PATH="$HOME/.local/node24/bin:$PATH"
             corepack enable
             corepack pnpm install --frozen-lockfile
-            corepack pnpm run check
+            # Linux keeps the mandatory entire check suite. The native macOS
+            # acceptance covers genuine Darwin/arm64 builds and portable unit
+            # behaviour; Linux-only descriptor/tmux tests are not downgraded.
+            corepack pnpm run build:all
+            corepack pnpm run lint
+            corepack pnpm run check:docs
+            node --test --test-concurrency=2 test/close-reasons.test.ts test/context.test.ts test/decision-parser.test.ts test/github-json.test.ts test/clawsweeper-text.test.ts test/command.test.ts
 
 workflows:
   circleci-free-fallback:
