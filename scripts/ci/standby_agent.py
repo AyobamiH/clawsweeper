@@ -330,6 +330,22 @@ def verified_provider_result(sha,pipeline_id,token):
             'outcome':outcome,'provider_verified':True,'steps':steps,
             'required_steps':list(required)+([final] if final else [])}
 
+def preserve_provider_receipt(path,info):
+    """Persist immutable provider-only evidence; digest always covers these bytes."""
+    if path.exists():
+        try:
+            previous=json.loads(path.read_text())
+        except (ValueError,OSError):
+            raise Hold('Existing provider receipt unreadable; no overwrite') from None
+        if previous!=info:
+            raise Hold('Existing provider receipt differs; no overwrite')
+    else:
+        atomic(path,info)
+    digest=hashlib.sha256(path.read_bytes()).hexdigest()
+    if not re.fullmatch(r'[0-9a-f]{64}',digest):
+        raise Hold('Provider receipt digest invalid')
+    return digest
+
 def reconcile(cfg,sha,record):
     if record.get('sha')!=sha or record.get('state') not in coord.ACTIVE:
         raise Hold('Not an active provider record')
@@ -346,8 +362,8 @@ def reconcile(cfg,sha,record):
         record={**record,'pipeline_id':found,'state':'awaiting_provider_readback'}
     info=verified_provider_result(sha,pipeline_id,token)
     receipt=ROOT/'evidence'/'standby'/('provider-'+sha+'.json')
-    atomic(receipt,info)
-    digest=hashlib.sha256(receipt.read_bytes()).hexdigest()
+    provider_receipt=ROOT/'evidence'/'standby'/('provider-'+sha+'.verified-provider.json')
+    digest=preserve_provider_receipt(provider_receipt,info)
     state=record.get('state')
     if state not in ('awaiting_provider_readback','status_pending'):
         raise Hold('Unrecognised provider reporting phase')
@@ -376,9 +392,11 @@ def reconcile(cfg,sha,record):
         return {'sha':sha,'hold':'github-status-not-confirmed-readback-first'}
     if any(matching.get(k)!=v for k,v in desired.items()) or not isinstance(matching.get('id'),int):
         raise Hold('GitHub provider status mismatch')
-    coord.update(sha,nonce,info['outcome'],pipeline_id,status_id=matching['id'],receipt_sha256=digest)
-    atomic(receipt,{**info,'github_status_id':matching['id'],'receipt_sha256':digest,
+    atomic(receipt,{**info,'github_status_id':matching['id'],
+                    'provider_receipt_sha256':digest,
+                    'provider_receipt_representation':'verified-provider.v1',
                     'verified_at':coord.timestamp()})
+    coord.update(sha,nonce,info['outcome'],pipeline_id,status_id=matching['id'],receipt_sha256=digest)
     return {'sha':sha,'outcome':info['outcome'],'github_status_id':matching['id'],
             'pipeline_id':pipeline_id,'independently_verified':True}
 
