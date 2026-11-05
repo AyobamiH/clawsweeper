@@ -117,12 +117,20 @@ jobs:
           set -euo pipefail
           [[ "$REVIEW_BASE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$REVIEW_HEAD" =~ ^[a-f0-9]{40}$ ]]
-          test "$REVIEW_HEAD" = "$GITHUB_SHA"
-      - uses: actions/checkout@v7
+          test "$REVIEW_BASE" != "$REVIEW_HEAD"
+      - name: Checkout trusted review tooling at workflow revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Checkout pinned target source as review-only data
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.release_head }}
+          path: target
       - uses: ./.github/actions/setup-pnpm
         with:
           build-script: build:node
@@ -132,14 +140,14 @@ jobs:
         env:
           REVIEW_BASE: ${{ inputs.release_base }}
           REVIEW_HEAD: ${{ inputs.release_head }}
-        run: node scripts/review-release.mjs --preflight . "$REVIEW_BASE" "$REVIEW_HEAD"
+        run: node scripts/review-release.mjs --preflight target "$REVIEW_BASE" "$REVIEW_HEAD"
       - name: Review exact source without mutation
         env:
           REVIEW_BASE: ${{ inputs.release_base }}
           REVIEW_HEAD: ${{ inputs.release_head }}
         run: |
           set -euo pipefail
-          node scripts/review-release.mjs . "$REVIEW_BASE" "$REVIEW_HEAD" "$RUNNER_TEMP/clawsweeper-release-review.json"
+          node scripts/review-release.mjs target "$REVIEW_BASE" "$REVIEW_HEAD" "$RUNNER_TEMP/clawsweeper-release-review.json"
           node -e 'const r=require(process.argv[1]); if(!r.passed || r.head!==process.env.REVIEW_HEAD || r.base!==process.env.REVIEW_BASE) process.exit(1)' "$RUNNER_TEMP/clawsweeper-release-review.json"
       # The existing local owner-operated runner retains its output. No artifact
       # upload, PR merge, branch push or GitHub status fabrication is performed.

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 test("release review is exact-head, committed-only, fail-closed and routed through existing provider selector", () => {
@@ -20,20 +23,30 @@ test("release review is exact-head, committed-only, fail-closed and routed throu
 });
 
 test("release preflight rejects uncommitted source without invoking inference", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      "scripts/review-release.mjs",
-      "--preflight",
-      ".",
-      "03d32fb784758d2a3770aaa9721f1212ac061096",
-      "f3e2d205492b126c81aa729475ce67594a2dbc5e",
-    ],
-    { encoding: "utf8", timeout: 15000 },
-  );
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /tracked checkout is dirty/);
-  assert.doesNotMatch(result.stdout, /"ready":true/);
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-release-preflight-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  try {
+    git("init", "-q");
+    git("config", "user.name", "Test");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "commit.gpgsign", "false");
+    writeFileSync(join(root, "sample.md"), "original\n");
+    git("add", "sample.md");
+    git("commit", "-qm", "fixture");
+    const head = git("rev-parse", "HEAD");
+    writeFileSync(join(root, "sample.md"), "modified\n");
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/review-release.mjs", "--preflight", root, head, head],
+      { encoding: "utf8", timeout: 15000 },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /tracked checkout is dirty/);
+    assert.doesNotMatch(result.stdout, /"ready":true/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("release review uses existing owner runner and dedicated Workers AI secret, never merge authority", () => {
@@ -45,7 +58,9 @@ test("release review uses existing owner runner and dedicated Workers AI secret,
     /CLOUDFLARE_WORKERS_AI_TOKEN: \$\{\{ secrets\.CLOUDFLARE_WORKERS_AI_TOKEN \}\}/,
   );
   assert.match(workflow, /CLAWSWEEPER_INFERENCE_POLICY: auto/);
-  assert.match(workflow, /test "\$REVIEW_HEAD" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /ref: \$\{\{ inputs\.release_head \}\}/);
+  assert.match(workflow, /path: target/);
   assert.match(workflow, /node scripts\/review-release\.mjs --preflight/);
   assert.ok(
     workflow.lastIndexOf("Install existing trusted input scanner") <
