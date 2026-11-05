@@ -329,28 +329,31 @@ def reconcile(cfg,sha,record):
     atomic(receipt,info)
     digest=hashlib.sha256(receipt.read_bytes()).hexdigest()
     state=record.get('state')
-    if state=='awaiting_provider_readback':
-        coord.update(sha,nonce,'status_pending',pipeline_id)
-        should_post=True
-    elif state=='status_pending':should_post=False
-    else:raise Hold('Unrecognised provider reporting phase')
+    if state not in ('awaiting_provider_readback','status_pending'):
+        raise Hold('Unrecognised provider reporting phase')
     target='https://circleci.com/gh/AyobamiH/clawsweeper/'+str(info['number'])
     desired={'state':info['outcome'],'context':CONTEXT,
              'description':'CircleCI provider-verified '+info['outcome']+' on exact commit',
              'target_url':target}
-    results=statuses(sha)
-    matching=latest_context(results,CONTEXT)
-    if matching is None and should_post:
-        # A persistent shared intent precedes the GitHub write. An unknown
-        # response is NEVER blindly replayed on later cycles.
+    # Read back BEFORE every possible write, including crash recovery.
+    # Never replay the CircleCI pipeline POST. A GitHub commit status is
+    # append-only, so a bounded duplicate status may occur after an uncertain
+    # network response; exact SHA/context/payload are verified below.
+    matching=latest_context(statuses(sha),CONTEXT)
+    if matching is None:
+        try:
+            attempt_number=coord.reserve_status_post(sha,nonce,pipeline_id)
+        except RuntimeError as exc:
+            return {'sha':sha,'hold':'github-status-reconciliation-required',
+                    'reason':str(exc)[:180]}
         try:
             coord.gh('AyobamiH/clawsweeper/statuses/'+sha,'POST',desired)
         except Exception as exc:
-            return {'sha':sha,'hold':'github-status-post-uncertain-no-replay',
-                    'reason':type(exc).__name__}
+            return {'sha':sha,'hold':'github-status-post-uncertain-readback-first',
+                    'attempt':attempt_number,'reason':type(exc).__name__}
         matching=latest_context(statuses(sha),CONTEXT)
     if matching is None:
-        return {'sha':sha,'hold':'github-status-not-confirmed-no-replay'}
+        return {'sha':sha,'hold':'github-status-not-confirmed-readback-first'}
     if any(matching.get(k)!=v for k,v in desired.items()) or not isinstance(matching.get('id'),int):
         raise Hold('GitHub provider status mismatch')
     coord.update(sha,nonce,info['outcome'],pipeline_id,status_id=matching['id'],receipt_sha256=digest)

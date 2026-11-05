@@ -28,3 +28,7 @@ git diff --check
 ```
 
 Never use an already processed SHA to create a fallback acceptance run. Preserve historical provider receipts with their actual SHA. A stale budget may hold provider dispatch but must not suppress independent recovery diagnosis.
+
+## GitHub status crash recovery
+
+The verified CircleCI result is reconciled through a GitHub commit-status intent. Before any status POST, the shared CAS ledger records the attempt number and timestamp. On restart, the standby independently reads the exact-SHA status context before considering a write. If absent, a second and final attempt is permitted only after a 120-second cooldown and a new CAS reservation. Exhaustion requires manual reconciliation; no CircleCI pipeline POST is ever retried. GitHub commit statuses are append-only, so a delayed first POST can produce a duplicate *identical status*, not duplicate provider execution. Conflicting status payloads fail closed. Tests cover crashes, cooldown, owner mismatch, readback and exhausted attempts.

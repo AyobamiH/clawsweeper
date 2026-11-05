@@ -139,6 +139,42 @@ def update(sha,nonce,state_name,pipeline_id=None,status_id=None,receipt_sha256=N
     commit(head,state,'ci: CircleCI '+state_name+' '+sha[:12])
     return record
 
+def reserve_status_post(sha,nonce,pipeline_id,now=None):
+    """CAS-fence a bounded, readback-first GitHub commit-status attempt.
+
+    GitHub commit statuses are append-only; unlike CircleCI pipeline POST,
+    repeated identical statuses have no additional provider execution effect.
+    A crash before/after the POST is indistinguishable, so wait before a
+    bounded retry, and ALWAYS read back first. Never retry CircleCI dispatch.
+    """
+    now=datetime.datetime.now(datetime.timezone.utc) if now is None else now
+    head,state=read()
+    record=state['dispatches'].get(sha)
+    if not record or record.get('nonce')!=nonce or record.get('pipeline_id')!=pipeline_id:
+        raise RuntimeError('Status publication owner or pipeline mismatch')
+    if record.get('state') not in ('awaiting_provider_readback','status_pending'):
+        raise RuntimeError('Status publication state not eligible')
+    attempts=record.get('status_post_attempts',0)
+    if type(attempts)!=int or attempts<0 or attempts>2:
+        raise RuntimeError('Invalid status attempt count')
+    if attempts>=2:
+        raise RuntimeError('Status publication attempts exhausted; manual reconciliation required')
+    previous=record.get('status_post_reserved_at')
+    if previous:
+        age=(now-datetime.datetime.fromisoformat(previous.replace('Z','+00:00'))).total_seconds()
+        if age<120:
+            raise RuntimeError('Status publication pending readback or retry cooldown')
+    record['status_post_attempts']=attempts+1
+    record['status_post_reserved_at']=now.isoformat()
+    record['state']='status_pending'
+    record['updated_at']=timestamp()
+    commit(head,state,'ci: reserve GitHub status attempt '+str(attempts+1)+' '+sha[:12])
+    _,confirmed=read()
+    found=confirmed['dispatches'].get(sha,{})
+    if found.get('nonce')!=nonce or found.get('status_post_attempts')!=attempts+1:
+        raise RuntimeError('Status attempt reservation not confirmed')
+    return attempts+1
+
 def init():
     head=gh(REPO+'/git/ref/heads/'+BRANCH)['object']['sha']
     state={'schema_version':1,'target':TARGET,'branch':BRANCH,'dispatches':{},
