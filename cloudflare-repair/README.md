@@ -9,6 +9,25 @@ fallback. Planning and execution still use the separately provisioned Cloudflare
 roles. The selected inference policy retains the existing OpenClaw/Workers AI
 route and subscription route with their credential and allowance guards.
 
+## Repair artifact handoff
+
+When the existing `CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL` is configured, repair
+planning and execution use that Worker's authenticated R2 state-blob API. The
+workflow verifies write/read access before inference, then publishes bounded,
+content-addressed files and a manifest bound to repository, run, attempt,
+workflow revision, job path and phase. Execution verifies the producer's
+manifest digest and byte count plus every file before accepting the plan.
+Final execution results and transcripts use the same durable store. No Worker
+deployment, new credential, or exact-review lease is involved.
+
+`scripts/repair-artifacts.ts` records the manifest path, SHA-256 and size in a
+local JSON receipt and the job summary. Reads require the existing webhook
+secret; these are not public asset URLs. Transfers are limited to 24 MiB and
+512 regular files, and reject unsafe paths, links and foreign run identities.
+The existing GitHub artifact transport remains available when no Worker URL is
+configured. With the state store selected, GitHub Codex debug uploads are
+optional copies and cannot block a verified durable handoff.
+
 ## Lifecycle and authority
 
 `repair-cluster-worker.yml` deduplicates its command receipt before provisioning.
