@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import {
+import fs, {
   closeSync,
   existsSync,
   ftruncateSync,
@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -478,4 +479,57 @@ test("environment identity is explicit and missing workflow evidence fails close
   assert.deepEqual(repairArtifactBindingFromEnv(env, "plan"), bound);
   assert.throws(() => repairArtifactBindingFromEnv({ ...env, GITHUB_SHA: "" }, "plan"), /binding/);
   assert.throws(() => repairArtifactBindingFromEnv(env, "unknown"), /binding/);
+});
+
+test("local short writes are rejected before restored artifacts become visible", async (t) => {
+  const root = sandbox(t);
+  const source = files(root);
+  const store = blobStore();
+  const published = await publishRepairArtifacts({
+    binding: bound,
+    client: store.client,
+    root: source,
+  });
+  const payload = readFileSync(path.join(source, "cluster/result.json"));
+  const destination = path.join(root, "restored", "runs");
+  const originalWrite = fs.writeSync;
+  let shortened = false;
+  fs.writeSync = ((fd: number, value: string | NodeJS.ArrayBufferView, ...args: unknown[]) => {
+    if (
+      !shortened &&
+      ArrayBuffer.isView(value) &&
+      Buffer.from(value.buffer, value.byteOffset, value.byteLength).equals(payload)
+    ) {
+      shortened = true;
+      return originalWrite(fd, payload.subarray(0, payload.length - 1));
+    }
+    return Reflect.apply(originalWrite, fs, [fd, value, ...args]);
+  }) as typeof fs.writeSync;
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      restoreRepairArtifacts({
+        binding: bound,
+        client: store.client,
+        root: destination,
+        reference: published,
+      }).then((result) => {
+        t.diagnostic(
+          JSON.stringify({
+            wrongly_verified: result.verified,
+            expected_bytes: payload.length,
+            written_bytes: readFileSync(path.join(destination, "cluster/result.json")).length,
+          }),
+        );
+        return result;
+      }),
+      /written (size|digest) mismatch/,
+    );
+    assert.equal(shortened, true);
+    assert.equal(existsSync(destination), false);
+    assert.deepEqual(readdirSync(path.dirname(destination)), []);
+  } finally {
+    fs.writeSync = originalWrite;
+    syncBuiltinESMExports();
+  }
 });

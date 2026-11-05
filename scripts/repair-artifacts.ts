@@ -337,6 +337,19 @@ async function downloadVerified(
   });
   if (result.bytes !== bytes || result.digest !== hash)
     throw new Error("Repair artifact download identity mismatch");
+  const fd = openSync(
+    destination,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  try {
+    const written = fstatSync(fd);
+    if (!written.isFile() || written.size !== bytes)
+      throw new Error("Repair artifact written size mismatch");
+    if (digest(readFileSync(fd)) !== hash)
+      throw new Error("Repair artifact written digest mismatch");
+  } finally {
+    closeSync(fd);
+  }
 }
 
 async function publishVerified(
