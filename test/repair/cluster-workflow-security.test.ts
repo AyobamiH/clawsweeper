@@ -11,7 +11,10 @@ type Workflow = {
     string,
     {
       env?: Record<string, string>;
+      outputs?: Record<string, string>;
       steps?: Array<{
+        if?: string;
+        "continue-on-error"?: string | boolean;
         name?: string;
         run?: string;
         env?: Record<string, string>;
@@ -37,12 +40,79 @@ test("cluster worker passes workflow inputs through environment boundaries", () 
   }
   assert.match(source, /job_auth:[\s\S]*Materializer HMAC/);
   assert.equal(source.match(/run: pnpm run repair:restore-cluster-intake-job/g)?.length, 3);
-  assert.equal(source.match(/CLAWSWEEPER_WEBHOOK_SECRET: \$\{\{ secrets\./g)?.length, 4);
+  const webhookSecretSteps = Object.entries(workflow.jobs ?? {}).flatMap(([jobName, job]) =>
+    (job.steps ?? [])
+      .filter((step) => step.env?.CLAWSWEEPER_WEBHOOK_SECRET !== undefined)
+      .map((step) => {
+        assert.equal(
+          step.env?.CLAWSWEEPER_WEBHOOK_SECRET,
+          "${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}",
+        );
+        return `${jobName}/${step.name}`;
+      }),
+  );
+  assert.deepEqual(webhookSecretSteps, [
+    "receipt/Authenticate durable intake before credentials",
+    "cluster/Restore durable intake job",
+    "cluster/Verify durable repair artifact transport",
+    "cluster/Publish worker artifacts to state store",
+    "execute/Restore durable intake job",
+    "execute/Restore verified worker artifacts from state store",
+    "execute/Publish immutable repair requeue action ledger",
+    "execute/Publish execution artifacts to state store",
+  ]);
   assert.ok(
     source.indexOf("Authenticate durable intake before credentials") <
       source.indexOf("Create GitHub App token"),
   );
   assert.doesNotMatch(source, /restore-durable-intake-job\.sh/);
+});
+
+test("repair handoff preserves producer identity and fails closed before execution", () => {
+  const source = fs.readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8");
+  const workflow = parse(source) as Workflow;
+  const cluster = workflow.jobs?.cluster;
+  const execute = workflow.jobs?.execute;
+  assert.ok(cluster && execute);
+  const preflight = cluster.steps?.find(
+    (step) => step.name === "Verify durable repair artifact transport",
+  );
+  const publish = cluster.steps?.find(
+    (step) => step.name === "Publish worker artifacts to state store",
+  );
+  const restore = execute.steps?.find(
+    (step) => step.name === "Restore verified worker artifacts from state store",
+  );
+  assert.ok(preflight && publish && restore);
+  for (const step of [preflight, publish, restore]) {
+    assert.match(step.if ?? "", /REPAIR_ARTIFACT_TRANSPORT != 'github'/);
+    assert.equal(step["continue-on-error"], undefined);
+  }
+  for (const key of ["path", "digest", "bytes"]) {
+    assert.equal(
+      cluster.outputs?.[`artifact_manifest_${key}`],
+      "${{ steps.publish_worker.outputs.manifest_" + key + " }}",
+    );
+    assert.equal(
+      restore.env?.[`REPAIR_ARTIFACT_MANIFEST_${key.toUpperCase()}`],
+      "${{ needs.cluster.outputs.artifact_manifest_" + key + " }}",
+    );
+  }
+  assert.equal(
+    cluster.outputs?.artifact_state_commit,
+    "${{ steps.publish_worker.outputs.state_commit }}",
+  );
+  assert.equal(
+    restore.env?.REPAIR_ARTIFACT_STATE_COMMIT,
+    "${{ needs.cluster.outputs.artifact_state_commit }}",
+  );
+  const names = execute.steps?.map((step) => step.name) ?? [];
+  assert.ok(names.indexOf(restore.name) < names.indexOf("Execute credited fix artifact"));
+  assert.match(
+    execute.steps?.find((step) => step.name === "Download worker artifacts")?.if ?? "",
+    /REPAIR_ARTIFACT_TRANSPORT == 'github'/,
+  );
+  assert.match(source, /needs.cluster.result == 'success'/);
 });
 
 test("repair mutation authority is bounded per run and defaults off", () => {
