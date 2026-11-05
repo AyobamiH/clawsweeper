@@ -85,7 +85,7 @@ test("repair handoff preserves producer identity and fails closed before executi
   );
   assert.ok(preflight && publish && restore);
   for (const step of [preflight, publish, restore]) {
-    assert.match(step.if ?? "", /CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker'/);
+    assert.match(step.if ?? "", /REPAIR_ARTIFACT_TRANSPORT == 'worker'/);
     assert.equal(step["continue-on-error"], undefined);
   }
   for (const key of ["path", "digest", "bytes"]) {
@@ -102,7 +102,7 @@ test("repair handoff preserves producer identity and fails closed before executi
   assert.ok(names.indexOf(restore.name) < names.indexOf("Execute credited fix artifact"));
   assert.match(
     execute.steps?.find((step) => step.name === "Download worker artifacts")?.if ?? "",
-    /CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'github'/,
+    /REPAIR_ARTIFACT_TRANSPORT == 'github'/,
   );
   assert.match(source, /needs.cluster.result == 'success'/);
 });

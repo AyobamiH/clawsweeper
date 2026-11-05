@@ -136,7 +136,7 @@ env:
   CLUSTER_PLANNER_SANDBOX: ${{ inputs.planner_sandbox }}
   CLUSTER_REQUEUE_DEPTH: ${{ inputs.requeue_depth }}
   CLUSTER_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL != '' && 'worker' || 'github' }}
+  REPAIR_ARTIFACT_TRANSPORT: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL != '' && 'worker' || 'github' }}
 
 concurrency:
   group: cloudflare-repair-compute
@@ -366,7 +366,7 @@ jobs:
         run: scripts/restore-repair-job.sh "$JOB_PATH" "this worker"
 
       - name: Verify durable repair artifact transport
-        if: ${{ steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -531,7 +531,7 @@ jobs:
 
       - name: Publish worker artifacts to state store
         id: publish_worker
-        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -539,7 +539,7 @@ jobs:
 
       - name: Upload Codex debug logs
         # The verified state-store receipt is authoritative when selected.
-        continue-on-error: ${{ env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         if: ${{ always() && steps.check_job.outputs.job_exists == '1' }}
         uses: actions/upload-artifact@v7
         with:
@@ -549,7 +549,7 @@ jobs:
           retention-days: 7
 
       - name: Upload worker transfer artifacts
-        if: ${{ always() && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'github' && (inputs.mode == 'execute' || inputs.mode == 'autonomous') && !inputs.dry_run }}
+        if: ${{ always() && env.REPAIR_ARTIFACT_TRANSPORT == 'github' && (inputs.mode == 'execute' || inputs.mode == 'autonomous') && !inputs.dry_run }}
         uses: actions/upload-artifact@v7
         with:
           name: clawsweeper-repair-worker-${{ github.run_id }}-${{ github.run_attempt }}
@@ -557,7 +557,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload final worker artifacts
-        if: ${{ always() && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'github' && (!((inputs.mode == 'execute' || inputs.mode == 'autonomous') && !inputs.dry_run) || failure() || cancelled()) }}
+        if: ${{ always() && env.REPAIR_ARTIFACT_TRANSPORT == 'github' && (!((inputs.mode == 'execute' || inputs.mode == 'autonomous') && !inputs.dry_run) || failure() || cancelled()) }}
         uses: actions/upload-artifact@v7
         with:
           name: clawsweeper-repair-${{ github.run_id }}-${{ github.run_attempt }}
@@ -802,7 +802,7 @@ jobs:
         run: pnpm run repair:action-session -- register "$CLUSTER_JOB_PATH"
 
       - name: Restore verified worker artifacts from state store
-        if: ${{ steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -812,7 +812,7 @@ jobs:
         run: node scripts/repair-artifacts.ts restore --phase plan --root .clawsweeper-repair/runs
 
       - name: Download worker artifacts
-        if: ${{ steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'github' }}
+        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'github' }}
         uses: actions/download-artifact@v8
         with:
           name: clawsweeper-repair-worker-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1119,7 +1119,7 @@ jobs:
 
       - name: Upload Codex debug logs
         # The verified state-store receipt is authoritative when selected.
-        continue-on-error: ${{ env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         if: ${{ always() && steps.check_job.outputs.job_exists == '1' }}
         uses: actions/upload-artifact@v7
         with:
@@ -1129,14 +1129,14 @@ jobs:
           retention-days: 7
 
       - name: Publish execution artifacts to state store
-        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: node scripts/repair-artifacts.ts publish --phase execute --root .clawsweeper-repair/runs
 
       - name: Upload final worker artifacts
-        if: ${{ always() && env.CLAWSWEEPER_REPAIR_ARTIFACT_TRANSPORT == 'github' }}
+        if: ${{ always() && env.REPAIR_ARTIFACT_TRANSPORT == 'github' }}
         uses: actions/upload-artifact@v7
         with:
           name: clawsweeper-repair-${{ github.run_id }}-${{ github.run_attempt }}
