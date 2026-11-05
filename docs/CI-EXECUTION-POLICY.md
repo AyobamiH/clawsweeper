@@ -132,3 +132,42 @@ or spend outside Free credits to manufacture a green result.
   `local-ci/bootstrap/evidence/agentproof-circleci-macos-20261029.json`
 
 **Do not modify the product's operational architecture to satisfy CI cost goals.**
+
+## Verified feedback-loop timing audits (PR #84, 2026-11-01)
+
+Before changing providers, runner size, caching or test-selection rules, measure
+existing exact-commit local-fleet receipts using the read-only command:
+
+```sh
+node scripts/ci-feedback-audit.mjs --repo AyobamiH/clawsweeper --limit 150
+```
+
+The audit reads the local fleet's receipts and associated test logs, reports
+measured checkout, setup, full-validation and sparse-smoke durations, and ranks
+slow tests **only when the log SHA-256 and byte count match its receipt**.
+Missing, mismatched and unverified logs are reported separately and must not
+contribute test timings. Queue time and incomplete validation are marked
+**unmeasured**. A failed, skipped, interrupted or missing run is never a pass.
+Retain exact commit hashes, runner policy, source receipts, and negative results.
+
+**Historical baseline (captured 1 November 2026):** 17 local ClawSweeper
+receipt attempts spanning nine commits/policies. Median completed
+full-validation stage was 914 seconds, versus 41 seconds dependency setup,
+8 seconds checkout and 2 seconds workflow syntax validation. The closeout
+provenance and 4,097-event shard-import fixtures were dominant. Comparing
+different commits and environments does not establish any speedup.
+
+PR #83 was subsequently merged after successful exact-SHA local-fleet checks.
+Its upstream fixes to test concurrency, timing-sensitive test isolation and
+**local signing isolation inside disposable Git fixtures** are authoritative.
+Do not restore a blanket `GIT_CONFIG_COUNT` signing override to the whole
+Node test process: that obscures tests deliberately exercising malicious or
+failing signing callbacks. Preserve the signing security negative controls.
+No production code, signing policy, billing setting or CI authority needs
+to change for these measurement improvements.
+
+Any performance improvement must be demonstrated with before/after
+measurements under comparable exact commits, hosts, resource limits and
+identical required assertions. Do not delete slow tests, hide provider
+failures, silently skip coverage, activate a paid runner or merge without
+the existing review and evidence contract.
