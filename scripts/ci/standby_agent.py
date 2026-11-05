@@ -119,16 +119,23 @@ def safe_project(token):
     if result.get('slug')!=PROJECT:raise Hold('CircleCI project mismatch')
     return True
 
-def provider(path,token,method='GET',payload=None):
+def provider(path,token,method='GET',payload=None,params=None):
     if not (path.startswith('/project/gh/AyobamiH/clawsweeper')
             or re.fullmatch(r'/pipeline/[a-f0-9-]{36}(?:/workflow)?',path)
             or re.fullmatch(r'/workflow/[a-f0-9-]{36}/job',path)):
         raise Hold('Unapproved provider API path')
     if '?' in path or '..' in path or ':' in path:raise Hold('Unsafe provider API path')
+    if params is not None:
+        if (path!='/project/gh/AyobamiH/clawsweeper/pipeline' or method!='GET'
+            or not isinstance(params,dict) or set(params)!={'page-token'}
+            or not isinstance(params['page-token'],str)
+            or not 1<=len(params['page-token'])<=512):
+            raise Hold('Unapproved CircleCI pagination')
+
     try:
         response=requests.request(method,PROVIDER_BASE+path,headers={
             'Circle-Token':token,'Accept':'application/json','Content-Type':'application/json'},
-            json=payload,timeout=22)
+            json=payload,params=params,timeout=22)
         response.raise_for_status()
         value=response.json()
         if not isinstance(value,dict):raise Hold('Invalid CircleCI API response')
@@ -137,11 +144,24 @@ def provider(path,token,method='GET',payload=None):
         raise Hold('CircleCI API transport, status or JSON unavailable: '+type(e).__name__) from None
 
 def existing_provider_workflow(sha,token,accepted_pipeline=None,allow_discovery=False):
-    page=provider('/project/gh/AyobamiH/clawsweeper/pipeline',token)
-    if page.get('next_page_token') or not isinstance(page.get('items'),list):
-        raise Hold('CircleCI pipeline inventory incomplete: fail closed')
     found=[]
-    for entry in page['items']:
+    entries=[]
+    seen=set()
+    next_token=None
+    for page_number in range(40):
+        params={'page-token':next_token} if next_token else None
+        page=provider('/project/gh/AyobamiH/clawsweeper/pipeline',token,params=params)
+        if not isinstance(page.get('items'),list):
+            raise Hold('CircleCI pipeline inventory incomplete: fail closed')
+        entries.extend(page['items'])
+        next_token=page.get('next_page_token')
+        if not next_token:break
+        if not isinstance(next_token,str) or next_token in seen:
+            raise Hold('CircleCI pipeline pagination invalid or cyclic')
+        seen.add(next_token)
+    else:
+        raise Hold('CircleCI pipeline inventory exceeds bounded pagination')
+    for entry in entries:
         if entry.get('vcs',{}).get('revision')!=sha:continue
         pid=entry.get('id')
         if not isinstance(pid,str) or str(uuid.UUID(pid))!=pid:raise Hold('Untrusted pipeline identity')
