@@ -85,7 +85,7 @@ test("repair handoff preserves producer identity and fails closed before executi
   );
   assert.ok(preflight && publish && restore);
   for (const step of [preflight, publish, restore]) {
-    assert.match(step.if ?? "", /REPAIR_ARTIFACT_TRANSPORT == 'worker'/);
+    assert.match(step.if ?? "", /REPAIR_ARTIFACT_TRANSPORT != 'github'/);
     assert.equal(step["continue-on-error"], undefined);
   }
   for (const key of ["path", "digest", "bytes"]) {
@@ -98,6 +98,14 @@ test("repair handoff preserves producer identity and fails closed before executi
       "${{ needs.cluster.outputs.artifact_manifest_" + key + " }}",
     );
   }
+  assert.equal(
+    cluster.outputs?.artifact_state_commit,
+    "${{ steps.publish_worker.outputs.state_commit }}",
+  );
+  assert.equal(
+    restore.env?.REPAIR_ARTIFACT_STATE_COMMIT,
+    "${{ needs.cluster.outputs.artifact_state_commit }}",
+  );
   const names = execute.steps?.map((step) => step.name) ?? [];
   assert.ok(names.indexOf(restore.name) < names.indexOf("Execute credited fix artifact"));
   assert.match(

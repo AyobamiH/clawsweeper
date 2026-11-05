@@ -11,22 +11,30 @@ route and subscription route with their credential and allowance guards.
 
 ## Repair artifact handoff
 
-When the existing `CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL` is configured, repair
-planning and execution use that Worker's authenticated R2 state-blob API. The
-workflow verifies write/read access before inference, then publishes bounded,
-content-addressed files and a manifest bound to repository, run, attempt,
-workflow revision, job path and phase. Execution verifies the producer's
-manifest digest and byte count plus every file before accepting the plan.
-Final execution results and transcripts use the same durable store. No Worker
-deployment, new credential, or exact-review lease is involved.
+The repair worker uses the private state repository's retained `results/` tree
+by default (`git-results`). It reuses the existing coordinated state writer,
+publishing only a bounded subtree for the current repository, run, attempt,
+workflow revision, job and phase. It verifies publication before inference.
+Planning publishes content-addressed files and a manifest; execution accepts
+only the producer's exact state commit, manifest SHA-256 and byte count, then
+verifies every restored file. Final results and transcripts follow the same path.
 
-`scripts/repair-artifacts.ts` records the manifest path, SHA-256 and size in a
-local JSON receipt and the job summary. Reads require the existing webhook
-secret; these are not public asset URLs. Transfers are limited to 24 MiB and
-512 regular files, and reject unsafe paths, links and foreign run identities.
-The existing GitHub artifact transport remains available when no Worker URL is
-configured. With the state store selected, GitHub Codex debug uploads are
-optional copies and cannot block a verified durable handoff.
+`scripts/repair-artifacts.ts` records the state commit and manifest identity in
+a local JSON receipt and the job summary. Transfers are limited to 24 MiB and
+512 regular files, and reject unsafe paths, links, incomplete local writes and
+foreign run identities. The existing coordinator, App credential and normal
+Git push remain mandatory. The writer publishes explicit `results/` paths;
+`assets/` and `ledger/` retain their existing ownership.
+Before final publication, each role refreshes its existing App token into a
+separate disposable state checkout. This preserves the worker output and avoids
+using credentials that expired during a long model run.
+
+The owner may explicitly select `worker` or `github` using
+`REPAIR_ARTIFACT_TRANSPORT`. Worker mode uses the existing authenticated R2
+state-blob API and requires its deployed binding to be available. Every selected
+durable transport is preflighted before inference; there is no silent replay
+through another backend. With a durable state transport selected, GitHub Codex
+debug uploads are optional copies and cannot block a verified handoff.
 
 ## Lifecycle and authority
 

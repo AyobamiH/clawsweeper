@@ -136,7 +136,7 @@ env:
   CLUSTER_PLANNER_SANDBOX: ${{ inputs.planner_sandbox }}
   CLUSTER_REQUEUE_DEPTH: ${{ inputs.requeue_depth }}
   CLUSTER_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  REPAIR_ARTIFACT_TRANSPORT: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL != '' && 'worker' || 'github' }}
+  REPAIR_ARTIFACT_TRANSPORT: ${{ vars.REPAIR_ARTIFACT_TRANSPORT || 'git-results' }}
 
 concurrency:
   group: cloudflare-repair-compute
@@ -263,6 +263,7 @@ jobs:
       artifact_manifest_path: ${{ steps.publish_worker.outputs.manifest_path }}
       artifact_manifest_digest: ${{ steps.publish_worker.outputs.manifest_digest }}
       artifact_manifest_bytes: ${{ steps.publish_worker.outputs.manifest_bytes }}
+      artifact_state_commit: ${{ steps.publish_worker.outputs.state_commit }}
     env:
       CLAWSWEEPER_ALLOWED_OWNER: ${{ vars.CLAWSWEEPER_ALLOWED_OWNER || 'AyobamiH' }}
       CLAWSWEEPER_ALLOW_EXECUTE: ${{ (inputs.mode == 'execute' || inputs.mode == 'autonomous') && (vars.CLAWSWEEPER_ALLOW_EXECUTE == '1' || inputs.authorize_execute == true) && '1' || '0' }}
@@ -366,7 +367,7 @@ jobs:
         run: scripts/restore-repair-job.sh "$JOB_PATH" "this worker"
 
       - name: Verify durable repair artifact transport
-        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
@@ -529,17 +530,39 @@ jobs:
             echo "::notice title=No Codex debug collector::dist/repair/collect-codex-debug.js is missing."
           fi
 
+      - name: Refresh state publication token
+        id: publication_state_token
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' }}
+        uses: ./.github/actions/create-state-token
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+
+      - name: Check out fresh state publication credentials
+        if: ${{ always() && steps.publication_state_token.outcome == 'success' && env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' }}
+        uses: actions/checkout@v7
+        with:
+          repository: AyobamiH/clawsweeper-state
+          ref: state
+          path: clawsweeper-publication-state
+          token: ${{ steps.publication_state_token.outputs.token }}
+          filter: blob:none
+          fetch-depth: 1
+          sparse-checkout: jobs
+          persist-credentials: true
+
       - name: Publish worker artifacts to state store
         id: publish_worker
-        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         env:
+          CLAWSWEEPER_STATE_DIR: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' && format('{0}/clawsweeper-publication-state', github.workspace) || env.CLAWSWEEPER_STATE_DIR }}
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: node scripts/repair-artifacts.ts publish --phase plan --root .clawsweeper-repair/runs
 
       - name: Upload Codex debug logs
         # The verified state-store receipt is authoritative when selected.
-        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         if: ${{ always() && steps.check_job.outputs.job_exists == '1' }}
         uses: actions/upload-artifact@v7
         with:
@@ -802,13 +825,14 @@ jobs:
         run: pnpm run repair:action-session -- register "$CLUSTER_JOB_PATH"
 
       - name: Restore verified worker artifacts from state store
-        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         env:
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
           REPAIR_ARTIFACT_MANIFEST_PATH: ${{ needs.cluster.outputs.artifact_manifest_path }}
           REPAIR_ARTIFACT_MANIFEST_DIGEST: ${{ needs.cluster.outputs.artifact_manifest_digest }}
           REPAIR_ARTIFACT_MANIFEST_BYTES: ${{ needs.cluster.outputs.artifact_manifest_bytes }}
+          REPAIR_ARTIFACT_STATE_COMMIT: ${{ needs.cluster.outputs.artifact_state_commit }}
         run: node scripts/repair-artifacts.ts restore --phase plan --root .clawsweeper-repair/runs
 
       - name: Download worker artifacts
@@ -1119,7 +1143,7 @@ jobs:
 
       - name: Upload Codex debug logs
         # The verified state-store receipt is authoritative when selected.
-        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        continue-on-error: ${{ env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         if: ${{ always() && steps.check_job.outputs.job_exists == '1' }}
         uses: actions/upload-artifact@v7
         with:
@@ -1128,9 +1152,31 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Refresh state publication token
+        id: publication_state_token
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' }}
+        uses: ./.github/actions/create-state-token
+        with:
+          client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+
+      - name: Check out fresh state publication credentials
+        if: ${{ always() && steps.publication_state_token.outcome == 'success' && env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' }}
+        uses: actions/checkout@v7
+        with:
+          repository: AyobamiH/clawsweeper-state
+          ref: state
+          path: clawsweeper-publication-state
+          token: ${{ steps.publication_state_token.outputs.token }}
+          filter: blob:none
+          fetch-depth: 1
+          sparse-checkout: jobs
+          persist-credentials: true
+
       - name: Publish execution artifacts to state store
-        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT == 'worker' }}
+        if: ${{ always() && steps.check_job.outputs.job_exists == '1' && env.REPAIR_ARTIFACT_TRANSPORT != 'github' }}
         env:
+          CLAWSWEEPER_STATE_DIR: ${{ env.REPAIR_ARTIFACT_TRANSPORT == 'git-results' && format('{0}/clawsweeper-publication-state', github.workspace) || env.CLAWSWEEPER_STATE_DIR }}
           CLAWSWEEPER_STATE_WORKER_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
           CLAWSWEEPER_WEBHOOK_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
         run: node scripts/repair-artifacts.ts publish --phase execute --root .clawsweeper-repair/runs
