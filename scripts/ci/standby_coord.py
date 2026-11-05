@@ -135,6 +135,7 @@ def update(sha,nonce,state_name,pipeline_id=None,status_id=None,receipt_sha256=N
             raise RuntimeError('Conflicting GitHub status identity')
         record['github_status_id']=status_id
         record['receipt_sha256']=receipt_sha256
+        record['receipt_representation']='verified-provider.v1'
     record['state']=state_name;record['updated_at']=timestamp()
     commit(head,state,'ci: CircleCI '+state_name+' '+sha[:12])
     return record

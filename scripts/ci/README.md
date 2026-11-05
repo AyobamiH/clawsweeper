@@ -32,3 +32,7 @@ Never use an already processed SHA to create a fallback acceptance run. Preserve
 ## GitHub status crash recovery
 
 The verified CircleCI result is reconciled through a GitHub commit-status intent. Before any status POST, the shared CAS ledger records the attempt number and timestamp. On restart, the standby independently reads the exact-SHA status context before considering a write. If absent, a second and final attempt is permitted only after a 120-second cooldown and a new CAS reservation. Exhaustion requires manual reconciliation; no CircleCI pipeline POST is ever retried. GitHub commit statuses are append-only, so a delayed first POST can produce a duplicate _identical status_, not duplicate provider execution. Conflicting status payloads fail closed. Tests cover crashes, cooldown, owner mismatch, readback and exhausted attempts.
+
+## Immutable receipt identity
+
+For new provider results, the shared ledger declares `receipt_representation=verified-provider.v1` and hashes the immutable `provider-<sha>.verified-provider.json` bytes. The separate `provider-<sha>.json` file is the mutable final reconciliation view, including GitHub status metadata; its bytes are **not** the ledger digest. A missing final view is distinguishable from a missing provider receipt. Existing historical ledger entries without a representation remain historical and must not be retroactively relabelled or rewritten. Never replay provider execution to repair a receipt.
