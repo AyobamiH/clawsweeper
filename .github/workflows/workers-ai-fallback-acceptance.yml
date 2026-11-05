@@ -131,9 +131,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.release_head }}
           path: target
-      - uses: ./.github/actions/setup-pnpm
-        with:
-          build-script: build:node
+      - name: Install pinned dependencies without privileged Corepack symlinks
+        run: |
+          set -euo pipefail
+          corepack pnpm --version
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm run build:node
       - name: Install existing trusted input scanner
         run: bash .github/actions/setup-review-tools/install.sh
       - name: Read-only exact-head preflight
