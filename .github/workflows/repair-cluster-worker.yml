@@ -147,7 +147,7 @@ concurrency:
 jobs:
   receipt:
     name: Deduplicate command dispatch receipt
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
     permissions:
       actions: read
       contents: read
@@ -157,6 +157,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           filter: blob:none
+
+      - name: Install pinned GitHub CLI for repair APIs
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz --output "$archive"
+          printf '9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8  %s\n' "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_2.101.0_linux_amd64/bin" >> "$GITHUB_PATH"
 
       - uses: ./.github/actions/setup-pnpm
         if: ${{ inputs.job_payload != '' }}
@@ -200,7 +209,7 @@ jobs:
     name: Provision ephemeral Cloudflare repair compute
     needs: receipt
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
     timeout-minutes: 10
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
@@ -210,6 +219,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install pinned GitHub CLI for repair APIs
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz --output "$archive"
+          printf '9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8  %s\n' "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_2.101.0_linux_amd64/bin" >> "$GITHUB_PATH"
+
       - name: Mint bounded GitHub App credential
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app
@@ -233,7 +251,7 @@ jobs:
     name: Plan and review cluster
     needs: [receipt, provision]
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
     timeout-minutes: 90
     outputs:
       allow_execute: ${{ steps.capture_gates.outputs.allow_execute }}
@@ -562,7 +580,7 @@ jobs:
     name: Execute and apply cluster actions
     needs: [cluster, provision]
     if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run }}
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
     timeout-minutes: 120
     permissions:
       actions: read
@@ -1122,12 +1140,21 @@ jobs:
     name: Destroy ephemeral Cloudflare repair compute
     needs: [receipt, provision, cluster, execute]
     if: ${{ always() && needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Install pinned GitHub CLI for repair APIs
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.tar.gz --output "$archive"
+          printf '9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8  %s\n' "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_2.101.0_linux_amd64/bin" >> "$GITHUB_PATH"
+
       - name: Mint bounded GitHub App credential
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app

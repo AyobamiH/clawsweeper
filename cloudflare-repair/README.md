@@ -1,10 +1,13 @@
 # Cloudflare repair compute
 
 ClawSweeper repair jobs provision two uniquely labelled ephemeral Cloudflare
-runners: one for planning, one for execution. Standard GitHub-hosted jobs own
-API orchestration, review, deterministic publication and CI. No workflow selects
-Blacksmith. Repair and review use ChatGPT subscription authentication, with API
-model credentials removed and the shared allowance gate retained.
+runners: one for planning, one for execution. For the repair worker,
+owner-operated `clawsweeper-operations` runners own
+dispatch admission, provisioning and cleanup. `CLAWSWEEPER_OPERATIONAL_RUNNER`
+may select an existing owner-operated runner label; there is no GitHub-hosted
+fallback. Planning and execution still use the separately provisioned Cloudflare
+roles. The selected inference policy retains the existing OpenClaw/Workers AI
+route and subscription route with their credential and allowance guards.
 
 ## Lifecycle and authority
 
