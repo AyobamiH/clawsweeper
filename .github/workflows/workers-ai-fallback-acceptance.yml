@@ -134,9 +134,13 @@ jobs:
       - name: Install pinned dependencies without privileged Corepack symlinks
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pnpm-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/pnpm-bin"
+          echo "$RUNNER_TEMP/pnpm-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/pnpm-bin:$PATH"
           corepack pnpm --version
-          corepack pnpm install --frozen-lockfile
-          corepack pnpm run build:node
+          pnpm install --frozen-lockfile
+          pnpm run build:node
       - name: Install existing trusted input scanner
         run: bash .github/actions/setup-review-tools/install.sh
       - name: Read-only exact-head preflight
