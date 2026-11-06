@@ -27,7 +27,13 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}",
+      ]
     timeout-minutes: 20
     strategy:
       fail-fast: false
