@@ -84,6 +84,18 @@ test("review result identity and shape failures have sanitised phase codes", () 
     });
   }
 });
+test("aggregation overflow exposes bounded count without findings content", () => {
+  const error = new ReviewFailure("review_incomplete", {
+    phase: "aggregation_overflow",
+    findingCount: 43,
+  });
+  assert.deepEqual(classifyReviewFailure(error), {
+    category: "review_incomplete",
+    phase: "aggregation_overflow",
+    findingCount: 43,
+    retryEligible: false,
+  });
+});
 test("unexpected errors remain sanitised and non-retryable", () => {
   assert.deepEqual(classifyReviewFailure(new Error("private credential")), {
     category: "unexpected_error",

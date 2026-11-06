@@ -415,7 +415,14 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
   );
   assert(interactionDecision.complete, "cross-file review incomplete");
   findings.push(...interactionDecision.findings);
-  assert(findings.length <= 30, "release findings exceed bound");
+  if (findings.length > 30) {
+    // Do not truncate or silently discard genuine findings to obtain a pass.
+    // The bounded count and phase explain why aggregation refused approval.
+    throw new ReviewFailure(REVIEW_ERROR_CODES.REVIEW_INCOMPLETE, {
+      phase: "aggregation_overflow",
+      findingCount: findings.length,
+    });
+  }
   return {
     sourceDigest: digest(bundle),
     complete: true,

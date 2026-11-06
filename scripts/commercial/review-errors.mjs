@@ -13,7 +13,10 @@ export const REVIEW_ERROR_CODES = Object.freeze({
   UNEXPECTED: "unexpected_error",
 });
 export class ReviewFailure extends Error {
-  constructor(code, { phase = "inference", retryEligible = false, statusClass = null } = {}) {
+  constructor(
+    code,
+    { phase = "inference", retryEligible = false, statusClass = null, findingCount = null } = {},
+  ) {
     if (!Object.values(REVIEW_ERROR_CODES).includes(code))
       throw new TypeError("invalid review failure code");
     super(`Review refused: ${code}`);
@@ -22,6 +25,10 @@ export class ReviewFailure extends Error {
     this.phase = phase;
     this.retryEligible = retryEligible;
     this.statusClass = statusClass;
+    this.findingCount =
+      Number.isSafeInteger(findingCount) && findingCount >= 0 && findingCount <= 2000
+        ? findingCount
+        : null;
   }
 }
 export function classifyReviewFailure(error) {
@@ -31,6 +38,7 @@ export function classifyReviewFailure(error) {
       phase: error.phase,
       retryEligible: error.retryEligible,
       ...(error.statusClass ? { statusClass: error.statusClass } : {}),
+      ...(error.findingCount !== null ? { findingCount: error.findingCount } : {}),
     };
   if (error?.name === "SourceFindingError")
     return {
