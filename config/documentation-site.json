@@ -88,6 +88,11 @@
       "banner": "This proof records the commercial bootstrap behavior at its stated revision and does not establish completed customer delivery."
     },
     {
+      "path": "webhook-ci-acceptance-20261106.md",
+      "lifecycle": "proposed",
+      "banner": "This temporary webhook-to-local-CI acceptance probe is not current operator guidance or a release approval."
+    },
+    {
       "path": "CI-EXECUTION-POLICY.md",
       "lifecycle": "proposed",
       "banner": "CircleCI fallback is not active until provider, free-budget, exact-SHA and recovery acceptance are verified."
