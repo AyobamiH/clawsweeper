@@ -1,4 +1,6 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import YAML from "yaml";
 import assert from "node:assert/strict";
 import { ReviewFailure, classifyReviewFailure } from "../scripts/commercial/review-errors.mjs";
 import { workersAiJson } from "../scripts/commercial/workers-ai.mjs";
@@ -134,4 +136,20 @@ test("release preflight admits only explicitly budgeted small full-source review
       approvedBudget: 4,
     },
   );
+});
+
+test("owner-operated release review exposes an explicit zero-default Workers AI call budget", () => {
+  const workflow = YAML.parse(
+    readFileSync(
+      new URL("../.github/workflows/workers-ai-fallback-acceptance.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  const input = workflow.on.workflow_dispatch.inputs.release_ai_max_calls;
+  assert.equal(input.type, "number");
+  assert.equal(input.default, 0);
+  const job = workflow.jobs["release-source-review"];
+  assert.deepEqual(job["runs-on"], ["self-hosted", "Linux", "X64", "clawsweeper-operations"]);
+  assert.equal(job.env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS, "${{ inputs.release_ai_max_calls || 0 }}");
+  assert.equal(workflow.jobs.smoke.env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS, undefined);
 });
