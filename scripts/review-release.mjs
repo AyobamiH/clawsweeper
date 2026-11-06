@@ -3,7 +3,12 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { writeFileSync, appendFileSync } from "node:fs";
-import { prepareSourceReview, reviewSource, sourceBundle } from "./commercial/source-review.mjs";
+import {
+  assertLiveReleaseReviewBudget,
+  prepareSourceReview,
+  reviewSource,
+  sourceBundle,
+} from "./commercial/source-review.mjs";
 import { classifyReviewFailure } from "./commercial/review-errors.mjs";
 
 const args = process.argv.slice(2);
@@ -46,6 +51,8 @@ try {
     await prepareSourceReview(root, values[1], "repository-release");
     const { selectCommercialRoute } = await import("./commercial/inference.mjs");
     const route = await selectCommercialRoute(process.env);
+    if (route.provider === "cloudflare-workers-ai")
+      assertLiveReleaseReviewBudget(bundle, process.env);
     console.log(
       JSON.stringify({
         ready: true,

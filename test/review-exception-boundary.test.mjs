@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ReviewFailure, classifyReviewFailure } from "../scripts/commercial/review-errors.mjs";
 import { workersAiJson } from "../scripts/commercial/workers-ai.mjs";
 import { selectCommercialRoute } from "../scripts/commercial/inference.mjs";
+import { assertLiveReleaseReviewBudget } from "../scripts/commercial/source-review.mjs";
 const env = {
   CLOUDFLARE_ACCOUNT_ID: "fixture_account_123",
   CLOUDFLARE_WORKERS_AI_TOKEN: "fixture_only_not_real",
@@ -101,4 +102,36 @@ test("unexpected errors remain sanitised and non-retryable", () => {
     category: "unexpected_error",
     retryEligible: false,
   });
+});
+
+const sourceWithLines = (lines) => ({
+  path: "src/review.js",
+  before: null,
+  after: Array.from({ length: lines }, () => "verified source line").join("\n"),
+});
+test("release preflight refuses PR93-sized source before a model call even with a budget of 8", () => {
+  const sizes = [1262, 95, 887, 822, 775];
+  const bundle = { files: sizes.map(sourceWithLines) };
+  assert.throws(
+    () => assertLiveReleaseReviewBudget(bundle, { CLAWSWEEPER_RELEASE_AI_MAX_CALLS: "8" }),
+    (error) =>
+      error instanceof ReviewFailure &&
+      error.code === "preflight_refused" &&
+      error.phase === "inference_budget",
+  );
+});
+test("release preflight admits only explicitly budgeted small full-source reviews", () => {
+  const bundle = { files: [sourceWithLines(1), sourceWithLines(100)] };
+  assert.throws(() => assertLiveReleaseReviewBudget(bundle), ReviewFailure);
+  assert.throws(
+    () => assertLiveReleaseReviewBudget(bundle, { CLAWSWEEPER_RELEASE_AI_MAX_CALLS: "2" }),
+    ReviewFailure,
+  );
+  assert.deepEqual(
+    assertLiveReleaseReviewBudget(bundle, { CLAWSWEEPER_RELEASE_AI_MAX_CALLS: "4" }),
+    {
+      requiredCalls: 4,
+      approvedBudget: 4,
+    },
+  );
 });

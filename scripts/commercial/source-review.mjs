@@ -352,30 +352,34 @@ export function aggregateReleaseFindings(findings) {
   return { findings: unique, total: findings.length, duplicates: findings.length - unique.length };
 }
 
-// Release-only: review every complete changed file separately, then a bounded
-// cross-file pass. A missing/truncated response refuses the whole release.
-export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
-  assert(route.provider === "cloudflare-workers-ai", "Workers AI route required");
+// Apply the identical admission limit during preflight and before the first
+// production inference call. A preflight must never claim a review is ready
+// when the complete pinned source is ineligible under the fixed cost cap.
+export function assertLiveReleaseReviewBudget(bundle, env = {}) {
   assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
-  // Cost gate before any inference. This release path is intentionally disabled
-  // by default until deterministic replay and an explicit request budget pass.
   const requiredCalls = bundle.files.reduce(
     (sum, file) => sum + releaseSourceChunks(file).length,
     1,
   );
   const approvedBudget = Number(env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS || 0);
-  // An explicit environment value is permission to spend within a ceiling,
-  // not permission for unbounded full-repository inference. Large candidates
-  // must use offline replay and smaller independently selected review scopes.
+  // A large candidate is a refusal, never permission for more API spending.
   const HARD_MAX_RELEASE_AI_CALLS = 8;
   if (
-    infer === workersAiJson &&
-    (!Number.isSafeInteger(approvedBudget) ||
-      approvedBudget < 1 ||
-      requiredCalls > approvedBudget ||
-      requiredCalls > HARD_MAX_RELEASE_AI_CALLS)
+    !Number.isSafeInteger(approvedBudget) ||
+    approvedBudget < 1 ||
+    requiredCalls > approvedBudget ||
+    requiredCalls > HARD_MAX_RELEASE_AI_CALLS
   )
     throw new ReviewFailure(REVIEW_ERROR_CODES.PREFLIGHT, { phase: "inference_budget" });
+  return { requiredCalls, approvedBudget };
+}
+
+// Release-only: review every complete changed file separately, then a bounded
+// cross-file pass. A missing/truncated response refuses the whole release.
+export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
+  assert(route.provider === "cloudflare-workers-ai", "Workers AI route required");
+  assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
+  if (infer === workersAiJson) assertLiveReleaseReviewBudget(bundle, env);
   const findings = [];
   const summaries = [];
   const coverage = [];
