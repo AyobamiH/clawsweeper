@@ -3,6 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { prepareSourceReview, reviewSource, sourceBundle } from "./commercial/source-review.mjs";
+import { classifyReviewFailure } from "./commercial/review-errors.mjs";
 
 const args = process.argv.slice(2);
 const preflight = args[0] === "--preflight";
@@ -78,7 +79,7 @@ try {
   }
 } catch (error) {
   // Sanitised diagnostic only: never log model descriptions, source content or credentials.
-  const known = error?.name === "SourceFindingError";
+  const classified = classifyReviewFailure(error);
   const preflightReason = [
     "head changed",
     "tracked checkout is dirty",
@@ -88,24 +89,14 @@ try {
   ].includes(error?.message)
     ? error.message
     : null;
-  const diagnostic = known
-    ? {
-        schema: "clawsweeper.release-review-diagnostic.v1",
-        status: "refused",
-        category: "unbound_finding",
-        reason: error.reason,
-        ...error.context,
-        head: values[2],
-        base: values[1],
-      }
-    : {
-        schema: "clawsweeper.release-review-diagnostic.v1",
-        status: "refused",
-        category: preflightReason ? "preflight_refused" : "review_incomplete",
-        ...(preflightReason ? { reason: preflightReason } : {}),
-        head: values[2],
-        base: values[1],
-      };
+  const diagnostic = {
+    schema: "clawsweeper.release-review-diagnostic.v1",
+    status: "refused",
+    ...classified,
+    ...(preflightReason ? { category: "preflight_refused", reason: preflightReason } : {}),
+    head: values[2],
+    base: values[1],
+  };
   console.error("Release review refused; no clean verdict: " + JSON.stringify(diagnostic));
   process.exitCode = 1;
 }
