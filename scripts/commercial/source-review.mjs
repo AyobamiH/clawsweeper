@@ -198,11 +198,8 @@ export function retainUnclassifiedReleaseFindings(value, bundle, chunk = null) {
 export function sourceFindingDiagnostic(finding, bundle, chunk = null, releaseMode = false) {
   const paths = new Set(bundle.files.map((file) => file.path));
   if (!finding || typeof finding !== "object" || Array.isArray(finding)) return "invalid_shape";
-  if (
-    !["P0", "P1", "P2"].includes(finding.severity) &&
-    !(releaseMode && finding.severity === UNCLASSIFIED_SEVERITY)
-  )
-    return "invalid_severity";
+  // Validate source anchoring before severity so malformed severity cannot
+  // conceal a more important invalid file/line/description diagnostic.
   if (typeof finding.file !== "string" || !paths.has(finding.file)) return "unknown_file";
   if (!Number.isSafeInteger(finding.line) || finding.line <= 0) return "invalid_line";
   if (chunk && (finding.line < chunk.lineStart || finding.line > chunk.lineEnd))
@@ -213,6 +210,11 @@ export function sourceFindingDiagnostic(finding, bundle, chunk = null, releaseMo
     finding.description.length > 8000
   )
     return "invalid_description";
+  if (
+    !["P0", "P1", "P2"].includes(finding.severity) &&
+    !(releaseMode && finding.severity === UNCLASSIFIED_SEVERITY)
+  )
+    return "invalid_severity";
   return null;
 }
 
