@@ -235,6 +235,40 @@ export async function prepareSourceReview(root, base, purpose = "commercial") {
   return { bundle, prompt, data };
 }
 
+export function releaseSourceChunks(file, maxLines = 80) {
+  assert(Number.isSafeInteger(maxLines) && maxLines >= 1 && maxLines <= 160, "invalid chunk size");
+  const before = file.before === null ? [] : file.before.split("\n");
+  const after = file.after === null ? [] : file.after.split("\n");
+  const count = Math.max(before.length, after.length, 1);
+  assert(count <= 20000, "release source exceeds chunk count limit");
+  const chunks = [];
+  for (let start = 0; start < count; start += maxLines) {
+    const end = Math.min(count, start + maxLines);
+    chunks.push({
+      ...file,
+      before:
+        file.before === null
+          ? null
+          : before
+              .slice(start, end)
+              .map((line, i) => `${start + i + 1}: ${line}`)
+              .join("\n"),
+      after:
+        file.after === null
+          ? null
+          : after
+              .slice(start, end)
+              .map((line, i) => `${start + i + 1}: ${line}`)
+              .join("\n"),
+      lineStart: start + 1,
+      lineEnd: end,
+      originalBeforeDigest: file.before === null ? null : digest(file.before),
+      originalAfterDigest: file.after === null ? null : digest(file.after),
+    });
+  }
+  return chunks;
+}
+
 // Release-only: review every complete changed file separately, then a bounded
 // cross-file pass. A missing/truncated response refuses the whole release.
 export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
@@ -244,14 +278,31 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
   const summaries = [];
   const coverage = [];
   for (const file of bundle.files) {
-    const unit = { ...bundle, files: [file] };
-    const data = { sourceDigest: digest(unit), bundle: unit };
-    const response = await infer(route, prompt, data, SCHEMA, { env, purpose: "source-review" });
-    const decision = sourceReviewDecision(response.value, unit);
-    assert(decision.complete, "release source unit incomplete");
-    coverage.push({ path: file.path, sourceDigest: data.sourceDigest });
-    summaries.push(`${file.path}: ${decision.summary}`);
-    findings.push(...decision.findings);
+    for (const chunk of releaseSourceChunks(file)) {
+      const unit = { ...bundle, files: [chunk] };
+      const data = { sourceDigest: digest(unit), bundle: unit };
+      const chunkPrompt =
+        prompt +
+        ` Review only ${file.path} lines ${chunk.lineStart}-${chunk.lineEnd}. Every supplied line is numbered with its original position. Return complete=true only after assessing every supplied line.`;
+      const response = await infer(route, chunkPrompt, data, SCHEMA, {
+        env,
+        purpose: "source-review",
+      });
+      const decision = sourceReviewDecision(response.value, unit);
+      assert(decision.complete, "release source chunk incomplete");
+      assert(
+        decision.findings.every((f) => f.line >= chunk.lineStart && f.line <= chunk.lineEnd),
+        "finding outside reviewed chunk",
+      );
+      coverage.push({
+        path: file.path,
+        lineStart: chunk.lineStart,
+        lineEnd: chunk.lineEnd,
+        sourceDigest: data.sourceDigest,
+      });
+      summaries.push(`${file.path}:${chunk.lineStart}-${chunk.lineEnd}: ${decision.summary}`);
+      findings.push(...decision.findings);
+    }
   }
   const interaction = {
     schema: bundle.schema,
