@@ -77,6 +77,35 @@ try {
     if (!result.passed) process.exitCode = 1;
   }
 } catch (error) {
-  console.error("Release review refused; no clean verdict: " + (error?.message || "unknown"));
+  // Sanitised diagnostic only: never log model descriptions, source content or credentials.
+  const known = error?.name === "SourceFindingError";
+  const preflightReason = [
+    "head changed",
+    "tracked checkout is dirty",
+    "base is not an ancestor",
+    "bundle head mismatch",
+    "untracked source in review",
+  ].includes(error?.message)
+    ? error.message
+    : null;
+  const diagnostic = known
+    ? {
+        schema: "clawsweeper.release-review-diagnostic.v1",
+        status: "refused",
+        category: "unbound_finding",
+        reason: error.reason,
+        ...error.context,
+        head: values[2],
+        base: values[1],
+      }
+    : {
+        schema: "clawsweeper.release-review-diagnostic.v1",
+        status: "refused",
+        category: preflightReason ? "preflight_refused" : "review_incomplete",
+        ...(preflightReason ? { reason: preflightReason } : {}),
+        head: values[2],
+        base: values[1],
+      };
+  console.error("Release review refused; no clean verdict: " + JSON.stringify(diagnostic));
   process.exitCode = 1;
 }

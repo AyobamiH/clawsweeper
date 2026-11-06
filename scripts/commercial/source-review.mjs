@@ -172,7 +172,33 @@ export async function sourceBundle(root, base, includeUntracked = true) {
     files,
   };
 }
-export function sourceReviewDecision(value, bundle) {
+export function sourceFindingDiagnostic(finding, bundle, chunk = null) {
+  const paths = new Set(bundle.files.map((file) => file.path));
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) return "invalid_shape";
+  if (!["P0", "P1", "P2"].includes(finding.severity)) return "invalid_severity";
+  if (typeof finding.file !== "string" || !paths.has(finding.file)) return "unknown_file";
+  if (!Number.isSafeInteger(finding.line) || finding.line <= 0) return "invalid_line";
+  if (chunk && (finding.line < chunk.lineStart || finding.line > chunk.lineEnd))
+    return "line_outside_chunk";
+  if (
+    typeof finding.description !== "string" ||
+    !finding.description.length ||
+    finding.description.length > 8000
+  )
+    return "invalid_description";
+  return null;
+}
+
+export class SourceFindingError extends Error {
+  constructor(reason, context = {}) {
+    super(`unbound source finding: ${reason}`);
+    this.name = "SourceFindingError";
+    this.reason = reason;
+    this.context = context;
+  }
+}
+
+export function sourceReviewDecision(value, bundle, chunk = null) {
   assert(
     value && Object.keys(value).sort().join(",") === "complete,findings,sourceDigest,summary",
     "unexpected source-review output",
@@ -186,18 +212,15 @@ export function sourceReviewDecision(value, bundle) {
     "source review identity or result invalid",
   );
   assert(Array.isArray(value.findings) && value.findings.length <= 30, "invalid source findings");
-  const findings = value.findings.map((f) => {
-    assert(
-      f &&
-        ["P0", "P1", "P2"].includes(f.severity) &&
-        bundle.files.some((x) => x.path === f.file) &&
-        Number.isSafeInteger(f.line) &&
-        f.line > 0 &&
-        typeof f.description === "string" &&
-        f.description.length > 0 &&
-        f.description.length <= 8000,
-      "unbound source finding",
-    );
+  const findings = value.findings.map((f, index) => {
+    const reason = sourceFindingDiagnostic(f, bundle, chunk);
+    if (reason)
+      throw new SourceFindingError(reason, {
+        index,
+        phase: chunk ? "chunk" : "cross_file",
+        lineStart: chunk?.lineStart ?? null,
+        lineEnd: chunk?.lineEnd ?? null,
+      });
     return { severity: f.severity, file: f.file, line: f.line, description: f.description };
   });
   return {
@@ -288,12 +311,20 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
         env,
         purpose: "source-review",
       });
-      const decision = sourceReviewDecision(response.value, unit);
+      let decision;
+      try {
+        decision = sourceReviewDecision(response.value, unit, chunk);
+      } catch (error) {
+        if (error instanceof SourceFindingError) {
+          error.context = {
+            ...error.context,
+            pathDigest: digest(file.path),
+            unitDigest: data.sourceDigest,
+          };
+        }
+        throw error;
+      }
       assert(decision.complete, "release source chunk incomplete");
-      assert(
-        decision.findings.every((f) => f.line >= chunk.lineStart && f.line <= chunk.lineEnd),
-        "finding outside reviewed chunk",
-      );
       coverage.push({
         path: file.path,
         lineStart: chunk.lineStart,
