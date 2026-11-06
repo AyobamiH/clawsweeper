@@ -2,6 +2,7 @@
 // Read-only release review: use existing Codex admission / Workers AI fallback.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import { writeFileSync, appendFileSync } from "node:fs";
 import { prepareSourceReview, reviewSource, sourceBundle } from "./commercial/source-review.mjs";
 import { classifyReviewFailure } from "./commercial/review-errors.mjs";
 
@@ -98,5 +99,44 @@ try {
     base: values[1],
   };
   console.error("Release review refused; no clean verdict: " + JSON.stringify(diagnostic));
+  // The GitHub annotation contains only fixed taxonomy identifiers. Keep the
+  // full sanitised diagnostic in the runner's private evidence directory.
+  const safeToken = (value) =>
+    typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : "unspecified";
+  const category = safeToken(diagnostic.category);
+  const phase = safeToken(diagnostic.phase);
+  const reason = safeToken(diagnostic.reason);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    console.error(
+      `::error title=ClawSweeper release refused::category=${category} phase=${phase} reason=${reason}; exact-head review has no approval`,
+    );
+  }
+  if (
+    !preflight &&
+    process.env.RUNNER_TEMP &&
+    resolve(values[3]).startsWith(resolve(process.env.RUNNER_TEMP) + "/")
+  ) {
+    const evidencePath = resolve(values[3]) + ".diagnostic.json";
+    try {
+      writeFileSync(evidencePath, JSON.stringify(diagnostic, null, 2) + "\n", {
+        flag: "wx",
+        mode: 0o600,
+      });
+    } catch {
+      console.error(
+        "::warning title=ClawSweeper evidence::sanitised diagnostic could not be persisted",
+      );
+    }
+  }
+  if (process.env.GITHUB_STEP_SUMMARY && process.env.GITHUB_ACTIONS === "true") {
+    try {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        `### ClawSweeper release refused\n\n- Category: \`${category}\`\n- Phase: \`${phase}\`\n- Reason: \`${reason}\`\n- Exact head: \`${values[2]}\`\n- Exact base: \`${values[1]}\`\n- Approval: **not granted**\n`,
+      );
+    } catch {
+      console.error("::warning title=ClawSweeper summary::could not write job summary");
+    }
+  }
   process.exitCode = 1;
 }
