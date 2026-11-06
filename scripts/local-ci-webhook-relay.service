@@ -1,0 +1,16 @@
+[Unit]
+Description=ClawSweeper GitHub webhook relay to existing local CI
+After=network-online.target local-ci-webhook.service
+Wants=network-online.target local-ci-webhook.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/johnh/.local/share/local-ci/fleet_webhook_relay.py
+Restart=on-failure
+RestartSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
