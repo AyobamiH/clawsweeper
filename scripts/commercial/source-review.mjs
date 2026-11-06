@@ -335,6 +335,23 @@ export function releaseSourceChunks(file, maxLines = 80) {
   return chunks;
 }
 
+// Deduplicate only byte-identical, fully anchored findings. Similar descriptions,
+// different lines, severities or source paths may be distinct defects and must
+// never be collapsed by heuristic or model judgement.
+export function aggregateReleaseFindings(findings) {
+  const unique = [];
+  const counts = new Map();
+  for (const finding of findings) {
+    const key = digest([finding.file, finding.line, finding.severity, finding.description]);
+    const index = counts.get(key);
+    if (index === undefined) {
+      counts.set(key, unique.length);
+      unique.push({ ...finding, occurrences: 1 });
+    } else unique[index].occurrences++;
+  }
+  return { findings: unique, total: findings.length, duplicates: findings.length - unique.length };
+}
+
 // Release-only: review every complete changed file separately, then a bounded
 // cross-file pass. A missing/truncated response refuses the whole release.
 export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
@@ -415,19 +432,25 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
   );
   assert(interactionDecision.complete, "cross-file review incomplete");
   findings.push(...interactionDecision.findings);
-  if (findings.length > 30) {
+  const aggregated = aggregateReleaseFindings(findings);
+  if (aggregated.findings.length > 30) {
     // Do not truncate or silently discard genuine findings to obtain a pass.
     // The bounded count and phase explain why aggregation refused approval.
     throw new ReviewFailure(REVIEW_ERROR_CODES.REVIEW_INCOMPLETE, {
       phase: "aggregation_overflow",
-      findingCount: findings.length,
+      findingCount: aggregated.findings.length,
     });
   }
   return {
     sourceDigest: digest(bundle),
     complete: true,
     summary: `Reviewed ${coverage.length} complete files and cross-file interactions.`,
-    findings,
+    findings: aggregated.findings,
+    findingTotals: {
+      observed: aggregated.total,
+      distinct: aggregated.findings.length,
+      duplicates: aggregated.duplicates,
+    },
     passed: findings.length === 0,
     coverage,
   };
