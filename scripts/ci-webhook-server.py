@@ -8,7 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from importlib.machinery import SourceFileLoader
 
-verify = SourceFileLoader('wakeup', str(Path(__file__).with_name('fleet_webhook_wakeup.py') if Path(__file__).name == 'fleet_webhook_server.py' else Path(__file__).with_name('ci-webhook-wakeup.py'))).load_module().authorised
+wakeup = SourceFileLoader('wakeup', str(Path(__file__).with_name('fleet_webhook_wakeup.py') if Path(__file__).name == 'fleet_webhook_server.py' else Path(__file__).with_name('ci-webhook-wakeup.py'))).load_module()
+verify = wakeup.authorised
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -19,7 +20,12 @@ class Handler(BaseHTTPRequestHandler):
         if not size.isdecimal() or int(size) > 65536:
             self.send_error(413)
             return
-        if not verify(self.headers, self.rfile.read(int(size)), self.server.secret):
+        payload = self.rfile.read(int(size))
+        if self.headers.get('X-GitHub-Event') == 'ping' and wakeup.verified_signature(self.headers, payload, self.server.secret):
+            self.send_response(200)
+            self.end_headers()
+            return
+        if not verify(self.headers, payload, self.server.secret):
             self.send_error(403)
             return
         result = subprocess.run(('systemctl', '--user', 'start', '--no-block', 'local-ci-fleet.service'),
