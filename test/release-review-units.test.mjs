@@ -63,6 +63,24 @@ test("cross-file response with a mismatched request digest refuses release", asy
   );
 });
 
+test("chunk request explicitly constrains model findings to exact path and line range", async () => {
+  let observed = false;
+  const infer = async (_route, prompt, data) => {
+    if (!data.bundle.reviewedSummaries) {
+      observed = true;
+      assert.match(prompt, /EXACTLY ONE file/);
+      assert.match(prompt, /Valid finding.file MUST equal that exact path/);
+      assert.match(prompt, /Valid finding.line MUST be an integer/);
+      assert.match(prompt, /return complete=false/);
+    }
+    return {
+      value: { sourceDigest: data.sourceDigest, complete: true, summary: "checked", findings: [] },
+    };
+  };
+  await reviewReleaseUnits(route, "review", bundle, {}, infer);
+  assert.equal(observed, true);
+});
+
 test("missing or incomplete unit refuses release without clean verdict", async () => {
   let calls = 0;
   const infer = async (_route, _prompt, data) => ({

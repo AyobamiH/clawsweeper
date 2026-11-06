@@ -366,7 +366,7 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
       const data = { sourceDigest: digest(unit), bundle: unit };
       const chunkPrompt =
         prompt +
-        ` Review only ${file.path} lines ${chunk.lineStart}-${chunk.lineEnd}. Every supplied line is numbered with its original position. Return complete=true only after assessing every supplied line.`;
+        ` This request reviews EXACTLY ONE file: ${JSON.stringify(file.path)}. Valid finding.file MUST equal that exact path (not a referenced dependency, alias, basename, or other file). Valid finding.line MUST be an integer from ${chunk.lineStart} to ${chunk.lineEnd}, inclusive. Every supplied line is numbered with its original position. If a suspected defect requires evidence in another file or outside these lines, do not invent an anchored finding: return complete=false with a short summary explaining insufficient scope. Return complete=true only after assessing every supplied line. Severity MUST be P0, P1 or P2.`;
       const response = await infer(route, chunkPrompt, data, SCHEMA, {
         env,
         purpose: "source-review",
