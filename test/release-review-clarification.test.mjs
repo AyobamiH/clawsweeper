@@ -42,7 +42,10 @@ test("bounded clarification preserves real finding and blocks release", async ()
 test("clarification cannot erase findings", async () => {
   await assert.rejects(
     run(() => []),
-    (e) => e instanceof SourceFindingError && e.reason === "invalid_severity",
+    (e) =>
+      e instanceof SourceFindingError &&
+      e.reason === "invalid_severity" &&
+      e.context.clarification === "clarification_contract_violation",
   );
 });
 test("clarification cannot rewrite valid description", async () => {

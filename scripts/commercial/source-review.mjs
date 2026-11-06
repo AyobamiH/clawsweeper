@@ -381,7 +381,16 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
             decision.findings.length > 0 && !decision.passed,
             "clarification erased blocking findings",
           );
-        } catch {
+        } catch (clarificationError) {
+          // Preserve the original blocking error, but classify why the one
+          // clarification failed. Never retain raw provider text or findings.
+          const reason =
+            clarificationError instanceof SourceFindingError
+              ? "invalid_clarified_finding"
+              : clarificationError?.name === "ReviewFailure"
+                ? "provider_failure"
+                : "clarification_contract_violation";
+          error.context = { ...error.context, clarification: reason };
           throw error;
         }
       }
