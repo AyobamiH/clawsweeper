@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { assert, digest, safePath } from "./contract.mjs";
 import { selectCommercialRoute } from "./inference.mjs";
 import { workersAiJson } from "./workers-ai.mjs";
+import { ReviewFailure, REVIEW_ERROR_CODES } from "./review-errors.mjs";
 import { modelEnvironment, runModel } from "./codex-runtime.mjs";
 
 const SCHEMA = {
@@ -234,10 +235,17 @@ export function sourceReviewDecision(
   releaseMode = false,
   expectedDigest = digest(bundle),
 ) {
-  assert(
-    value && Object.keys(value).sort().join(",") === "complete,findings,sourceDigest,summary",
-    "unexpected source-review output",
-  );
+  // Diagnose the structural contract without logging untrusted keys or values.
+  // Extra or missing fields must never be silently stripped to obtain approval.
+  const requiredKeys = ["complete", "findings", "sourceDigest", "summary"];
+  const receivedKeys =
+    value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA, { phase: "result_not_object" });
+  if (requiredKeys.some((key) => !Object.hasOwn(value, key)))
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA, { phase: "result_missing_fields" });
+  if (receivedKeys.length !== requiredKeys.length)
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA, { phase: "result_extra_fields" });
   assert(
     value.sourceDigest === expectedDigest &&
       typeof value.complete === "boolean" &&

@@ -31,6 +31,32 @@ test("classifies invalid finding fields without leaking content", () => {
   ])
     assert.equal(sourceFindingDiagnostic(finding, bundle, chunk), reason);
 });
+test("malformed response shape reports bounded categories without exposing untrusted fields", () => {
+  const valid = { sourceDigest: digest(bundle), complete: true, summary: "checked", findings: [] };
+  for (const [value, phase] of [
+    [null, "result_not_object"],
+    [
+      {
+        ...valid,
+        findings: undefined,
+        summary: undefined,
+        sourceDigest: undefined,
+        complete: undefined,
+        privateToken: "sensitive",
+      },
+      "result_extra_fields",
+    ],
+    [{ complete: true, findings: [] }, "result_missing_fields"],
+    [{ ...valid, privateToken: "sensitive" }, "result_extra_fields"],
+  ])
+    assert.throws(
+      () => sourceReviewDecision(value, bundle),
+      (e) =>
+        e.code === "provider_schema" &&
+        e.phase === phase &&
+        !JSON.stringify(e).includes("sensitive"),
+    );
+});
 test("genuine finding remains actionable and blocks approval", () => {
   const value = {
     sourceDigest: digest(bundle),
