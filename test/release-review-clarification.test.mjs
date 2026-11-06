@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reviewReleaseUnits, SourceFindingError } from "../scripts/commercial/source-review.mjs";
+import {
+  reviewReleaseUnits,
+  SourceFindingError,
+  UNCLASSIFIED_SEVERITY,
+} from "../scripts/commercial/source-review.mjs";
 const file = {
   path: "a.ts",
   before: "old",
@@ -16,8 +20,7 @@ const bundle = {
   files: [file],
 };
 const route = { provider: "cloudflare-workers-ai" };
-const finding = { severity: "Critical", file: "a.ts", line: 1, description: "genuine issue" };
-const run = async (change) => {
+const run = async (finding) => {
   let calls = 0;
   const infer = async (_r, _p, data) => {
     calls++;
@@ -26,43 +29,44 @@ const run = async (change) => {
         sourceDigest: data.sourceDigest,
         complete: true,
         summary: "reviewed",
-        findings: calls === 1 ? [finding] : calls === 2 ? change(finding) : [],
+        findings: calls === 1 ? [finding] : [],
       },
     };
   };
-  const result = await reviewReleaseUnits(route, "review", bundle, {}, infer);
-  return { result, calls };
+  try {
+    return { result: await reviewReleaseUnits(route, "review", bundle, {}, infer), calls };
+  } catch (error) {
+    error.calls = calls;
+    throw error;
+  }
 };
-test("bounded clarification preserves real finding and blocks release", async () => {
-  const { result, calls } = await run((f) => [{ ...f, severity: "P1" }]);
-  assert.equal(calls, 3);
+test("unclassified finding is retained without an additional model clarification", async () => {
+  const { result, calls } = await run({
+    severity: "Blocker",
+    file: "a.ts",
+    line: 1,
+    description: "genuine issue",
+  });
+  assert.equal(calls, 2);
   assert.equal(result.passed, false);
+  assert.equal(result.findings[0].severity, UNCLASSIFIED_SEVERITY);
   assert.equal(result.findings[0].description, "genuine issue");
 });
-test("clarification cannot erase findings", async () => {
+test("unknown source file fails closed without clarification", async () => {
   await assert.rejects(
-    run(() => []),
-    (e) =>
-      e instanceof SourceFindingError &&
-      e.reason === "invalid_severity" &&
-      e.context.clarification === "clarification_contract_violation",
+    run({ severity: "critical", file: "other.ts", line: 1, description: "issue" }),
+    (e) => e instanceof SourceFindingError && e.calls === 1,
   );
 });
-test("clarification cannot rewrite valid description", async () => {
+test("invalid source line fails closed without clarification", async () => {
   await assert.rejects(
-    run((f) => [{ ...f, severity: "P1", description: "changed" }]),
-    (e) => e instanceof SourceFindingError,
+    run({ severity: "critical", file: "a.ts", line: -1, description: "issue" }),
+    (e) => e instanceof SourceFindingError && e.calls === 1,
   );
 });
-test("clarification cannot alter original source line", async () => {
+test("empty finding description fails closed without clarification", async () => {
   await assert.rejects(
-    run((f) => [{ ...f, severity: "P1", line: 2 }]),
-    (e) => e instanceof SourceFindingError,
-  );
-});
-test("clarification cannot return another invalid severity", async () => {
-  await assert.rejects(
-    run((f) => [{ ...f, severity: "Blocker" }]),
-    (e) => e instanceof SourceFindingError,
+    run({ severity: "critical", file: "a.ts", line: 1, description: "" }),
+    (e) => e instanceof SourceFindingError && e.calls === 1,
   );
 });
