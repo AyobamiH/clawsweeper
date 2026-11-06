@@ -58,6 +58,18 @@ for (const [name, fetch, code, retryEligible] of cases)
     );
     assert.equal(calls, 1);
   });
+test("known incomplete review phases remain bounded and fail closed", () => {
+  assert.deepEqual(classifyReviewFailure(new Error("release source chunk incomplete")), {
+    category: "review_incomplete",
+    phase: "chunk",
+    retryEligible: false,
+  });
+  assert.deepEqual(classifyReviewFailure(new Error("cross-file review incomplete")), {
+    category: "review_incomplete",
+    phase: "cross_file",
+    retryEligible: false,
+  });
+});
 test("unexpected errors remain sanitised and non-retryable", () => {
   assert.deepEqual(classifyReviewFailure(new Error("private credential")), {
     category: "unexpected_error",

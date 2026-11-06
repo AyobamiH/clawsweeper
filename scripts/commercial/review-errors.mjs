@@ -39,5 +39,15 @@ export function classifyReviewFailure(error) {
       ...error.context,
       retryEligible: false,
     };
+  // Only these fixed, code-owned assertions may be surfaced. Never forward
+  // arbitrary exception messages, model text, source content or URLs.
+  const known = {
+    "release source chunk incomplete": ["review_incomplete", "chunk"],
+    "cross-file review incomplete": ["review_incomplete", "cross_file"],
+    "release findings exceed bound": ["review_incomplete", "aggregation"],
+    "release source file count exceeds bound": ["preflight_refused", "coverage"],
+  };
+  const match = error?.name === "Error" ? known[error.message] : null;
+  if (match) return { category: match[0], phase: match[1], retryEligible: false };
   return { category: "unexpected_error", retryEligible: false };
 }
