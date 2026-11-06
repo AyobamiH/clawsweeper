@@ -46,6 +46,13 @@ export function classifyReviewFailure(error) {
     "cross-file review incomplete": ["review_incomplete", "cross_file"],
     "release findings exceed bound": ["review_incomplete", "aggregation"],
     "release source file count exceeds bound": ["preflight_refused", "coverage"],
+    "unexpected source-review output": ["provider_schema", "result_shape"],
+    "source review identity or result invalid": ["provider_schema", "result_identity"],
+    "invalid source findings": ["provider_schema", "finding_shape"],
+    "source changed during review": ["preflight_refused", "source_integrity"],
+    "unsupported release file count": ["preflight_refused", "coverage"],
+    "release source exceeds chunk count limit": ["preflight_refused", "coverage"],
+    "complete inference context exceeds budget": ["preflight_refused", "request_budget"],
   };
   const match = error?.name === "Error" ? known[error.message] : null;
   if (match) return { category: match[0], phase: match[1], retryEligible: false };

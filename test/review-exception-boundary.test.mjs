@@ -70,6 +70,20 @@ test("known incomplete review phases remain bounded and fail closed", () => {
     retryEligible: false,
   });
 });
+test("review result identity and shape failures have sanitised phase codes", () => {
+  for (const [message, category, phase] of [
+    ["unexpected source-review output", "provider_schema", "result_shape"],
+    ["source review identity or result invalid", "provider_schema", "result_identity"],
+    ["invalid source findings", "provider_schema", "finding_shape"],
+    ["source changed during review", "preflight_refused", "source_integrity"],
+  ]) {
+    assert.deepEqual(classifyReviewFailure(new Error(message)), {
+      category,
+      phase,
+      retryEligible: false,
+    });
+  }
+});
 test("unexpected errors remain sanitised and non-retryable", () => {
   assert.deepEqual(classifyReviewFailure(new Error("private credential")), {
     category: "unexpected_error",
