@@ -15,6 +15,13 @@ const bundle = {
   ],
 };
 
+test("production release review refuses inference before any provider call without explicit budget", async () => {
+  await assert.rejects(
+    reviewReleaseUnits(route, "review", bundle, {}),
+    (e) => e.code === "preflight_refused" && e.phase === "inference_budget",
+  );
+});
+
 test("release review requires every complete file and a cross-file pass", async () => {
   const seen = [];
   const infer = async (_route, _prompt, data) => {

@@ -357,6 +357,18 @@ export function aggregateReleaseFindings(findings) {
 export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
   assert(route.provider === "cloudflare-workers-ai", "Workers AI route required");
   assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
+  // Cost gate before any inference. This release path is intentionally disabled
+  // by default until deterministic replay and an explicit request budget pass.
+  const requiredCalls = bundle.files.reduce(
+    (sum, file) => sum + releaseSourceChunks(file).length,
+    1,
+  );
+  const approvedBudget = Number(env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS || 0);
+  if (
+    infer === workersAiJson &&
+    (!Number.isSafeInteger(approvedBudget) || approvedBudget < 1 || requiredCalls > approvedBudget)
+  )
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PREFLIGHT, { phase: "inference_budget" });
   const findings = [];
   const summaries = [];
   const coverage = [];
