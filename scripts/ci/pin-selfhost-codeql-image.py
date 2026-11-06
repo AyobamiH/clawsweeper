@@ -10,6 +10,7 @@ ROOT = Path.home() / '.local/share/local-ci/clawsweeper-selfhosted'
 CONTROLS = ROOT / 'controls.json'
 PROVENANCE = ROOT / 'cache/codeql-2.27.4/image-provenance.json'
 DIGEST = '393bf92b66596141ec93baf9b483f4a350f3749916c922fed0dd63c67706047d'
+ARCHIVE_DIGEST = 'ec7d95d9a25734ad9553aed70f04bb3394a79b86b9eee44c84fa7f92970a5176'
 BASE = 'sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3'
 TAG = 'clawsweeper-codeql-runner:node24-codeql-2.27.4'
 
@@ -26,8 +27,9 @@ def main():
     if controls.get('enabled') is not False:
         raise RuntimeError('disable admissions before changing the pinned image')
     data = trusted_json(PROVENANCE)
-    assert data.get('schema') == 'clawsweeper.codeql-image.v1'
+    assert data.get('schema') == 'clawsweeper.codeql-image.v2'
     assert data.get('codeql_bundle_sha256') == DIGEST
+    assert data.get('codeql_archive_sha256') == ARCHIVE_DIGEST
     assert data.get('base_image_sha256') == BASE
     assert data.get('image_tag') == TAG
     pin = data['image_sha256']

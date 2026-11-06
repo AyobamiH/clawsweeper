@@ -15,7 +15,7 @@ class WorkflowSources(unittest.TestCase):
         for part in ('- actions', '- javascript-typescript', 'security-events: write',
                      'github/codeql-action/init@v4', 'github/codeql-action/analyze@v4',
                      'clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}',
-                     'tools: /opt/clawsweeper-codeql/codeql-linux64.zip',
+                     'tools: /opt/clawsweeper-codeql/codeql-bundle.tar.gz',
                      'timeout-minutes: 35'):
             self.assertIn(part,s)
         self.assertNotIn('runs-on: ubuntu-latest',s)
