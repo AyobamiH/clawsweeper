@@ -235,13 +235,72 @@ export async function prepareSourceReview(root, base, purpose = "commercial") {
   return { bundle, prompt, data };
 }
 
+// Release-only: review every complete changed file separately, then a bounded
+// cross-file pass. A missing/truncated response refuses the whole release.
+export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
+  assert(route.provider === "cloudflare-workers-ai", "Workers AI route required");
+  assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
+  const findings = [];
+  const summaries = [];
+  const coverage = [];
+  for (const file of bundle.files) {
+    const unit = { ...bundle, files: [file] };
+    const data = { sourceDigest: digest(unit), bundle: unit };
+    const response = await infer(route, prompt, data, SCHEMA, { env, purpose: "source-review" });
+    const decision = sourceReviewDecision(response.value, unit);
+    assert(decision.complete, "release source unit incomplete");
+    coverage.push({ path: file.path, sourceDigest: data.sourceDigest });
+    summaries.push(`${file.path}: ${decision.summary}`);
+    findings.push(...decision.findings);
+  }
+  const interaction = {
+    schema: bundle.schema,
+    repository: bundle.repository,
+    head: bundle.head,
+    base: bundle.base,
+    files: bundle.files.map((f) => ({
+      path: f.path,
+      beforeDigest: f.before === null ? null : digest(f.before),
+      afterDigest: f.after === null ? null : digest(f.after),
+      beforeMode: f.beforeMode,
+      afterMode: f.afterMode,
+    })),
+    reviewedSummaries: summaries,
+  };
+  const interactionData = { sourceDigest: digest(interaction), bundle: interaction };
+  const interactionPrompt =
+    prompt +
+    " Cross-file pass: assess interactions using the reviewed file summaries and immutable digests. If full code context is required for a finding, return complete=false; never invent evidence.";
+  const response = await infer(route, interactionPrompt, interactionData, SCHEMA, {
+    env,
+    purpose: "source-review",
+  });
+  const interactionDecision = sourceReviewDecision(response.value, {
+    files: bundle.files,
+    ...interaction, // bind findings to the full changed-file set
+  });
+  assert(interactionDecision.complete, "cross-file review incomplete");
+  findings.push(...interactionDecision.findings);
+  assert(findings.length <= 30, "release findings exceed bound");
+  return {
+    sourceDigest: digest(bundle),
+    complete: true,
+    summary: `Reviewed ${coverage.length} complete files and cross-file interactions.`,
+    findings,
+    passed: findings.length === 0,
+    coverage,
+  };
+}
+
 export async function reviewSource(root, base, output, env = process.env, purpose = "commercial") {
   root = path.resolve(root);
   output = path.resolve(output);
   const { bundle, prompt, data } = await prepareSourceReview(root, base, purpose);
   const route = await selectCommercialRoute(env);
   let value;
-  if (route.provider === "cloudflare-workers-ai")
+  if (route.provider === "cloudflare-workers-ai" && purpose === "repository-release")
+    value = await reviewReleaseUnits(route, prompt, bundle, env);
+  else if (route.provider === "cloudflare-workers-ai")
     value = (await workersAiJson(route, prompt, data, SCHEMA, { env, purpose: "source-review" }))
       .value;
   else {
@@ -264,7 +323,10 @@ export async function reviewSource(root, base, output, env = process.env, purpos
     });
     value = JSON.parse(await readFile(resultPath, "utf8"));
   }
-  const decision = sourceReviewDecision(value, bundle);
+  const decision =
+    purpose === "repository-release" && route.provider === "cloudflare-workers-ai"
+      ? value
+      : sourceReviewDecision(value, bundle);
   assert(
     digest(await sourceBundle(root, base, purpose !== "repository-release")) === digest(bundle),
     "source changed during review",
@@ -277,6 +339,7 @@ export async function reviewSource(root, base, output, env = process.env, purpos
     model: route.model,
     transport: route.transport,
     purpose,
+    ...(decision.coverage ? { coverage: decision.coverage } : {}),
     repository: bundle.repository,
     head: bundle.head,
     base,
