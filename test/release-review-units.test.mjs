@@ -22,6 +22,14 @@ test("production release review refuses inference before any provider call witho
   );
 });
 
+test("explicitly oversized live call budget cannot override the hard ceiling", async () => {
+  const large = { ...bundle, files: [{ ...bundle.files[0], after: "line\n".repeat(650) }] };
+  await assert.rejects(
+    reviewReleaseUnits(route, "review", large, { CLAWSWEEPER_RELEASE_AI_MAX_CALLS: "10000" }),
+    (e) => e.code === "preflight_refused" && e.phase === "inference_budget",
+  );
+});
+
 test("release review requires every complete file and a cross-file pass", async () => {
   const seen = [];
   const infer = async (_route, _prompt, data) => {

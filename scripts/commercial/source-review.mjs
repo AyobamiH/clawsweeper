@@ -364,9 +364,16 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
     1,
   );
   const approvedBudget = Number(env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS || 0);
+  // An explicit environment value is permission to spend within a ceiling,
+  // not permission for unbounded full-repository inference. Large candidates
+  // must use offline replay and smaller independently selected review scopes.
+  const HARD_MAX_RELEASE_AI_CALLS = 8;
   if (
     infer === workersAiJson &&
-    (!Number.isSafeInteger(approvedBudget) || approvedBudget < 1 || requiredCalls > approvedBudget)
+    (!Number.isSafeInteger(approvedBudget) ||
+      approvedBudget < 1 ||
+      requiredCalls > approvedBudget ||
+      requiredCalls > HARD_MAX_RELEASE_AI_CALLS)
   )
     throw new ReviewFailure(REVIEW_ERROR_CODES.PREFLIGHT, { phase: "inference_budget" });
   const findings = [];
