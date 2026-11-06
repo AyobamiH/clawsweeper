@@ -225,13 +225,19 @@ export class SourceFindingError extends Error {
   }
 }
 
-export function sourceReviewDecision(value, bundle, chunk = null, releaseMode = false) {
+export function sourceReviewDecision(
+  value,
+  bundle,
+  chunk = null,
+  releaseMode = false,
+  expectedDigest = digest(bundle),
+) {
   assert(
     value && Object.keys(value).sort().join(",") === "complete,findings,sourceDigest,summary",
     "unexpected source-review output",
   );
   assert(
-    value.sourceDigest === digest(bundle) &&
+    value.sourceDigest === expectedDigest &&
       typeof value.complete === "boolean" &&
       typeof value.summary === "string" &&
       value.summary.length > 0 &&
@@ -395,6 +401,7 @@ export async function reviewReleaseUnits(route, prompt, bundle, env, infer = wor
     interactionBundle,
     null,
     true,
+    interactionData.sourceDigest,
   );
   assert(interactionDecision.complete, "cross-file review incomplete");
   findings.push(...interactionDecision.findings);
