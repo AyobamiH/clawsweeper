@@ -34,7 +34,8 @@ jobs:
         X64,
         "clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}",
       ]
-    timeout-minutes: 20
+    # Scanner is supplied by the pinned, isolated runner image. Bound actual analysis separately.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +49,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+          # Offline, SHA-256 verified CodeQL 2.27.4 bundle in disposable image.
+          # No job-level 418 MB release download and no host filesystem mount.
+          tools: /opt/clawsweeper-codeql/codeql-linux64.zip
 
       - uses: github/codeql-action/analyze@v4
         with:

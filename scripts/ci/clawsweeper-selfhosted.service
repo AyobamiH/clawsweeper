@@ -8,7 +8,7 @@ Type=oneshot
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/usr/bin/python3 %h/.local/share/local-ci/clawsweeper-selfhosted/self_hosted_executor.py cycle
 WorkingDirectory=%h/.local/share/local-ci/clawsweeper-selfhosted
-TimeoutStartSec=40min
+TimeoutStartSec=45min
 TimeoutStopSec=35sec
 KillMode=control-group
 UMask=0077

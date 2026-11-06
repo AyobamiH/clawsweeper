@@ -26,10 +26,11 @@ CONTROLS = ROOT / "controls.json"
 LOCK = ROOT / "executor.lock"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
+SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
 NETWORK_IMAGE = "sha256:f9e6f27cf17460dfb82250c5ac94f5a829956692c2e47615a870a4ec9312b802"
 LABEL = "io.ayobamih.clawsweeper.selfhosted"
 REPO_SLUG = "repos/" + REPOSITORY
-MAX_SECONDS = 32 * 60
+MAX_SECONDS = 42 * 60
 
 
 def now():
@@ -144,7 +145,20 @@ def source_authorised(candidate, controls):
     return True
 
 
-def capacity(candidate):
+def approved_job_image(candidate, controls):
+    if candidate.role != "security":
+        return IMAGE
+    pinned = controls.get("security_image_sha256")
+    if not isinstance(pinned, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", pinned):
+        raise AdmissionHold("codeql_image_not_pinned")
+    current = run_cli(["docker", "image", "inspect", SECURITY_IMAGE_NAME,
+                       "--format", "{{.Id}}"], timeout=15).strip()
+    if current != pinned:
+        raise AdmissionHold("codeql_image_drift")
+    return pinned
+
+
+def capacity(candidate, controls):
     # In-flight local CI belongs to another controller; defer, never compete.
     fleet = subprocess.run(["systemctl", "--user", "is-active", "local-ci-fleet.service"],
                            capture_output=True, text=True, timeout=5)
@@ -161,6 +175,7 @@ def capacity(candidate):
     image_id = run_cli(["docker", "image", "inspect", "clawsweeper-selfhost-runner:node24-gh245", "--format", "{{.Id}}"], timeout=15).strip()
     if image_id != IMAGE:
         raise AdmissionHold("runner_image_drift")
+    approved_job_image(candidate, controls)
     return True
 
 
@@ -218,12 +233,13 @@ def runner_job(candidate, controls):
     name = f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}"
     worker = name + "-worker"
     net = name + "-net"
+    image_id = approved_job_image(candidate, controls)
     receipt = {
         "schema": "clawsweeper.selfhosted-jit.v1", "run_id": candidate.run_id,
         "job_id": candidate.job_id, "attempt": candidate.run_attempt,
         "head_sha": candidate.sha, "workflow": candidate.workflow, "event": candidate.event,
         "role": candidate.role, "label": candidate.label, "runner_name": name,
-        "image_sha256": IMAGE, "state": "registration_uncertain", "created_at": now(),
+        "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
     }
     atomic(target / "receipt.json", receipt)
     # POST is non-idempotent: no implicit retries on timeout or partial response.
@@ -248,7 +264,7 @@ def runner_job(candidate, controls):
             cmd = ["docker", "run", "--rm", "--interactive", "--init", "--name", worker,
                    "--label", LABEL+"="+name, "--network", "container:"+net,
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "500",
-                   "--memory", "4g" if candidate.role == "security" else "2g", "--cpus", "2", IMAGE,
+                   "--memory", "4g" if candidate.role == "security" else "2g", "--cpus", "2", image_id,
                    "bash", "-ec", 'IFS= read -r config; exec ./run.sh --jitconfig "$config"']
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logfile, stderr=subprocess.STDOUT, text=True)
             process.stdin.write(encoded + "\n")
@@ -338,7 +354,7 @@ def main():
             try:
                 category_enabled(c, controls)
                 source_authorised(c, controls)
-                capacity(c)
+                capacity(c, controls)
                 result = runner_job(c, controls)
                 print(json.dumps(result))
                 return

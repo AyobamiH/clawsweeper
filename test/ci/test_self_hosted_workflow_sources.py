@@ -14,7 +14,9 @@ class WorkflowSources(unittest.TestCase):
         s = self.text('codeql.yml')
         for part in ('- actions', '- javascript-typescript', 'security-events: write',
                      'github/codeql-action/init@v4', 'github/codeql-action/analyze@v4',
-                     'clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}'):
+                     'clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}',
+                     'tools: /opt/clawsweeper-codeql/codeql-linux64.zip',
+                     'timeout-minutes: 35'):
             self.assertIn(part,s)
         self.assertNotIn('runs-on: ubuntu-latest',s)
 
@@ -57,5 +59,10 @@ class WorkflowSources(unittest.TestCase):
         self.assertNotIn('/var/run/docker.sock',controller)
         self.assertIn('--cap-drop',controller)
         self.assertIn('--security-opt',controller)
+        self.assertIn('codeql_image_not_pinned',controller)
+        self.assertIn('codeql_image_drift',controller)
+        builder=(ROOT/'scripts/ci/build-selfhost-codeql-runner.sh').read_text()
+        self.assertIn('393bf92b66596141ec93baf9b483f4a350f3749916c922fed0dd63c67706047d',builder)
+        self.assertIn('docker build --network none',builder)
 
 if __name__ == '__main__': unittest.main()

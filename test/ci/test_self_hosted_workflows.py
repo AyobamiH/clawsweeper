@@ -65,6 +65,18 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(policy.AdmissionHold, "target_base_not_main"):
             policy.classify(scenario, job("ops", "dispatch", "dispatch"))
 
+    def test_codeql_image_requires_owner_pin_and_verifies_tag(self):
+        c = policy.classify(run(), job())
+        with self.assertRaisesRegex(policy.AdmissionHold, 'codeql_image_not_pinned'):
+            executor.approved_job_image(c, {})
+        image = 'sha256:' + 'f'*64
+        with patch.object(executor, 'run_cli', return_value=image) as call:
+            self.assertEqual(executor.approved_job_image(c, {'security_image_sha256': image}), image)
+            self.assertIn('image', call.call_args.args[0])
+        with patch.object(executor, 'run_cli', return_value='sha256:'+'e'*64):
+            with self.assertRaisesRegex(policy.AdmissionHold, 'codeql_image_drift'):
+                executor.approved_job_image(c, {'security_image_sha256': image})
+
     def test_containerised_e2e_kept_on_hold_without_inner_daemon(self):
         c = policy.classify(run(".github/workflows/automerge-e2e.yml", actor="AyobamiH"),
                             job("isolation", "e2e", "production automerge flow"))
