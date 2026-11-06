@@ -134,12 +134,32 @@ jobs:
       - name: Install pinned dependencies without privileged Corepack symlinks
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pnpm-bin"
+          # Keep the package manager cache within this isolated job. Never
+          # install a floating version or write to privileged runner paths.
+          export COREPACK_HOME="$RUNNER_TEMP/corepack-cache"
+          mkdir -p "$COREPACK_HOME" "$RUNNER_TEMP/pnpm-bin"
           corepack enable --install-directory "$RUNNER_TEMP/pnpm-bin"
           echo "$RUNNER_TEMP/pnpm-bin" >> "$GITHUB_PATH"
           export PATH="$RUNNER_TEMP/pnpm-bin:$PATH"
-          corepack pnpm --version
-          pnpm install --frozen-lockfile
+          # A transient registry TLS reset must not require a new workflow.
+          # Every attempt still resolves the repository's exact pinned version.
+          for attempt in 1 2 3; do
+            if corepack pnpm --version; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Pinned package manager unavailable after bounded retries' >&2
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          test "$(pnpm --version)" = "11.10.0"
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Frozen dependency installation failed after bounded retries' >&2
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
           pnpm run build:node
       - name: Install existing trusted input scanner
         run: bash .github/actions/setup-review-tools/install.sh
