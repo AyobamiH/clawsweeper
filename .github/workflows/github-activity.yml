@@ -91,12 +91,34 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # This job executes repository code with notification secrets. The
+      # default branch is mutable between runner admission and checkout;
+      # require an owner-managed immutable revision matching the JIT pin.
+      - name: Require approved immutable notification source
+        if: steps.core-budget.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Missing approved source SHA' >&2; exit 1; }
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test "$actual" = "$APPROVED_SHA"
+
       - uses: actions/checkout@v7
         if: steps.core-budget.outputs.skip != 'true'
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
           filter: blob:none
           persist-credentials: false
+
+      - name: Verify checked-out notification source
+        if: steps.core-budget.outputs.skip != 'true'
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
 
       - uses: actions/setup-node@v6
         if: steps.core-budget.outputs.skip != 'true'

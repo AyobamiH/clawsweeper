@@ -58,6 +58,18 @@ class WorkflowSources(unittest.TestCase):
         smoke=s.split('  containment-smoke:\n',1)[1].split('  cleanup:\n',1)[0]
         self.assertNotIn('permission-administration: write',smoke)
 
+    def test_notification_checkout_is_owner_approved_sha_not_moving_default_branch(self):
+        s = self.text('github-activity.yml')
+        self.assertIn('vars.CLAWSWEEPER_TRUSTED_MAIN_SHA', s)
+        self.assertIn('Require approved immutable notification source', s)
+        self.assertIn('Verify checked-out notification source', s)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$APPROVED_SHA"', s)
+        self.assertNotIn('ref: ${{ github.event.repository.default_branch }}', s)
+        self.assertLess(s.index('Require approved immutable notification source'),
+                        s.index('      - uses: actions/checkout@v7'))
+        self.assertLess(s.index('Verify checked-out notification source'),
+                        s.index('      - name: Install dependencies'))
+
     def test_automerge_keeps_full_hermetic_scenarios_no_host_socket(self):
         s=self.text('automerge-e2e.yml')
         for fragment in ('clawsweeper-ci-isolation-${{ github.run_id }}-e2e',

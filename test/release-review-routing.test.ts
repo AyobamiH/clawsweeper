@@ -49,16 +49,16 @@ test("release preflight rejects uncommitted source without invoking inference", 
   }
 });
 
-test("release review uses existing owner runner and dedicated Workers AI secret, never merge authority", () => {
+test("release review uses isolated, immutable-source JIT runner and dedicated Workers AI secret, never merge authority", () => {
   const workflow = readFileSync(".github/workflows/workers-ai-fallback-acceptance.yml", "utf8");
   assert.match(workflow, /release-source-review:/);
-  assert.match(workflow, /runs-on: \[self-hosted, Linux, X64, clawsweeper-operations\]/);
+  assert.match(workflow, /clawsweeper-ci-ops-\$\{\{ github.run_id \}\}-release-review/);
   assert.match(
     workflow,
     /CLOUDFLARE_WORKERS_AI_TOKEN: \$\{\{ secrets\.CLOUDFLARE_WORKERS_AI_TOKEN \}\}/,
   );
   assert.match(workflow, /CLAWSWEEPER_INFERENCE_POLICY: auto/);
-  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /ref: \$\{\{ vars\.CLAWSWEEPER_TRUSTED_MAIN_SHA \}\}/);
   assert.match(workflow, /ref: \$\{\{ inputs\.release_head \}\}/);
   assert.match(workflow, /path: target/);
   assert.match(workflow, /node scripts\/review-release\.mjs --preflight/);

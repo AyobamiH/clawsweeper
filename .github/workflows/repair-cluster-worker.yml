@@ -148,16 +148,32 @@ concurrency:
 jobs:
   receipt:
     name: Deduplicate command dispatch receipt
-    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-repair-receipt"]
     permissions:
       actions: read
       contents: read
     outputs:
       proceed: ${{ steps.receipt.outputs.proceed }}
     steps:
+      - name: Require owner-approved immutable workflow source before checkout
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
       - uses: actions/checkout@v7
         with:
           filter: blob:none
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+      - name: Verify checked-out approved tooling before local actions
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
 
       - name: Install pinned GitHub CLI for repair APIs
         run: |
@@ -210,16 +226,32 @@ jobs:
     name: Provision ephemeral Cloudflare repair compute
     needs: receipt
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-repair-provision"]
     timeout-minutes: 10
     outputs:
-      plan: ${{ steps.runners.outputs.plan }}
-      execute: ${{ steps.runners.outputs.execute }}
-      attempt: ${{ steps.runners.outputs.attempt }}
+      plan: ${{ steps.validate_outputs.outputs.plan }}
+      execute: ${{ steps.validate_outputs.outputs.execute }}
+      attempt: ${{ steps.validate_outputs.outputs.attempt }}
     steps:
+      - name: Require owner-approved immutable workflow source before checkout
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+      - name: Verify checked-out approved tooling before local actions
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
       - name: Install pinned GitHub CLI for repair APIs
         run: |
           set -euo pipefail
@@ -247,12 +279,29 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
+      - id: validate_outputs
+        name: Verify exact-attempt disposable Cloudflare runner identities
+        env:
+          PLAN: ${{ steps.runners.outputs.plan }}
+          EXECUTE: ${{ steps.runners.outputs.execute }}
+          ATTEMPT: ${{ steps.runners.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$ATTEMPT" = "$GITHUB_RUN_ATTEMPT"
+          nonce="$(printf "%s" "$GITHUB_REPOSITORY:$GITHUB_RUN_ID" | sha256sum | cut -c1-16)"
+          test "$PLAN" = "csw-$nonce-plan"
+          test "$EXECUTE" = "csw-$nonce-execute"
+          test "$PLAN" != "$EXECUTE"
+          echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
+          echo "execute=$EXECUTE" >> "$GITHUB_OUTPUT"
+          echo "attempt=$ATTEMPT" >> "$GITHUB_OUTPUT"
 
   cluster:
     name: Plan and review cluster
     needs: [receipt, provision]
-    if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
+    if: ${{ needs.receipt.outputs.proceed == 'true' && needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan != '' && needs.provision.outputs.execute != '' }}
+    runs-on: ${{ needs.provision.outputs.plan || 'clawsweeper-disposable-plan-not-provisioned' }}
     timeout-minutes: 90
     outputs:
       allow_execute: ${{ steps.capture_gates.outputs.allow_execute }}
@@ -623,8 +672,8 @@ jobs:
   execute:
     name: Execute and apply cluster actions
     needs: [cluster, provision]
-    if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run }}
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
+    if: ${{ needs.cluster.result == 'success' && needs.cluster.outputs.job_exists == '1' && needs.cluster.outputs.allow_execute == '1' && (needs.cluster.outputs.effective_mode == 'execute' || needs.cluster.outputs.effective_mode == 'autonomous') && !inputs.dry_run && needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan != '' && needs.provision.outputs.execute != '' }}
+    runs-on: ${{ needs.provision.outputs.execute || 'clawsweeper-disposable-execute-not-provisioned' }}
     timeout-minutes: 120
     permissions:
       actions: read
@@ -1226,12 +1275,28 @@ jobs:
     name: Destroy ephemeral Cloudflare repair compute
     needs: [receipt, provision, cluster, execute]
     if: ${{ always() && needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ${{ vars.CLAWSWEEPER_OPERATIONAL_RUNNER || 'clawsweeper-operations' }}
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-repair-cleanup"]
     timeout-minutes: 10
     steps:
+      - name: Require owner-approved immutable workflow source before checkout
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+      - name: Verify checked-out approved tooling before local actions
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
       - name: Install pinned GitHub CLI for repair APIs
         run: |
           set -euo pipefail

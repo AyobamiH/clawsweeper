@@ -101,7 +101,7 @@ jobs:
 
   release-source-review:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_review == true && github.repository == 'AyobamiH/clawsweeper' }}
-    runs-on: [self-hosted, Linux, X64, clawsweeper-operations]
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-release-review"]
     # Checkout and pinned tool bootstrap consume several minutes on the isolated
     # runner. Keep a finite job budget while allowing the bounded per-chunk review.
     timeout-minutes: 35
@@ -112,9 +112,7 @@ jobs:
       CLAWSWEEPER_RELEASE_AI_MAX_CALLS: ${{ inputs.release_ai_max_calls || 0 }}
       CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
       CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_QUOTA_URL }}
-      CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_QUOTA_SECRET }}
     steps:
       - name: Validate pinned release inputs before checkout
         env:
@@ -125,12 +123,27 @@ jobs:
           [[ "$REVIEW_BASE" =~ ^[a-f0-9]{40}$ ]]
           [[ "$REVIEW_HEAD" =~ ^[a-f0-9]{40}$ ]]
           test "$REVIEW_BASE" != "$REVIEW_HEAD"
+      - name: Require owner-approved immutable workflow source before checkout
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
       - name: Checkout trusted review tooling at workflow revision
         uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ github.sha }}
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+      - name: Verify checked-out approved tooling before local actions
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
       - name: Checkout pinned target source as review-only data
         uses: actions/checkout@v7
         with:
@@ -177,6 +190,8 @@ jobs:
         run: node scripts/review-release.mjs --preflight target "$REVIEW_BASE" "$REVIEW_HEAD"
       - name: Review exact source without mutation
         env:
+          CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+          CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_QUOTA_SECRET }}
           REVIEW_BASE: ${{ inputs.release_base }}
           REVIEW_HEAD: ${{ inputs.release_head }}
         run: |

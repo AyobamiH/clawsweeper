@@ -15,11 +15,21 @@ test("repair jobs use provisioned Cloudflare identities and always clean up", ()
   const workflow = parse(readFileSync(".github/workflows/repair-cluster-worker.yml", "utf8"));
   assert.equal(workflow.concurrency.group, "cloudflare-repair-compute");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
-  assert.match(workflow.jobs.cluster["runs-on"], /needs\.provision\.outputs\.attempt/);
+  // The exact-attempt fence must be checked before scheduling the disposable job.
+  // Neither worker may fall back to a shared owner-operated runner.
+  for (const job of [workflow.jobs.cluster, workflow.jobs.execute]) {
+    assert.match(job.if, /needs\.provision\.result == 'success'/);
+    assert.match(job.if, /needs\.provision\.outputs\.attempt/);
+    assert.match(job.if, /needs\.provision\.outputs\.plan != ''/);
+    assert.match(job.if, /needs\.provision\.outputs\.execute != ''/);
+    assert.doesNotMatch(job["runs-on"], /clawsweeper-operations|CLAWSWEEPER_OPERATIONAL_RUNNER/);
+  }
   assert.match(workflow.jobs.cluster["runs-on"], /needs\.provision\.outputs\.plan/);
-  assert.match(workflow.jobs.execute["runs-on"], /needs\.provision\.outputs\.attempt/);
   assert.match(workflow.jobs.execute["runs-on"], /needs\.provision\.outputs\.execute/);
-  assert.equal(workflow.jobs.provision.outputs.attempt, "${{ steps.runners.outputs.attempt }}");
+  assert.equal(
+    workflow.jobs.provision.outputs.attempt,
+    "${{ steps.validate_outputs.outputs.attempt }}",
+  );
   assert.match(
     workflow.jobs.cluster.steps[0].run,
     /failed-jobs-only rerun cannot reuse destroyed Cloudflare compute/,

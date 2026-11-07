@@ -3,7 +3,9 @@
 Requires a separately provisioned HTTPS relay and a shared HMAC secret.
 """
 import os
+import re
 import subprocess
+from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from importlib.machinery import SourceFileLoader
@@ -13,7 +15,11 @@ verify = wakeup.authorised
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        if self.path != '/github':
+        # The random, non-authentication owner marker distinguishes a webhook
+        # created before a crash. HMAC remains mandatory for every request.
+        destination = urlsplit(self.path)
+        if destination.path != '/github' or destination.fragment or (destination.query and
+                not re.fullmatch(r'cs_hook=[a-f0-9]{48}', destination.query)):
             self.send_error(404)
             return
         size = self.headers.get('Content-Length', '')

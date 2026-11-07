@@ -127,6 +127,15 @@ def load_controls():
 def source_authorised(candidate, controls):
     if candidate.role != "ops":
         return True
+    # GitHub Actions REST run/check-suite metadata can report a PR head SHA
+    # while the executed GITHUB_SHA was a synthetic PR merge revision. A
+    # matching current main and PR head workflow is not proof of historical
+    # executed merge bytes. Never register a privileged JIT worker on that
+    # incomplete provenance: use a verified owner-dispatch/default-branch
+    # event or a separately reviewed, run-bound merge attestation instead.
+    if candidate.event in ("pull_request", "pull_request_review",
+                           "pull_request_review_comment"):
+        raise AdmissionHold("executed_pr_merge_workflow_unverifiable")
     main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
     if is_release_preview(candidate, controls):
         # Explicitly approved, source-pinned candidate can prove the Cloudflare
@@ -165,6 +174,17 @@ def source_authorised(candidate, controls):
         raise AdmissionHold("default_branch_source_drift")
     if main != controls.get("trusted_main_sha"):
         raise AdmissionHold("trusted_workflow_head_changed")
+    if candidate.slot == "notify":
+        # The workflow must check out exactly the owner's independently
+        # accepted commit, not the mutable default branch or a PR merge SHA.
+        # Missing or unreadable repository variables fail closed.
+        try:
+            approved = gh(f"{REPO_SLUG}/actions/variables/CLAWSWEEPER_TRUSTED_MAIN_SHA")
+            approved_sha = approved.get("value")
+        except (RuntimeError, AttributeError, ValueError) as exc:
+            raise AdmissionHold("notification_checkout_pin_unverifiable") from exc
+        if approved_sha != main:
+            raise AdmissionHold("notification_checkout_pin_mismatch")
     # A source hash mismatch is an authority change, not a reason to auto-update
     # the owner's accepted baseline or execute the unreviewed revision.
     manifest = controls.get("trusted_workflow_sha256", {})
@@ -278,6 +298,39 @@ def runner_absent_verified(runner_id, name):
     return True
 
 
+def lookup_owned_runner(name, label, known_id=None, *, allow_busy=False):
+    """Exact named runner in COMPLETE GitHub inventory, with immutable label binding.
+
+    A missing registration is safe; an ambiguous/partial inventory is not.
+    Never use a name-only match to delete a foreign or replacement runner.
+    """
+    inventory = gh(f"{REPO_SLUG}/actions/runners?per_page=100")
+    runners = inventory.get("runners")
+    total = inventory.get("total_count")
+    if (not isinstance(runners, list) or not isinstance(total, int)
+            or isinstance(total, bool) or total != len(runners)):
+        raise RuntimeError("runner_inventory_unbounded")
+    matches = [r for r in runners if r.get("name") == name or (
+        isinstance(known_id, int) and r.get("id") == known_id)]
+    if len(matches) > 1:
+        raise RuntimeError("ambiguous_owned_runner_identity")
+    if not matches:
+        return None
+    runner = matches[0]
+    if (runner.get("name") != name or not isinstance(runner.get("id"), int)
+            or isinstance(runner.get("id"), bool)
+            or (known_id is not None and runner["id"] != known_id)):
+        raise RuntimeError("runner_identity_mismatch")
+    labels = runner.get("labels", [])
+    if (not isinstance(labels, list) or not all(isinstance(x, dict) for x in labels)
+            or not {"self-hosted", "Linux", "X64", label}.issubset(
+                {item.get("name") for item in labels})):
+        raise RuntimeError("runner_label_mismatch")
+    if runner.get("busy") is not False and not allow_busy:
+        raise RuntimeError("runner_still_busy_unverified")
+    return runner["id"]
+
+
 def prepare_network(name, owner):
     image = run_cli(["docker", "image", "inspect", "poststeward-ops-net:1", "--format", "{{.Id}}"], timeout=15).strip()
     if image != NETWORK_IMAGE:
@@ -321,21 +374,26 @@ def runner_job(candidate, controls):
         "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
     }
     atomic(target / "receipt.json", receipt)
-    # POST is non-idempotent: no implicit retries on timeout or partial response.
-    response = gh(f"{REPO_SLUG}/actions/runners/generate-jitconfig", "POST", {
-        "name": name, "runner_group_id": 1,
-        "labels": ["self-hosted", "Linux", "X64", candidate.label],
-        "work_folder": "_work",
-    })
-    encoded = response.pop("encoded_jit_config", None)
-    registered_id = response.get("runner", {}).get("id")
-    if not isinstance(encoded, str) or not isinstance(registered_id, int):
-        raise RuntimeError("jit_registration_response_incomplete")
-    receipt.update(state="registered", runner_id=registered_id, registered_at=now())
-    atomic(target / "receipt.json", receipt)
+    # Registration is non-idempotent. Enter cleanup protection BEFORE the POST.
+    # Persist an uncertain intent first; a crash leaves recovery an exact identity
+    # to reconcile, but never permission to submit the POST again.
+    registered_id = None
     process = None
     issues = []
     try:
+        response = gh(f"{REPO_SLUG}/actions/runners/generate-jitconfig", "POST", {
+            "name": name, "runner_group_id": 1,
+            "labels": ["self-hosted", "Linux", "X64", candidate.label],
+            "work_folder": "_work",
+        })
+        encoded = response.pop("encoded_jit_config", None)
+        registration = response.get("runner", {})
+        registered_id = registration.get("id") if isinstance(registration, dict) else None
+        if isinstance(registered_id, int) and not isinstance(registered_id, bool):
+            receipt.update(state="registered", runner_id=registered_id, registered_at=now())
+            atomic(target / "receipt.json", receipt)
+        if not isinstance(encoded, str) or not isinstance(registered_id, int):
+            raise RuntimeError("jit_registration_response_incomplete")
         prepare_network(net, name)
         log_path = target / "runner.log"
         with log_path.open("xb") as logfile:
@@ -387,14 +445,17 @@ def runner_job(candidate, controls):
             except subprocess.TimeoutExpired:
                 issues.append("worker_process_reaping_unverified")
         try:
-            # A completed one-job JIT runner may already be automatically
-            # removed by GitHub. Never equate a failed DELETE with a leak;
-            # require independent readback of the complete runner inventory.
-            try:
-                gh(f"{REPO_SLUG}/actions/runners/{registered_id}", "DELETE")
-            except Exception:
-                pass
-            runner_absent_verified(registered_id, name)
+            # The POST may have succeeded without returning a complete response.
+            # Resolve ONLY this exact owned name+labels, then independently prove
+            # absence. Cleanup is a hold when identity or inventory is ambiguous.
+            current_id = lookup_owned_runner(name, candidate.label, registered_id,
+                                             allow_busy=True)
+            if current_id is not None:
+                try:
+                    gh(f"{REPO_SLUG}/actions/runners/{current_id}", "DELETE")
+                except Exception:
+                    pass  # Need independent absence readback, not DELETE success.
+            runner_absent_verified(registered_id or current_id, name)
         except Exception:
             issues.append("runner_deregistration_unverified")
         receipt["issues"] = issues

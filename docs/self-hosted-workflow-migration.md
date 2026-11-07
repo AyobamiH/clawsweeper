@@ -40,6 +40,32 @@ must be restored after the bounded owner acceptance; the JIT and cleanup
 receipts must independently establish both lifecycle roles. A queued job,
 successful provision alone, or a scanner/model assertion is never acceptance.
 
+## Privileged PR/review execution provenance (fail-closed hold)
+
+The owner-operated JIT controller must distinguish a PR branch's head SHA
+from the **executed** synthetic merge workflow at \`refs/pull/N/merge\`.
+GitHub Actions REST workflow-run/check-suite responses can report only
+the PR head SHA for \`pull_request_review\`, \`pull_request_review_comment\`
+or \`pull_request\` events. Comparing the current main and PR-head YAML
+bytes is **not** historical execution proof: that merge commit may have
+used different workflow bytes before a branch or base update.
+
+Until a run-bound, independently attestable executed-merge revision is
+available, both \`category_enabled\` and \`source_authorised\` refuse
+privileged operations for these three event types with
+\`executed_pr_merge_workflow_unverifiable\` **before** issuing JIT
+registration or permitting credentials. Matching PR head source,
+owner actor, signed main, pinned workflow digests and allowed run ID
+still do not override this gate.
+
+This hold is narrower than disabling every operation: approved immutable
+default-branch events remain subject to their exact main/workflow/runner
+checks, and signed owner \`workflow_dispatch\` containment preview retains
+its separate, explicit run/source grant. PR/review event delivery needs
+a future separately reviewed default-branch authenticated relay or a
+verifiable historical merge attestation. Do **not** replace this with
+current \`refs/pull/N/merge\` or a self-attested source claim.
+
 ## Signed CodeQL branch/PR release evidence
 
 `scripts/ci/verify_codeql_release.py` is the fail-closed, read-only current-source

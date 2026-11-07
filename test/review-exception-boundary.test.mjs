@@ -149,7 +149,12 @@ test("owner-operated release review exposes an explicit zero-default Workers AI 
   assert.equal(input.type, "number");
   assert.equal(input.default, 0);
   const job = workflow.jobs["release-source-review"];
-  assert.deepEqual(job["runs-on"], ["self-hosted", "Linux", "X64", "clawsweeper-operations"]);
+  assert.deepEqual(job["runs-on"], [
+    "self-hosted",
+    "Linux",
+    "X64",
+    "clawsweeper-ci-ops-${{ github.run_id }}-release-review",
+  ]);
   assert.equal(job.env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS, "${{ inputs.release_ai_max_calls || 0 }}");
   assert.equal(workflow.jobs.smoke.env.CLAWSWEEPER_RELEASE_AI_MAX_CALLS, undefined);
 });

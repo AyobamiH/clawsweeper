@@ -19,6 +19,11 @@ WORKFLOWS = {
     ("ops", "notify"): (".github/workflows/github-activity.yml", "notify"),
     ("ops", "provision"): (".github/workflows/repair-containment-smoke.yml", "Provision containment smoke compute"),
     ("ops", "cleanup"): (".github/workflows/repair-containment-smoke.yml", "Destroy containment smoke compute"),
+    ("ops", "repair-receipt"): (".github/workflows/repair-cluster-worker.yml", "Deduplicate command dispatch receipt"),
+    ("ops", "repair-provision"): (".github/workflows/repair-cluster-worker.yml", "Provision ephemeral Cloudflare repair compute"),
+    ("ops", "repair-cleanup"): (".github/workflows/repair-cluster-worker.yml", "Destroy ephemeral Cloudflare repair compute"),
+    ("ops", "release-review"): (".github/workflows/workers-ai-fallback-acceptance.yml", "release-source-review"),
+    ("ops", "offline-replay"): (".github/workflows/release-offline-replay.yml", "replay"),
     ("isolation", "e2e"): (".github/workflows/automerge-e2e.yml", "production automerge flow"),
 }
 # Match each production workflow's actual GitHub event contract. Source code
@@ -33,6 +38,11 @@ EVENTS = {
                                   "pull_request_review_comment", "workflow_run")),
     ("ops", "provision"): frozenset(("push", "pull_request", "workflow_dispatch")),
     ("ops", "cleanup"): frozenset(("push", "pull_request", "workflow_dispatch")),
+    ("ops", "repair-receipt"): frozenset(("workflow_dispatch",)),
+    ("ops", "repair-provision"): frozenset(("workflow_dispatch",)),
+    ("ops", "repair-cleanup"): frozenset(("workflow_dispatch",)),
+    ("ops", "release-review"): frozenset(("workflow_dispatch",)),
+    ("ops", "offline-replay"): frozenset(("workflow_dispatch",)),
     ("isolation", "e2e"): frozenset(("push", "pull_request", "workflow_dispatch")),
 }
 
@@ -205,6 +215,9 @@ def category_enabled(candidate, controls):
     if candidate.role == "isolation":
         raise AdmissionHold("nested_docker_isolation_not_proven")
     if candidate.role == "ops":
+        if candidate.event in ("pull_request", "pull_request_review",
+                               "pull_request_review_comment"):
+            raise AdmissionHold("executed_pr_merge_workflow_unverifiable")
         release_preview = is_release_preview(candidate, controls)
         if not release_preview and controls.get("operations_accepted") is not True:
             raise AdmissionHold("operations_not_proven")
