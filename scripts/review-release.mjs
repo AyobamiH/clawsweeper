@@ -1,0 +1,149 @@
+#!/usr/bin/env node
+// Read-only release review: use existing Codex admission / Workers AI fallback.
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import { writeFileSync, appendFileSync } from "node:fs";
+import {
+  assertLiveReleaseReviewBudget,
+  prepareSourceReview,
+  reviewSource,
+  sourceBundle,
+} from "./commercial/source-review.mjs";
+import { classifyReviewFailure } from "./commercial/review-errors.mjs";
+
+const args = process.argv.slice(2);
+const preflight = args[0] === "--preflight";
+const values = preflight ? args.slice(1) : args;
+if (
+  (preflight && values.length !== 3) ||
+  (!preflight && values.length !== 4) ||
+  !/^[a-f0-9]{40}$/.test(values[1]) ||
+  !/^[a-f0-9]{40}$/.test(values[2])
+) {
+  console.error(
+    "usage: node scripts/review-release.mjs [--preflight] <checkout> <base-sha> <head-sha> [new-output-json]",
+  );
+  process.exit(2);
+}
+const root = resolve(values[0]);
+const git = (...params) =>
+  execFileSync("git", ["-C", root, ...params], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 4 * 1024 * 1024,
+  }).trim();
+try {
+  if (git("rev-parse", "HEAD") !== values[2]) throw new Error("head changed");
+  if (git("status", "--porcelain", "--untracked-files=no"))
+    throw new Error("tracked checkout is dirty");
+  if (git("merge-base", values[1], values[2]) !== values[1])
+    throw new Error("base is not an ancestor");
+  const bundle = await sourceBundle(root, values[1], false);
+  if (bundle.head !== values[2]) throw new Error("bundle head mismatch");
+  // This entrypoint only reviews committed source. Untracked non-generated files
+  // are never accepted as release evidence.
+  const tracked = new Set(
+    git("diff", "--name-only", values[1], values[2]).split("\n").filter(Boolean),
+  );
+  if (bundle.files.some((file) => !tracked.has(file.path)))
+    throw new Error("untracked source in review");
+  if (preflight) {
+    await prepareSourceReview(root, values[1], "repository-release");
+    const { selectCommercialRoute } = await import("./commercial/inference.mjs");
+    const route = await selectCommercialRoute(process.env);
+    if (route.provider === "cloudflare-workers-ai")
+      assertLiveReleaseReviewBudget(bundle, process.env);
+    console.log(
+      JSON.stringify({
+        ready: true,
+        provider: route.provider,
+        model: route.model,
+        reason: route.reason,
+        head: bundle.head,
+        base: bundle.base,
+        files: bundle.files.length,
+      }),
+    );
+  } else {
+    const result = await reviewSource(
+      root,
+      values[1],
+      resolve(values[3]),
+      process.env,
+      "repository-release",
+    );
+    if (result.head !== values[2]) throw new Error("review head changed");
+    console.log(
+      JSON.stringify({
+        passed: result.passed,
+        provider: result.provider,
+        model: result.model,
+        head: result.head,
+        base: result.base,
+        findings: result.findings.length,
+      }),
+    );
+    if (!result.passed) process.exitCode = 1;
+  }
+} catch (error) {
+  // Sanitised diagnostic only: never log model descriptions, source content or credentials.
+  const classified = classifyReviewFailure(error);
+  const preflightReason = [
+    "head changed",
+    "tracked checkout is dirty",
+    "base is not an ancestor",
+    "bundle head mismatch",
+    "untracked source in review",
+  ].includes(error?.message)
+    ? error.message
+    : null;
+  const diagnostic = {
+    schema: "clawsweeper.release-review-diagnostic.v1",
+    status: "refused",
+    ...classified,
+    ...(preflightReason ? { category: "preflight_refused", reason: preflightReason } : {}),
+    head: values[2],
+    base: values[1],
+  };
+  console.error("Release review refused; no clean verdict: " + JSON.stringify(diagnostic));
+  // The GitHub annotation contains only fixed taxonomy identifiers. Keep the
+  // full sanitised diagnostic in the runner's private evidence directory.
+  const safeToken = (value) =>
+    typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : "unspecified";
+  const category = safeToken(diagnostic.category);
+  const phase = safeToken(diagnostic.phase);
+  const reason = safeToken(diagnostic.reason);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    console.error(
+      `::error title=ClawSweeper release refused::category=${category} phase=${phase} reason=${reason}; exact-head review has no approval`,
+    );
+  }
+  if (
+    !preflight &&
+    process.env.RUNNER_TEMP &&
+    resolve(values[3]).startsWith(resolve(process.env.RUNNER_TEMP) + "/")
+  ) {
+    const evidencePath = resolve(values[3]) + ".diagnostic.json";
+    try {
+      writeFileSync(evidencePath, JSON.stringify(diagnostic, null, 2) + "\n", {
+        flag: "wx",
+        mode: 0o600,
+      });
+    } catch {
+      console.error(
+        "::warning title=ClawSweeper evidence::sanitised diagnostic could not be persisted",
+      );
+    }
+  }
+  if (process.env.GITHUB_STEP_SUMMARY && process.env.GITHUB_ACTIONS === "true") {
+    try {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        `### ClawSweeper release refused\n\n- Category: \`${category}\`\n- Phase: \`${phase}\`\n- Reason: \`${reason}\`\n- Exact head: \`${values[2]}\`\n- Exact base: \`${values[1]}\`\n- Approval: **not granted**\n`,
+      );
+    } catch {
+      console.error("::warning title=ClawSweeper summary::could not write job summary");
+    }
+  }
+  process.exitCode = 1;
+}

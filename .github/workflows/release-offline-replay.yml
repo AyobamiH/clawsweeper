@@ -1,0 +1,26 @@
+name: ClawSweeper offline release replay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: [self-hosted, Linux, X64, clawsweeper-operations]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned dependencies
+        run: |
+          export COREPACK_HOME="$RUNNER_TEMP/corepack"
+          mkdir -p "$COREPACK_HOME" "$RUNNER_TEMP/pnpm-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/pnpm-bin"
+          echo "$RUNNER_TEMP/pnpm-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/pnpm-bin:$PATH"
+          test "$(corepack pnpm --version)" = '11.10.0'
+          pnpm install --frozen-lockfile
+      - name: Replay without model inference
+        run: pnpm run test:release-replay
+      - name: Static checks
+        run: pnpm run check:static

@@ -87,6 +87,8 @@ not split reports into issue/PR subtrees.
 
 ## PR Validation and Landing
 
+For repository-release reviews when Codex subscription admission is unavailable, use the existing `scripts/review-release.mjs` entry point and `workers-ai-fallback-acceptance.yml` owner-operated release-review job. It uses the existing admission router, trusted input scanner and dedicated Workers AI credentials; no direct `codex review` invocation is required when that provider is unavailable. A current-head, complete, finding-free Workers AI source review may fulfil the model-review requirement, but does not substitute for repository-native validation, real behavioural proof, required checks, explicit owner merge approval, or independent operational readback. An unavailable scanner/provider or incomplete review is a refusal, never a clean verdict. This exception is limited to repository-release source review; it does not change the normal PR automerge policy or issue-fixture no-merge restrictions.
+
 - For code-bearing changes, run focused validation that exercises the changed
   behavior, then run a fresh Codex `/review` before committing and again on the
   committed branch against its base before landing. Address every accepted or

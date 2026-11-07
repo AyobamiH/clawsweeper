@@ -17,7 +17,7 @@
 
 import { spawn } from "node:child_process";
 import { globSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { availableParallelism, devNull } from "node:os";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -159,7 +159,10 @@ export async function runNodeTests({
   const child = spawnProcess(
     process.execPath,
     ["--test", `--test-concurrency=${concurrency}`, ...nodeArguments, ...files],
-    { cwd, stdio: "inherit" },
+    // Test fixtures create disposable Git repositories; inherited user signing
+    // configuration makes their synthetic commits fail on developer machines.
+    // Keep the real repository signing configuration untouched outside tests.
+    { cwd, stdio: "inherit", env: { ...process.env, GIT_CONFIG_GLOBAL: devNull } },
   );
 
   return new Promise((resolve, reject) => {
