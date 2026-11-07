@@ -136,6 +136,8 @@ class PolicyTests(unittest.TestCase):
                 return {"workflow_runs": [valid]}
             if "runs?status=in_progress" in path:
                 return {"workflow_runs": [valid]}
+            if "runs?status=pending" in path:
+                return {"workflow_runs": []}
             if "jobs?" in path:
                 return {"jobs": [job(), {**job(), "id": 889, "labels": ["ubuntu-latest"]}]}
             raise AssertionError(path)
@@ -145,6 +147,29 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(discovered[0].job_id, 888)
         self.assertEqual(sum("/jobs?" in x for x, _ in fake_calls), 1)
         self.assertTrue(all(method == "GET" for _, method in fake_calls))
+
+    def test_pending_workflow_run_admits_only_queued_exact_jit_job(self):
+        # Live GitHub may report a waiting self-hosted run as pending while its
+        # JIT-labelled job is queued; omitting pending strands genuine work.
+        waiting = run()
+        waiting["status"] = "pending"
+        requests = []
+        def gh(path, method="GET", body=None):
+            requests.append((path, method))
+            if "runs?status=pending" in path:
+                return {"workflow_runs": [waiting]}
+            if "runs?status=queued" in path or "runs?status=in_progress" in path:
+                return {"workflow_runs": []}
+            if "jobs?" in path:
+                return {"jobs": [job(), {**job(), "id": 889, "status": "completed"}]}
+            raise AssertionError(path)
+        with patch.object(executor, "gh", side_effect=gh):
+            result = executor.discover()
+        self.assertEqual([(c.run_id, c.job_id, c.sha) for c in result],
+                         [(123456789, 888, SHA)])
+        self.assertEqual(sum("/jobs?" in path for path, _ in requests), 1)
+        self.assertTrue(all(method == "GET" for _, method in requests))
+        self.assertTrue(any("runs?status=pending" in path for path, _ in requests))
 
     def test_receipt_is_owner_only_and_durable(self):
         with tempfile.TemporaryDirectory() as root:

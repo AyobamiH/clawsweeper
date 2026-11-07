@@ -92,7 +92,9 @@ def discover():
     candidates = []
     workflow_paths = {path for path, _ in WORKFLOWS.values()}
     visited = set()
-    for status in ("queued", "in_progress"):
+    # GitHub keeps some queued JIT jobs in workflow runs reported as pending.
+    # Enumerate that state without relaxing per-job queued admission or JIT pins.
+    for status in ("queued", "in_progress", "pending"):
         runs = gh(f"{REPO_SLUG}/actions/runs?status={status}&per_page=100").get("workflow_runs", [])
         for item in runs[:100]:
             if item.get("path") not in workflow_paths or item.get("id") in visited:
@@ -101,7 +103,7 @@ def discover():
             if not isinstance(run_id, int) or run_id <= 0:
                 continue
             visited.add(run_id)
-            if item.get("status") not in ("queued", "in_progress"):
+            if item.get("status") not in ("queued", "in_progress", "pending"):
                 continue
             jobs = gh(f"{REPO_SLUG}/actions/runs/{run_id}/jobs?per_page=100").get("jobs", [])
             for job in jobs[:100]:
