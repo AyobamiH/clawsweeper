@@ -140,7 +140,9 @@ def classify(run, job):
                 raise AdmissionHold("untrusted_privileged_pull_request_source")
             trusted_base_sha = base["sha"]
         elif run.get("event") in ("push", "workflow_dispatch") and slot in ("provision", "cleanup"):
-            if actor != "AyobamiH" or branch != "main":
+            # A signed, explicitly pinned release preview is eligible for
+            # *classification*, never execution without owner-only controls.
+            if actor != "AyobamiH" or (branch != "main" and run.get("event") != "workflow_dispatch"):
                 raise AdmissionHold("untrusted_operations_source")
         elif run.get("event") in REVIEW_EVENTS and slot == "notify":
             # GitHub reports reviewer activity on PR feature/merge revisions,
@@ -155,6 +157,33 @@ def classify(run, job):
         raise AdmissionHold("unexpected_e2e_branch")
     return Candidate(run_id, job_id, attempt, sha, path, run["event"], role, slot,
                      unique[0], name, branch, trusted_base_sha)
+
+
+def is_release_preview(candidate, controls):
+    """The only non-main privileged preview: exact owner run and source identity."""
+    if not (candidate.role == "ops" and candidate.slot in ("provision", "cleanup")
+            and candidate.event == "workflow_dispatch" and candidate.branch != "main"):
+        return False
+    scope = controls.get("release_preview")
+    if not isinstance(scope, dict) or scope.get("accepted") is not True:
+        raise AdmissionHold("release_preview_not_accepted")
+    branch = str(scope.get("branch", ""))
+    if (not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", branch)
+            or ".." in branch or "//" in branch):
+        raise AdmissionHold("release_preview_branch_invalid")
+    if (scope.get("branch") != candidate.branch or
+            scope.get("head_sha") != candidate.sha or
+            not SHA.fullmatch(str(scope.get("head_sha", ""))) or
+            not SHA.fullmatch(str(scope.get("tree_sha", ""))) or
+            not re.fullmatch(r"[a-f0-9]{64}", str(scope.get("workflow_sha256", "")))):
+        raise AdmissionHold("release_preview_source_not_pinned")
+    runs = controls.get("allowed_run_ids")
+    if not isinstance(runs, list) or runs != [candidate.run_id]:
+        raise AdmissionHold("release_preview_run_not_exclusive")
+    # Do not allow the exceptional preview authority to promote ordinary ops.
+    if controls.get("operations_accepted") is True:
+        raise AdmissionHold("release_preview_operations_mixed")
+    return True
 
 
 def category_enabled(candidate, controls):
@@ -176,7 +205,8 @@ def category_enabled(candidate, controls):
     if candidate.role == "isolation":
         raise AdmissionHold("nested_docker_isolation_not_proven")
     if candidate.role == "ops":
-        if controls.get("operations_accepted") is not True:
+        release_preview = is_release_preview(candidate, controls)
+        if not release_preview and controls.get("operations_accepted") is not True:
             raise AdmissionHold("operations_not_proven")
         # Target-PR events have arbitrary incoming branch names. Their base
         # workflow must instead be pinned by the executor's trusted_main_sha.
@@ -193,7 +223,7 @@ def category_enabled(candidate, controls):
         elif candidate.slot == "notify" and candidate.event in REVIEW_EVENTS:
             if not SHA.fullmatch(str(controls.get("trusted_main_sha", ""))):
                 raise AdmissionHold("trusted_base_not_pinned")
-        elif candidate.branch != "main":
+        elif candidate.branch != "main" and not release_preview:
             raise AdmissionHold("branch_not_authorised")
     else:
         allowed_branches = controls.get("allowed_branches", [])

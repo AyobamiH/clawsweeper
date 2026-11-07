@@ -17,6 +17,29 @@ The existing five-minute local CI timer remains independent; avoid a competing c
 
 A job result is accepted only when its head SHA, run and attempt, job ID, JIT runner identity, GitHub conclusion and local digest-bearing receipt match. A queue entry or successful webhook alone is not completion. Do not merge this migration until a controlled real job in each execution class is verified and the owner explicitly approves.
 
+### Explicit release-preview containment acceptance
+
+An unmerged release branch cannot inherit the normal `main` operations authority. The
+`workflow_dispatch` provision/cleanup preview is therefore **default-denied**, and
+requires all of the following in the owner-only controls before its two jobs can
+receive their exact JIT labels:
+
+- `enabled: true`, `enabled_roles: ["ops"]`, an **exclusive** single
+  `allowed_run_ids` entry, `operations_accepted: false`, and a pinned,
+  unchanged `trusted_main_sha`;
+- `release_preview.accepted: true`, exact `branch`, signed `head_sha`,
+  `tree_sha`, and SHA-256 of the candidate's containment workflow;
+- independent live GitHub verification that the run's branch resolves to its
+  signed head, the commit has the pinned tree, and the workflow bytes match.
+
+This exception cannot admit dispatch, activity notification, unrelated runs,
+fork or PR-head execution, an unsigned/drifted commit, or production-wide
+operations. It does not override the ordinary memory, fleet, image, container
+ownership, network or capacity restrictions. The approved preview controls
+must be restored after the bounded owner acceptance; the JIT and cleanup
+receipts must independently establish both lifecycle roles. A queued job,
+successful provision alone, or a scanner/model assertion is never acceptance.
+
 ## CodeQL bootstrap repair (6 November 2026)
 
 Controlled [run #42270282058](https://github.com/AyobamiH/clawsweeper/actions/runs/42270282058) accepted the exact SHA on a one-job runner and checked out source, but `github/codeql-action/init@v4` spent the original 20-minute limit downloading CodeQL. GitHub cancelled the `actions` job before analysis and the `javascript-typescript` job remained queued; the incomplete run was cancelled cleanly after independent readback. Neither language was scanned and no analysis was uploaded. The executor recorded a held (not successful) receipt and deregistered its worker.
