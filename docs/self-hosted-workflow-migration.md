@@ -40,6 +40,42 @@ must be restored after the bounded owner acceptance; the JIT and cleanup
 receipts must independently establish both lifecycle roles. A queued job,
 successful provision alone, or a scanner/model assertion is never acceptance.
 
+## Signed CodeQL branch/PR release evidence
+
+`scripts/ci/verify_codeql_release.py` is the fail-closed, read-only current-source
+verifier. Use a precise `--run-id` and `--head-sha`; specify `--pr NUMBER`
+only for a `pull_request` run. The CLI requires the owner-local signed runner
+receipts by default (no fabricated GitHub check contexts). A successful
+`workflow_dispatch` or push scan must have both CodeQL analyses on the
+actual `refs/heads/BRANCH` at the exact signed head. A PR scan may instead
+upload to GitHub's synthetic `refs/pull/NUMBER/merge` commit, but the current
+merge ref **must** match a commit whose first parent is the PR base and whose
+second parent is the exact PR head. A PR branch-head analysis is also valid
+when backed by the same completed run.
+
+Both languages must be uploaded during the corresponding successful, exactly
+named JIT jobs; the verifier also checks runner labels/names, digest-bearing
+local receipts, signing and stable source identity. A stale, absent or
+ambiguous analysis refuses, rather than borrowing an earlier successful scan.
+The existing alert #3 (`js/clear-text-logging`) remains explicitly visible
+in every report. Use `--require-alert-fixed` for *post-deployment* closure;
+`dismissed` or `open` do not satisfy that gate. Neither a successful older
+branch scan nor a prior PR merge scan approves a newer release revision.
+
+Examples (run on the authorised owner machine with GitHub read access):
+
+```bash
+python3 scripts/ci/verify_codeql_release.py \
+  --run-id 42342492854 \
+  --head-sha 04a27178f304520a7be0844dffd45a9efc439a35
+python3 scripts/ci/verify_codeql_release.py \
+  --run-id 42319278943 \
+  --head-sha f799b068053ddc75cfc73d35e56ce33cf96e7e57 --pr 97
+```
+
+Do not use this verifier to override independent source review, protected
+dispatch, live containment, hermetic automerge E2E, or owner merge approval.
+
 ## CodeQL bootstrap repair (6 November 2026)
 
 Controlled [run #42270282058](https://github.com/AyobamiH/clawsweeper/actions/runs/42270282058) accepted the exact SHA on a one-job runner and checked out source, but `github/codeql-action/init@v4` spent the original 20-minute limit downloading CodeQL. GitHub cancelled the `actions` job before analysis and the `javascript-typescript` job remained queued; the incomplete run was cancelled cleanly after independent readback. Neither language was scanned and no analysis was uploaded. The executor recorded a held (not successful) receipt and deregistered its worker.
