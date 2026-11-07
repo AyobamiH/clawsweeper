@@ -395,7 +395,7 @@ function spawnCodexSyncWithHeartbeat(
   }
 }
 
-function startCodexHeartbeat(label: string) {
+function startCodexHeartbeat(_label: string) {
   const script = `
 const interval = Math.max(1000, Number(process.env.CLAWSWEEPER_CODEX_HEARTBEAT_MS || 60000));
 const label = "Codex subprocess";
@@ -2744,7 +2744,7 @@ function updateAutomergeProgressStatus({
       preserveStatusMarkers(existingStatus.body, bodyWithTimeline),
     );
     return true;
-  } catch (error) {
+  } catch {
     // GitHub errors may include credential-bearing request URLs or headers.
     // Preserve the fail-closed outcome without copying provider diagnostics.
     console.warn(
