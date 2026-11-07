@@ -62,7 +62,7 @@ jobs:
   provision:
     name: Provision containment smoke compute
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-provision"]
     timeout-minutes: 10
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
@@ -94,7 +94,9 @@ jobs:
   containment-smoke:
     name: containment smoke (sample ${{ matrix.sample }})
     needs: provision
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs[matrix.lane] || 'ubuntu-latest' }}
+    # A missing/stale ephemeral runner must not silently fall back to a different execution environment.
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.plan != '' && needs.provision.outputs.execute != '' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) }}
+    runs-on: ${{ needs.provision.outputs[matrix.lane] }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -126,7 +128,7 @@ jobs:
     name: Destroy containment smoke compute
     needs: [provision, containment-smoke]
     if: ${{ always() && needs.provision.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-cleanup"]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

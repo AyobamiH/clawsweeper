@@ -32,7 +32,9 @@ jobs:
   automerge-e2e:
     name: production automerge flow
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    # The isolated nested-Docker executor is deliberately held until live sandbox acceptance.
+    # Never grant a self-hosted test the host Docker socket.
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-isolation-${{ github.run_id }}-e2e"]
     timeout-minutes: 15
     env:
       AUTOMERGE_E2E_BASE_ARCHIVE: /tmp/clawsweeper-automerge-e2e-base.tar
