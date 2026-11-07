@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, WORKFLOWS, category_enabled, classify
+from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, WORKFLOWS, category_enabled, classify, is_release_preview
 
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
@@ -128,6 +128,32 @@ def source_authorised(candidate, controls):
     if candidate.role != "ops":
         return True
     main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
+    if is_release_preview(candidate, controls):
+        # Explicitly approved, source-pinned candidate can prove the Cloudflare
+        # provision/cleanup chain *before* landing on main. This does not grant
+        # authority to dispatch, notify, other runs, or production operations.
+        scope = controls["release_preview"]
+        if main != controls.get("trusted_main_sha"):
+            raise AdmissionHold("release_preview_main_changed")
+        try:
+            branch = gh(f"{REPO_SLUG}/git/ref/heads/{candidate.branch}")
+            if branch["object"]["sha"] != candidate.sha:
+                raise AdmissionHold("release_preview_branch_moved")
+            commit = gh(f"{REPO_SLUG}/commits/{candidate.sha}")
+            if (commit["sha"] != candidate.sha
+                    or commit["commit"]["verification"]["verified"] is not True
+                    or commit["commit"]["tree"]["sha"] != scope["tree_sha"]):
+                raise AdmissionHold("release_preview_commit_unverified")
+            file = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={candidate.sha}")
+            import base64
+            digest = hashlib.sha256(base64.b64decode(file["content"])).hexdigest()
+        except (KeyError, ValueError, RuntimeError, TypeError) as exc:
+            if isinstance(exc, AdmissionHold):
+                raise
+            raise AdmissionHold("release_preview_source_unverifiable") from exc
+        if digest != scope["workflow_sha256"]:
+            raise AdmissionHold("release_preview_workflow_mismatch")
+        return True
     review_source = candidate.slot == "notify" and candidate.event in REVIEW_EVENTS
     owner_pr_source = candidate.slot in ("provision", "cleanup") and candidate.event == "pull_request"
     if candidate.event in ("pull_request_target", "pull_request"):
