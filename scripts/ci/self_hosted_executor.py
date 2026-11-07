@@ -127,8 +127,13 @@ def source_authorised(candidate, controls):
     if candidate.role != "ops":
         return True
     main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
-    if candidate.event == "pull_request_target" and candidate.trusted_base_sha != main:
-        raise AdmissionHold("target_base_sha_changed")
+    if candidate.event == "pull_request_target":
+        if candidate.trusted_base_sha != main:
+            raise AdmissionHold("target_base_sha_changed")
+    elif candidate.event != "pull_request" and candidate.sha != main:
+        # Event-driven operations are executable only at the exact pinned
+        # default-branch source. No stale dispatch after a source revision moves.
+        raise AdmissionHold("default_branch_source_drift")
     if main != controls.get("trusted_main_sha"):
         raise AdmissionHold("trusted_workflow_head_changed")
     # A source hash mismatch is an authority change, not a reason to auto-update

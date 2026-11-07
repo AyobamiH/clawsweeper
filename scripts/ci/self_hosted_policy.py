@@ -20,10 +20,19 @@ WORKFLOWS = {
     ("ops", "cleanup"): (".github/workflows/repair-containment-smoke.yml", "Destroy containment smoke compute"),
     ("isolation", "e2e"): (".github/workflows/automerge-e2e.yml", "production automerge flow"),
 }
+# Match each production workflow's actual GitHub event contract. Source code
+# authority is separate: every privileged lane must still match the approved
+# default-branch workflow hash, regardless of who submitted the event payload.
 EVENTS = {
-    "security": frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
-    "ops": frozenset(("push", "pull_request", "pull_request_target", "workflow_dispatch")),
-    "isolation": frozenset(("push", "pull_request", "workflow_dispatch")),
+    ("security", "actions"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
+    ("security", "javascript-typescript"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
+    ("ops", "dispatch"): frozenset(("issues", "issue_comment", "pull_request_target")),
+    ("ops", "notify"): frozenset(("repository_dispatch", "issues", "issue_comment",
+                                  "pull_request_target", "pull_request_review",
+                                  "pull_request_review_comment", "workflow_run")),
+    ("ops", "provision"): frozenset(("push", "pull_request", "workflow_dispatch")),
+    ("ops", "cleanup"): frozenset(("push", "pull_request", "workflow_dispatch")),
+    ("isolation", "e2e"): frozenset(("push", "pull_request", "workflow_dispatch")),
 }
 
 
@@ -76,7 +85,7 @@ def classify(run, job):
     path, name = contract
     if run.get("path") != path or job.get("name") != name:
         raise AdmissionHold("workflow_job_mismatch")
-    if run.get("event") not in EVENTS[role]:
+    if run.get("event") not in EVENTS[(role, slot)]:
         raise AdmissionHold("unapproved_event")
     sha, branch = run.get("head_sha"), run.get("head_branch")
     if not isinstance(sha, str) or not SHA.fullmatch(sha):
@@ -107,12 +116,34 @@ def classify(run, job):
                 raise AdmissionHold("target_base_not_main")
             trusted_base_sha = base["sha"]
         elif run.get("event") == "pull_request":
-            # Containment provisioning has privileged credentials; refuse fork
-            # PRs even if an upstream workflow if-condition were removed.
+            # Containment provisioning has privileged credentials. Validate
+            # GitHub's actual PR head repository, not merely its initiating
+            # actor, before ever considering this execution for admission.
             if actor != "AyobamiH":
                 raise AdmissionHold("untrusted_privileged_pull_request")
-        elif actor != "AyobamiH" or branch != "main":
-            raise AdmissionHold("untrusted_operations_source")
+            pulls = run.get("pull_requests")
+            repo_id = run.get("repository", {}).get("id")
+            if (not isinstance(repo_id, int) or isinstance(repo_id, bool)
+                    or not isinstance(pulls, list) or len(pulls) != 1
+                    or not isinstance(pulls[0], dict)):
+                raise AdmissionHold("privileged_pull_request_source_unverifiable")
+            head, base = pulls[0].get("head"), pulls[0].get("base")
+            if (not isinstance(head, dict) or not isinstance(base, dict)
+                    or not isinstance(head.get("repo"), dict)
+                    or not isinstance(base.get("repo"), dict)
+                    or head["repo"].get("id") != repo_id
+                    or base["repo"].get("id") != repo_id
+                    or base.get("ref") != "main"
+                    or not SHA.fullmatch(str(head.get("sha", "")))):
+                raise AdmissionHold("untrusted_privileged_pull_request_source")
+        elif run.get("event") in ("push", "workflow_dispatch") and slot in ("provision", "cleanup"):
+            if actor != "AyobamiH" or branch != "main":
+                raise AdmissionHold("untrusted_operations_source")
+        elif run.get("event") not in ("pull_request",) and branch != "main":
+            # Issues, comments, review notifications, repository_dispatch and
+            # workflow_run are emitted against the trusted default branch even
+            # when an external collaborator generated the event payload.
+            raise AdmissionHold("untrusted_default_branch_source")
     if role == "isolation" and run.get("event") != "pull_request" and branch != "main":
         raise AdmissionHold("unexpected_e2e_branch")
     return Candidate(run_id, job_id, attempt, sha, path, run["event"], role, slot,
