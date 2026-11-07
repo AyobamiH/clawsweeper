@@ -28,6 +28,7 @@
         "public-api.md",
         "github-egress-telemetry.md",
         "github-webhook-read-model.md",
+        "local-ci-webhook.md",
         "operator-configuration.md",
         "live-dashboard.md",
         "openclaw-bay-demo.md",
@@ -86,6 +87,11 @@
       "path": "pr-behavior-proofs/commercial-node-setup.md",
       "lifecycle": "historical proof",
       "banner": "This proof records the commercial bootstrap behavior at its stated revision and does not establish completed customer delivery."
+    },
+    {
+      "path": "self-hosted-workflow-migration.md",
+      "lifecycle": "proposed",
+      "banner": "This is a guarded self-hosted CI migration candidate, not accepted production runner coverage or merge authorisation."
     },
     {
       "path": "CI-EXECUTION-POLICY.md",

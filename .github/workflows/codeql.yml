@@ -27,8 +27,15 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}",
+      ]
+    # Scanner is supplied by the pinned, isolated runner image. Bound actual analysis separately.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +49,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+          # Offline, SHA-256 verified CodeQL 2.27.4 bundle in disposable image.
+          # No job-level 418 MB release download and no host filesystem mount.
+          tools: /opt/clawsweeper-codeql/codeql-bundle.tar.gz
 
       - uses: github/codeql-action/analyze@v4
         with:

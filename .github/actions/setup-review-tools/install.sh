@@ -20,9 +20,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl --fail --show-error --silent --location \
-  "https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.1/trufflehog_3.97.1_linux_amd64.tar.gz" \
-  --output "$review_tools_root/archive.tar.gz"
+scanner_url="https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.1/trufflehog_3.97.1_linux_amd64.tar.gz"
+scanner_downloaded=0
+for attempt in 1 2 3; do
+  # Do not retain partial archives between attempts. Never run an unverified download.
+  rm -f "$review_tools_root/archive.tar.gz"
+  curl_status=0
+  curl --fail --silent --show-error --location --connect-timeout 15 --max-time 90 \
+    "$scanner_url" --output "$review_tools_root/archive.tar.gz" \
+    2> "$review_tools_root/download-error" || curl_status=$?
+  if [[ "$curl_status" == 0 ]]; then
+    scanner_downloaded=1
+    break
+  fi
+  case "$curl_status" in
+    5|6|7|18|28|35|52|55|56) failure_class=transient_network ;;
+    22) failure_class=http_refused ;;
+    *) failure_class=download_failure ;;
+  esac
+  printf 'scanner_bootstrap phase=download attempt=%s curl_exit=%s category=%s\n' \
+    "$attempt" "$curl_status" "$failure_class" >&2
+  if [[ "$failure_class" != transient_network || "$attempt" == 3 ]]; then break; fi
+  sleep "$((attempt * 3))"
+done
+rm -f "$review_tools_root/download-error"
+if [[ "$scanner_downloaded" != 1 ]]; then
+  echo 'scanner_bootstrap status=refused category=download_unavailable' >&2
+  exit 1
+fi
 printf '%s  %s\n' \
   "f863ea3a8d786f7d097870496c977944cce7372a2fe1e56707d965016e543ece" \
   "$review_tools_root/archive.tar.gz" | sha256sum --check -
