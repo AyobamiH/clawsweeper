@@ -166,6 +166,30 @@ class PolicyTests(unittest.TestCase):
         controls["allowed_run_ids"] = [123456789]
         self.assertTrue(policy.category_enabled(c, controls))
 
+    def test_completed_ephemeral_runner_may_already_be_deregistered(self):
+        with patch.object(executor, "gh", return_value={"total_count": 0, "runners": []}):
+            self.assertTrue(executor.runner_absent_verified(232, "csw-ci-owned"))
+        with patch.object(executor, "gh", return_value={"total_count": 1,
+             "runners": [{"id": 232, "name": "csw-ci-owned"}]}):
+            with self.assertRaisesRegex(RuntimeError, "runner_deregistration_unverified"):
+                executor.runner_absent_verified(232, "csw-ci-owned")
+        with patch.object(executor, "gh", return_value={"total_count": 3, "runners": []}):
+            with self.assertRaisesRegex(RuntimeError, "runner_inventory_unbounded"):
+                executor.runner_absent_verified(232, "csw-ci-owned")
+
+    def test_disposable_worker_cleanup_waits_for_verified_removal(self):
+        with patch.object(executor, "inspect_owned", side_effect=[{ "owned": True }, {"owned": True}, None]) as inspect, \
+             patch.object(executor, "run_cli", return_value="") as stop, \
+             patch.object(executor.time, "sleep"):
+            executor.stop_owned("csw-ci-owned-worker", "csw-ci-owned")
+            self.assertEqual(stop.call_count, 1)
+            self.assertEqual(inspect.call_count, 3)
+        with patch.object(executor, "inspect_owned", side_effect=[None]) as inspect, \
+             patch.object(executor, "run_cli") as stop:
+            executor.stop_owned("csw-ci-owned-worker", "csw-ci-owned")
+            stop.assert_not_called()
+            inspect.assert_called_once()
+
     def test_existing_attempt_never_registers_another_runner(self):
         c = policy.classify(run(), job())
         with tempfile.TemporaryDirectory() as d:

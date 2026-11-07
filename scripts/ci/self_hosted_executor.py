@@ -192,11 +192,40 @@ def inspect_owned(name, owner):
 
 
 def stop_owned(name, owner):
-    if inspect_owned(name, owner) is None:
-        return
-    run_cli(["docker", "stop", "--time", "8", name], timeout=25)
+    # Docker --rm containers can still be visible to inspect just after their
+    # process exits. A transient inspect failure is not a reason to claim
+    # cleanup; give it bounded time and demand independently observed absence.
+    stop_requested = False
+    for attempt in range(5):
+        try:
+            obj = inspect_owned(name, owner)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            if attempt == 4:
+                raise RuntimeError("owned_container_identity_unverified")
+            time.sleep(2)
+            continue
+        if obj is None:
+            return
+        if not stop_requested:
+            run_cli(["docker", "stop", "--time", "8", name], timeout=25)
+            stop_requested = True
+        time.sleep(2)
     if inspect_owned(name, owner) is not None:
         raise RuntimeError("owned_container_cleanup_incomplete")
+
+
+def runner_absent_verified(runner_id, name):
+    # GitHub automatically deregisters ephemeral JIT runners. A DELETE may
+    # return not-found *after success*, but the status is only benign if the
+    # complete inventory independently proves the exact runner absent.
+    result = gh(f"{REPO_SLUG}/actions/runners?per_page=100")
+    runners = result.get("runners")
+    total = result.get("total_count")
+    if not isinstance(runners, list) or not isinstance(total, int) or total != len(runners):
+        raise RuntimeError("runner_inventory_unbounded")
+    if any(r.get("id") == runner_id or r.get("name") == name for r in runners):
+        raise RuntimeError("runner_deregistration_unverified")
+    return True
 
 
 def prepare_network(name, owner):
@@ -308,7 +337,14 @@ def runner_job(candidate, controls):
             except subprocess.TimeoutExpired:
                 issues.append("worker_process_reaping_unverified")
         try:
-            gh(f"{REPO_SLUG}/actions/runners/{registered_id}", "DELETE")
+            # A completed one-job JIT runner may already be automatically
+            # removed by GitHub. Never equate a failed DELETE with a leak;
+            # require independent readback of the complete runner inventory.
+            try:
+                gh(f"{REPO_SLUG}/actions/runners/{registered_id}", "DELETE")
+            except Exception:
+                pass
+            runner_absent_verified(registered_id, name)
         except Exception:
             issues.append("runner_deregistration_unverified")
         receipt["issues"] = issues
