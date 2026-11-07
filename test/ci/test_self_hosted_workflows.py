@@ -96,6 +96,58 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(policy.AdmissionHold, "trusted_workflow_head_changed"):
                 executor.source_authorised(c, {**expected, "trusted_main_sha": "b" * 40})
 
+    def test_real_review_event_branch_requires_same_workflow_bytes_at_pr_sha(self):
+        # Real GitHub Actions runs 41961710139 and 38621294582 have feature
+        # head branches and no pull_requests list, unlike issues events.
+        import base64, hashlib
+        trusted = b"name: exact pinned notify workflow\\n"
+        attacker = b"name: changed untrusted workflow\\n"
+        digest = hashlib.sha256(trusted).hexdigest()
+        controls = {"enabled": True, "repo": policy.REPOSITORY,
+                    "enabled_roles": ["ops"], "operations_accepted": True,
+                    "trusted_main_sha": SHA, "max_jobs_per_cycle": 1,
+                    "trusted_workflow_sha256":
+                        {".github/workflows/github-activity.yml": digest}}
+        for event in ("pull_request_review", "pull_request_review_comment"):
+            with self.subTest(event=event):
+                info = run(".github/workflows/github-activity.yml", event,
+                           branch="feature-pr", actor="external")
+                info["head_sha"] = "b" * 40
+                info["pull_requests"] = []
+                candidate = policy.classify(info, job("ops", "notify", "notify"))
+                self.assertTrue(policy.category_enabled(candidate, controls))
+                def gh(path, *args):
+                    if "/git/ref/heads/main" in path:
+                        return {"object": {"sha": SHA}}
+                    if path.endswith("?ref=" + SHA):
+                        return {"content": base64.b64encode(trusted).decode()}
+                    if path.endswith("?ref=" + "b" * 40):
+                        return {"content": base64.b64encode(trusted).decode()}
+                    raise AssertionError(path)
+                with patch.object(executor, "gh", side_effect=gh):
+                    self.assertTrue(executor.source_authorised(candidate, controls))
+                def tampered(path, *args):
+                    reply = gh(path, *args)
+                    if path.endswith("?ref=" + "b" * 40):
+                        reply = {"content": base64.b64encode(attacker).decode()}
+                    return reply
+                with patch.object(executor, "gh", side_effect=tampered):
+                    with self.assertRaisesRegex(policy.AdmissionHold,
+                                               "review_workflow_source_drift"):
+                        executor.source_authorised(candidate, controls)
+                with patch.object(executor, "gh", side_effect=lambda path, *args:
+                                  (_ for _ in ()).throw(RuntimeError("not found"))
+                                  if path.endswith("?ref=" + "b" * 40)
+                                  else gh(path, *args)):
+                    with self.assertRaisesRegex(policy.AdmissionHold,
+                                               "review_workflow_source_unverifiable"):
+                        executor.source_authorised(candidate, controls)
+        # An ordinary issue callback with a PR revision stays forbidden.
+        issue = run(".github/workflows/github-activity.yml", "issues",
+                    branch="feature-pr", actor="external")
+        with self.assertRaisesRegex(policy.AdmissionHold, "untrusted_default_branch_source"):
+            policy.classify(issue, job("ops", "notify", "notify"))
+
     def test_ops_never_executes_untrusted_pull_request(self):
         with self.assertRaisesRegex(policy.AdmissionHold, "untrusted_privileged_pull_request"):
             policy.classify(run(".github/workflows/repair-containment-smoke.yml",
@@ -109,7 +161,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(candidate.branch, "owner-pr")
         # Even a trusted owner PR cannot receive privileged runner secrets
         # until there is separately approved, pinned execution authority.
-        with self.assertRaisesRegex(policy.AdmissionHold, "branch_not_authorised"):
+        with self.assertRaisesRegex(policy.AdmissionHold, "privileged_pr_run_not_pinned"):
             policy.category_enabled(candidate, {"enabled": True, "repo": policy.REPOSITORY,
                 "enabled_roles": ["ops"], "operations_accepted": True,
                 "trusted_main_sha": SHA, "max_jobs_per_cycle": 1})
@@ -126,6 +178,55 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(case=case), self.assertRaisesRegex(
                     policy.AdmissionHold, "privileged_pull_request_source"):
                 policy.classify(scenario, job("ops", "provision", "Provision containment smoke compute"))
+
+    def test_privileged_owner_pr_pins_base_and_exact_workflow_at_head(self):
+        import base64, hashlib
+        good=b"name: pinned trusted workflow\n"
+        evil=b"name: changed PR instructions\n"
+        digest=hashlib.sha256(good).hexdigest()
+        r=run(".github/workflows/repair-containment-smoke.yml", "pull_request",
+              branch="owner-feature", actor="AyobamiH")
+        r["repository"]["id"]=17
+        r["head_sha"]="b"*40
+        r["pull_requests"][0]["head"]={"ref":"owner-feature","sha":"b"*40,"repo":{"id":17}}
+        r["pull_requests"][0]["base"]={"ref":"main","sha":SHA,"repo":{"id":17}}
+        ctrl={"enabled":True,"repo":policy.REPOSITORY,"enabled_roles":["ops"],
+              "operations_accepted":True,"trusted_main_sha":SHA,"max_jobs_per_cycle":1,
+              "allowed_run_ids":[123456789],
+              "trusted_workflow_sha256":{".github/workflows/repair-containment-smoke.yml":digest}}
+        def gh(path, changed=False):
+            if path.endswith("/git/ref/heads/main"):return {"object":{"sha":SHA}}
+            if path.endswith("?ref="+SHA):return {"content":base64.b64encode(good).decode()}
+            if path.endswith("?ref="+"b"*40):return {"content":base64.b64encode(evil if changed else good).decode()}
+            raise AssertionError(path)
+        for slot,name in (("provision","Provision containment smoke compute"),
+                          ("cleanup","Destroy containment smoke compute")):
+            with self.subTest(slot=slot):
+                c=policy.classify(r,job("ops",slot,name))
+                self.assertEqual(c.trusted_base_sha,SHA)
+                self.assertTrue(policy.category_enabled(c,ctrl))
+                with patch.object(executor,"gh",side_effect=gh):
+                    self.assertTrue(executor.source_authorised(c,ctrl))
+                with patch.object(executor,"gh",side_effect=lambda p:gh(p,True)):
+                    with self.assertRaisesRegex(policy.AdmissionHold,"privileged_pr_workflow_source_drift"):
+                        executor.source_authorised(c,ctrl)
+                with patch.object(executor,"gh",side_effect=lambda p:
+                                  (_ for _ in ()).throw(RuntimeError("missing"))
+                                  if p.endswith("?ref="+"b"*40) else gh(p)):
+                    with self.assertRaisesRegex(policy.AdmissionHold,"privileged_pr_workflow_source_unverifiable"):
+                        executor.source_authorised(c,ctrl)
+                with patch.object(executor,"gh",side_effect=lambda p:
+                                  {"object":{"sha":"c"*40}}
+                                  if p.endswith("/git/ref/heads/main") else gh(p)):
+                    with self.assertRaisesRegex(policy.AdmissionHold,"target_base_sha_changed"):
+                        executor.source_authorised(c,ctrl)
+                with self.assertRaisesRegex(policy.AdmissionHold,"trusted_base_not_pinned"):
+                    policy.category_enabled(c,{**ctrl,"trusted_main_sha":""})
+        for changed in ({"ref":"stacked"},{"sha":""},{"repo":{"id":22}}):
+            bad={**r,"pull_requests":[{**r["pull_requests"][0],
+                 "base":{**r["pull_requests"][0]["base"],**changed}}]}
+            with self.assertRaisesRegex(policy.AdmissionHold,"untrusted_privileged_pull_request_source"):
+                policy.classify(bad,job("ops","provision","Provision containment smoke compute"))
 
     def test_stacked_pr_target_never_gets_a_main_privileged_runner(self):
         scenario = run(".github/workflows/clawsweeper-dispatch.yml",
@@ -205,6 +306,8 @@ class PolicyTests(unittest.TestCase):
                 return {"workflow_runs": [valid]}
             if "runs?status=in_progress" in path:
                 return {"workflow_runs": [valid]}
+            if "runs?status=pending" in path:
+                return {"workflow_runs": []}
             if "jobs?" in path:
                 return {"jobs": [job(), {**job(), "id": 889, "labels": ["ubuntu-latest"]}]}
             raise AssertionError(path)
@@ -214,6 +317,29 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(discovered[0].job_id, 888)
         self.assertEqual(sum("/jobs?" in x for x, _ in fake_calls), 1)
         self.assertTrue(all(method == "GET" for _, method in fake_calls))
+
+    def test_pending_workflow_run_admits_only_queued_exact_jit_job(self):
+        # Live GitHub may report a waiting self-hosted run as pending while its
+        # JIT-labelled job is queued; omitting pending strands genuine work.
+        waiting = run()
+        waiting["status"] = "pending"
+        requests = []
+        def gh(path, method="GET", body=None):
+            requests.append((path, method))
+            if "runs?status=pending" in path:
+                return {"workflow_runs": [waiting]}
+            if "runs?status=queued" in path or "runs?status=in_progress" in path:
+                return {"workflow_runs": []}
+            if "jobs?" in path:
+                return {"jobs": [job(), {**job(), "id": 889, "status": "completed"}]}
+            raise AssertionError(path)
+        with patch.object(executor, "gh", side_effect=gh):
+            result = executor.discover()
+        self.assertEqual([(c.run_id, c.job_id, c.sha) for c in result],
+                         [(123456789, 888, SHA)])
+        self.assertEqual(sum("/jobs?" in path for path, _ in requests), 1)
+        self.assertTrue(all(method == "GET" for _, method in requests))
+        self.assertTrue(any("runs?status=pending" in path for path, _ in requests))
 
     def test_receipt_is_owner_only_and_durable(self):
         with tempfile.TemporaryDirectory() as root:

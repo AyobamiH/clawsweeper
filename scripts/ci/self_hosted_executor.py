@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from self_hosted_policy import AdmissionHold, REPOSITORY, WORKFLOWS, category_enabled, classify
+from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, WORKFLOWS, category_enabled, classify
 
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
@@ -92,7 +92,8 @@ def discover():
     candidates = []
     workflow_paths = {path for path, _ in WORKFLOWS.values()}
     visited = set()
-    for status in ("queued", "in_progress"):
+    # Some queued JIT jobs belong to runs GitHub still reports as pending.
+    for status in ("queued", "in_progress", "pending"):
         runs = gh(f"{REPO_SLUG}/actions/runs?status={status}&per_page=100").get("workflow_runs", [])
         for item in runs[:100]:
             if item.get("path") not in workflow_paths or item.get("id") in visited:
@@ -101,7 +102,7 @@ def discover():
             if not isinstance(run_id, int) or run_id <= 0:
                 continue
             visited.add(run_id)
-            if item.get("status") not in ("queued", "in_progress"):
+            if item.get("status") not in ("queued", "in_progress", "pending"):
                 continue
             jobs = gh(f"{REPO_SLUG}/actions/runs/{run_id}/jobs?per_page=100").get("jobs", [])
             for job in jobs[:100]:
@@ -127,12 +128,14 @@ def source_authorised(candidate, controls):
     if candidate.role != "ops":
         return True
     main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
-    if candidate.event == "pull_request_target":
+    review_source = candidate.slot == "notify" and candidate.event in REVIEW_EVENTS
+    owner_pr_source = candidate.slot in ("provision", "cleanup") and candidate.event == "pull_request"
+    if candidate.event in ("pull_request_target", "pull_request"):
         if candidate.trusted_base_sha != main:
             raise AdmissionHold("target_base_sha_changed")
-    elif candidate.event != "pull_request" and candidate.sha != main:
-        # Event-driven operations are executable only at the exact pinned
-        # default-branch source. No stale dispatch after a source revision moves.
+    elif candidate.event != "pull_request" and not review_source and candidate.sha != main:
+        # Non-review callbacks must use pinned main. Review callbacks are
+        # allowed only after separate exact workflow-byte equality below.
         raise AdmissionHold("default_branch_source_drift")
     if main != controls.get("trusted_main_sha"):
         raise AdmissionHold("trusted_workflow_head_changed")
@@ -147,6 +150,18 @@ def source_authorised(candidate, controls):
     digest = hashlib.sha256(base64.b64decode(obj["content"])).hexdigest()
     if digest != expected:
         raise AdmissionHold("trusted_workflow_drift")
+    if review_source or owner_pr_source:
+        # GitHub review callbacks point at PR revisions. Privileged same-repo
+        # PRs can edit the workflow BEFORE the checkout step. Both must prove
+        # exact reviewed workflow bytes at their reported SHA and pinned main.
+        kind = "review" if review_source else "privileged_pr"
+        try:
+            head_obj = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={candidate.sha}")
+            head_digest = hashlib.sha256(base64.b64decode(head_obj["content"])).hexdigest()
+        except (RuntimeError, KeyError, ValueError) as exc:
+            raise AdmissionHold(kind + "_workflow_source_unverifiable") from exc
+        if head_digest != expected:
+            raise AdmissionHold(kind + "_workflow_source_drift")
     return True
 
 

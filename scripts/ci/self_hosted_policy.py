@@ -10,6 +10,7 @@ import re
 REPOSITORY = "AyobamiH/clawsweeper"
 JOB_LABEL = re.compile(r"^clawsweeper-ci-(security|ops|isolation)-([1-9][0-9]*)-([a-z0-9-]+)$")
 SHA = re.compile(r"^[a-f0-9]{40}$")
+REVIEW_EVENTS = frozenset(("pull_request_review", "pull_request_review_comment"))
 WORKFLOWS = {
     ("security", "actions"): (".github/workflows/codeql.yml", "Analyze (actions)"),
     ("security", "javascript-typescript"): (
@@ -134,11 +135,17 @@ def classify(run, job):
                     or head["repo"].get("id") != repo_id
                     or base["repo"].get("id") != repo_id
                     or base.get("ref") != "main"
+                    or not SHA.fullmatch(str(base.get("sha", "")))
                     or not SHA.fullmatch(str(head.get("sha", "")))):
                 raise AdmissionHold("untrusted_privileged_pull_request_source")
+            trusted_base_sha = base["sha"]
         elif run.get("event") in ("push", "workflow_dispatch") and slot in ("provision", "cleanup"):
             if actor != "AyobamiH" or branch != "main":
                 raise AdmissionHold("untrusted_operations_source")
+        elif run.get("event") in REVIEW_EVENTS and slot == "notify":
+            # GitHub reports reviewer activity on PR feature/merge revisions,
+            # not main; the executor must pin their exact workflow bytes.
+            pass
         elif run.get("event") not in ("pull_request",) and branch != "main":
             # Issues, comments, review notifications, repository_dispatch and
             # workflow_run are emitted against the trusted default branch even
@@ -173,8 +180,18 @@ def category_enabled(candidate, controls):
             raise AdmissionHold("operations_not_proven")
         # Target-PR events have arbitrary incoming branch names. Their base
         # workflow must instead be pinned by the executor's trusted_main_sha.
-        if candidate.event == "pull_request_target":
-            if not re.fullmatch(r"[a-f0-9]{40}", str(controls.get("trusted_main_sha", ""))):
+        if candidate.event in ("pull_request_target", "pull_request"):
+            # A same-repository PR can have a feature-branch source, but its
+            # base must still match the owner's exact approved main revision.
+            if not SHA.fullmatch(str(controls.get("trusted_main_sha", ""))):
+                raise AdmissionHold("trusted_base_not_pinned")
+            if candidate.event == "pull_request":
+                # An owner PR alone is never privileged execution authority.
+                # Every such run must additionally be explicitly owner-pinned.
+                if not isinstance(scoped_runs, list) or candidate.run_id not in scoped_runs:
+                    raise AdmissionHold("privileged_pr_run_not_pinned")
+        elif candidate.slot == "notify" and candidate.event in REVIEW_EVENTS:
+            if not SHA.fullmatch(str(controls.get("trusted_main_sha", ""))):
                 raise AdmissionHold("trusted_base_not_pinned")
         elif candidate.branch != "main":
             raise AdmissionHold("branch_not_authorised")
