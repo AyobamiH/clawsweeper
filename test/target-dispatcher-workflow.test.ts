@@ -39,8 +39,17 @@ function normalizeWhitespace(value: string | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
-test("documented target dispatcher template matches the live workflow", () => {
-  assert.equal(documentedWorkflow, liveWorkflow);
+test("external target dispatcher and owner-operated CI preserve identical dispatch behaviour", () => {
+  // The copyable template runs in an external target repository without
+  // access to the owner's JIT fleet. Only our repository's exact runner line
+  // differs; every trigger, credential boundary and dispatch step must match.
+  const targetRunner = "    runs-on: ubuntu-latest\n";
+  const localRunner =
+    '    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-dispatch"]\n';
+  assert.ok(documentedWorkflow.includes(targetRunner));
+  assert.ok(liveWorkflow.includes(localRunner));
+  assert.doesNotMatch(liveWorkflow, /runs-on: ubuntu-(latest|24\.04)/);
+  assert.equal(documentedWorkflow.replace(targetRunner, localRunner), liveWorkflow);
 });
 
 test("target dispatcher acknowledges non-draft PR receipts before review dispatch", () => {

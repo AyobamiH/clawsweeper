@@ -7181,7 +7181,13 @@ test("github activity workflow scopes cancellation to matching item activity", (
   assert.match(workflow, /repair:spam-comment-intake -- --write-report/);
   assert.doesNotMatch(workflow, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/dispatches"/);
   assert.match(concurrencyBlock, /cancel-in-progress: true/);
-  assert.match(workflow, /runs-on: ubuntu-24\.04/);
+  // The runner migration must retain exactly the existing concurrency and
+  // notification contract, without falling back to a paid hosted runner.
+  assert.match(
+    workflow,
+    /runs-on: \[self-hosted, Linux, X64, "clawsweeper-ci-ops-\$\{\{ github.run_id \}\}-notify"\]/,
+  );
+  assert.doesNotMatch(workflow, /runs-on: ubuntu-(latest|24\.04)/);
   assert.doesNotMatch(workflow, /runs-on: blacksmith-/);
   assert.doesNotMatch(
     concurrencyBlock,
