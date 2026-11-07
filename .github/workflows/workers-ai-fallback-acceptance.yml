@@ -5,6 +5,21 @@ on:
     branches:
       - feat/inference-auto-routing-20260928
   workflow_dispatch:
+    inputs:
+      release_review:
+        description: Review the pinned source revision using the existing inference router
+        type: boolean
+        default: false
+      release_base:
+        description: Exact 40-character base commit
+        type: string
+      release_head:
+        description: Exact 40-character head commit
+        type: string
+      release_ai_max_calls:
+        description: "Explicit per-run Workers AI call budget (0 disables inference; maximum 8)"
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -15,6 +30,7 @@ concurrency:
 
 jobs:
   smoke:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_review != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
@@ -82,3 +98,90 @@ jobs:
           }
           console.log("Workers AI fallback inference accepted.");
           NODE
+
+  release-source-review:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_review == true && github.repository == 'AyobamiH/clawsweeper' }}
+    runs-on: [self-hosted, Linux, X64, clawsweeper-operations]
+    # Checkout and pinned tool bootstrap consume several minutes on the isolated
+    # runner. Keep a finite job budget while allowing the bounded per-chunk review.
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      CLAWSWEEPER_INFERENCE_POLICY: auto
+      CLAWSWEEPER_RELEASE_AI_MAX_CALLS: ${{ inputs.release_ai_max_calls || 0 }}
+      CLAWSWEEPER_WORKERS_AI_MODEL: ${{ vars.CLAWSWEEPER_WORKERS_AI_MODEL || '@cf/zai-org/glm-5.3' }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_AI_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_AI_TOKEN }}
+      CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_QUOTA_URL }}
+      CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_QUOTA_SECRET }}
+    steps:
+      - name: Validate pinned release inputs before checkout
+        env:
+          REVIEW_BASE: ${{ inputs.release_base }}
+          REVIEW_HEAD: ${{ inputs.release_head }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEW_BASE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REVIEW_HEAD" =~ ^[a-f0-9]{40}$ ]]
+          test "$REVIEW_BASE" != "$REVIEW_HEAD"
+      - name: Checkout trusted review tooling at workflow revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Checkout pinned target source as review-only data
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.release_head }}
+          path: target
+      - name: Install pinned dependencies without privileged Corepack symlinks
+        run: |
+          set -euo pipefail
+          # Keep the package manager cache within this isolated job. Never
+          # install a floating version or write to privileged runner paths.
+          export COREPACK_HOME="$RUNNER_TEMP/corepack-cache"
+          mkdir -p "$COREPACK_HOME" "$RUNNER_TEMP/pnpm-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/pnpm-bin"
+          echo "$RUNNER_TEMP/pnpm-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/pnpm-bin:$PATH"
+          # A transient registry TLS reset must not require a new workflow.
+          # Every attempt still resolves the repository's exact pinned version.
+          for attempt in 1 2 3; do
+            if corepack pnpm --version; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Pinned package manager unavailable after bounded retries' >&2
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          test "$(pnpm --version)" = "11.10.0"
+          for attempt in 1 2 3; do
+            if pnpm install --frozen-lockfile; then break; fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Frozen dependency installation failed after bounded retries' >&2
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          pnpm run build:node
+      - name: Install existing trusted input scanner
+        run: bash .github/actions/setup-review-tools/install.sh
+      - name: Read-only exact-head preflight
+        env:
+          REVIEW_BASE: ${{ inputs.release_base }}
+          REVIEW_HEAD: ${{ inputs.release_head }}
+        run: node scripts/review-release.mjs --preflight target "$REVIEW_BASE" "$REVIEW_HEAD"
+      - name: Review exact source without mutation
+        env:
+          REVIEW_BASE: ${{ inputs.release_base }}
+          REVIEW_HEAD: ${{ inputs.release_head }}
+        run: |
+          set -euo pipefail
+          node scripts/review-release.mjs target "$REVIEW_BASE" "$REVIEW_HEAD" "$RUNNER_TEMP/clawsweeper-release-review.json"
+          node -e 'const r=require(process.argv[1]); if(!r.passed || r.head!==process.env.REVIEW_HEAD || r.base!==process.env.REVIEW_BASE) process.exit(1)' "$RUNNER_TEMP/clawsweeper-release-review.json"
+      # The existing local owner-operated runner retains its output. No artifact
+      # upload, PR merge, branch push or GitHub status fabrication is performed.

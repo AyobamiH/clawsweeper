@@ -28,6 +28,7 @@
         "public-api.md",
         "github-egress-telemetry.md",
         "github-webhook-read-model.md",
+        "local-ci-webhook.md",
         "operator-configuration.md",
         "live-dashboard.md",
         "openclaw-bay-demo.md",

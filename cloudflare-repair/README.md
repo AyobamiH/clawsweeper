@@ -1,10 +1,40 @@
 # Cloudflare repair compute
 
 ClawSweeper repair jobs provision two uniquely labelled ephemeral Cloudflare
-runners: one for planning, one for execution. Standard GitHub-hosted jobs own
-API orchestration, review, deterministic publication and CI. No workflow selects
-Blacksmith. Repair and review use ChatGPT subscription authentication, with API
-model credentials removed and the shared allowance gate retained.
+runners: one for planning, one for execution. For the repair worker,
+owner-operated `clawsweeper-operations` runners own
+dispatch admission, provisioning and cleanup. `CLAWSWEEPER_OPERATIONAL_RUNNER`
+may select an existing owner-operated runner label; there is no GitHub-hosted
+fallback. Planning and execution still use the separately provisioned Cloudflare
+roles. The selected inference policy retains the existing OpenClaw/Workers AI
+route and subscription route with their credential and allowance guards.
+
+## Repair artifact handoff
+
+The repair worker uses the private state repository's retained `results/` tree
+by default (`git-results`). It reuses the existing coordinated state writer,
+publishing only a bounded subtree for the current repository, run, attempt,
+workflow revision, job and phase. It verifies publication before inference.
+Planning publishes content-addressed files and a manifest; execution accepts
+only the producer's exact state commit, manifest SHA-256 and byte count, then
+verifies every restored file. Final results and transcripts follow the same path.
+
+`scripts/repair-artifacts.ts` records the state commit and manifest identity in
+a local JSON receipt and the job summary. Transfers are limited to 24 MiB and
+512 regular files, and reject unsafe paths, links, incomplete local writes and
+foreign run identities. The existing coordinator, App credential and normal
+Git push remain mandatory. The writer publishes explicit `results/` paths;
+`assets/` and `ledger/` retain their existing ownership.
+Before final publication, each role refreshes its existing App token into a
+separate disposable state checkout. This preserves the worker output and avoids
+using credentials that expired during a long model run.
+
+The owner may explicitly select `worker` or `github` using
+`REPAIR_ARTIFACT_TRANSPORT`. Worker mode uses the existing authenticated R2
+state-blob API and requires its deployed binding to be available. Every selected
+durable transport is preflighted before inference; there is no silent replay
+through another backend. With a durable state transport selected, GitHub Codex
+debug uploads are optional copies and cannot block a verified handoff.
 
 ## Lifecycle and authority
 
