@@ -92,6 +92,16 @@ test("offline export emits all exact code and systemd bytes without making an in
   const duplicate = invoke(input);
   assert.notEqual(duplicate.status, 0);
   assert.deepEqual(fs.readFileSync(input.out), original);
+  const linkedDestination = path.join(input.root, "linked-bundle.json");
+  fs.symlinkSync(input.out, linkedDestination);
+  const linked = invoke({ ...input, out: linkedDestination });
+  assert.notEqual(linked.status, 0);
+  assert.equal(fs.lstatSync(linkedDestination).isSymbolicLink(), true);
+  assert.deepEqual(fs.readFileSync(input.out), original);
+  assert.deepEqual(
+    fs.readdirSync(input.root).filter((entry) => entry.startsWith(".clawsweeper-review-stage-")),
+    [],
+  );
 });
 
 test("changed tracked credential and stale commit refuse before creating a source bundle", (t) => {

@@ -2,8 +2,19 @@
 // Read-only release review: use existing Codex admission / Workers AI fallback.
 import { execFileSync } from "node:child_process";
 import { digest } from "./commercial/contract.mjs";
-import { resolve } from "node:path";
-import { writeFileSync, appendFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fsyncSync,
+  linkSync,
+  mkdtempSync,
+  openSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import {
   assertLiveReleaseReviewBudget,
   prepareSourceReview,
@@ -27,6 +38,50 @@ if (
   );
   process.exit(2);
 }
+// Never expose a partial export as complete if the process dies mid-write.
+// Stage on the same filesystem, fsync it, then create the final name with
+// link(2): an existing file or symlink cannot be overwritten by a retry.
+function writeImmutableBundle(destination, content) {
+  const output = resolve(destination);
+  const parent = dirname(output);
+  const stage = mkdtempSync(join(parent, ".clawsweeper-review-stage-"));
+  const stagedFile = join(stage, "source.json");
+  try {
+    const fd = openSync(
+      stagedFile,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      writeFileSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    linkSync(stagedFile, output);
+    const dirfd = openSync(
+      parent,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    try {
+      fsyncSync(dirfd);
+    } finally {
+      closeSync(dirfd);
+    }
+  } finally {
+    try {
+      unlinkSync(stagedFile);
+    } catch {
+      /* fail closed; preserve other owner files */
+    }
+    try {
+      rmdirSync(stage);
+    } catch {
+      /* stage is private; never delete foreign paths */
+    }
+  }
+}
+
 const root = resolve(values[0]);
 const git = (...params) =>
   execFileSync("git", ["-C", root, ...params], {
@@ -67,7 +122,7 @@ try {
     const content = JSON.stringify(evidence, null, 2) + "\n";
     if (Buffer.byteLength(content, "utf8") > 45 * 1024 * 1024)
       throw new Error("release review bundle exceeds bounded output size");
-    writeFileSync(resolve(values[3]), content, { flag: "wx", mode: 0o600 });
+    writeImmutableBundle(values[3], content);
     console.log(
       JSON.stringify({
         exported: true,
