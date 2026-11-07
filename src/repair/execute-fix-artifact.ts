@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import type { JsonValue, LooseRecord } from "./json-types.js";
+import { formatRepairProgressLine } from "./progress-log.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -397,7 +398,7 @@ function spawnCodexSyncWithHeartbeat(
 function startCodexHeartbeat(label: string) {
   const script = `
 const interval = Math.max(1000, Number(process.env.CLAWSWEEPER_CODEX_HEARTBEAT_MS || 60000));
-const label = process.env.CLAWSWEEPER_CODEX_HEARTBEAT_LABEL || "Codex subprocess";
+const label = "Codex subprocess";
 const startedAt = Date.now();
 setInterval(() => {
   const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
@@ -407,7 +408,6 @@ setInterval(() => {
   const child = spawn(process.execPath, ["-e", script], {
     env: {
       ...process.env,
-      CLAWSWEEPER_CODEX_HEARTBEAT_LABEL: label,
       CLAWSWEEPER_CODEX_HEARTBEAT_MS: String(codexHeartbeatMs),
     },
     stdio: ["ignore", "inherit", "inherit"],
@@ -2702,8 +2702,9 @@ function compactReplacementHistory({
 }
 
 function logProgress(message: string, details: LooseRecord = {}) {
-  const suffix = Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : "";
-  console.log(`[clawsweeper repair] ${new Date().toISOString()} ${message}${suffix}`);
+  // Progress logs are publicly visible workflow artifacts. Do not stringify
+  // command errors, environment values, provider bodies or arbitrary metadata.
+  console.log(formatRepairProgressLine(message, details));
 }
 
 function updateAutomergeProgressStatus({
@@ -2744,8 +2745,11 @@ function updateAutomergeProgressStatus({
     );
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[clawsweeper repair] failed to update automerge progress status: ${message}`);
+    // GitHub errors may include credential-bearing request URLs or headers.
+    // Preserve the fail-closed outcome without copying provider diagnostics.
+    console.warn(
+      "[clawsweeper repair] failed to update automerge progress status (details withheld)",
+    );
     return false;
   }
 }
@@ -4083,7 +4087,7 @@ function writeReport(report: LooseRecord, resultPath: string) {
 function publishPersistedReport(resultPath: string) {
   const reportPath = fixExecutionReportPath(resultPath);
   if (!fs.existsSync(reportPath)) {
-    console.warn(`No deferred fix execution report exists at ${reportPath}; skipping publication.`);
+    console.warn("No deferred fix execution report exists; skipping publication.");
     return;
   }
   const persistedReport = JSON.parse(fs.readFileSync(reportPath, "utf8"));
