@@ -16,12 +16,12 @@ SHA = "a" * 40
 
 
 def run(path=".github/workflows/codeql.yml", event="pull_request", branch="feature", actor="external"):
-    return {"repository": {"full_name": "AyobamiH/clawsweeper"},
+    return {"repository": {"full_name": "AyobamiH/clawsweeper", "id": 42},
             "id": 123456789, "run_attempt": 1, "path": path, "head_sha": SHA,
             "head_branch": branch, "event": event, "actor": {"login": actor},
             "status": "in_progress",
-            "pull_requests": [{"number": 123, "base": {"ref": "main", "sha": SHA},
-                               "head": {"ref": branch, "sha": SHA}}]}
+            "pull_requests": [{"number": 123, "base": {"ref": "main", "sha": SHA, "repo": {"id": 42}},
+                               "head": {"ref": branch, "sha": SHA, "repo": {"id": 42}}}]}
 
 
 def job(role="security", slot="actions", name="Analyze (actions)", run_id=123456789):
@@ -52,11 +52,80 @@ class PolicyTests(unittest.TestCase):
             "enabled_roles": ["ops"], "operations_accepted": True, "trusted_main_sha": SHA,
             "allowed_branches": ["main"], "max_jobs_per_cycle": 1}))
 
+    def test_all_existing_operations_events_survive_default_branch_routing(self):
+        event_cases = {
+            "dispatch": (".github/workflows/clawsweeper-dispatch.yml", "dispatch",
+                         ("issues", "issue_comment", "pull_request_target")),
+            "notify": (".github/workflows/github-activity.yml", "notify",
+                       ("repository_dispatch", "issues", "issue_comment", "pull_request_target",
+                        "pull_request_review", "pull_request_review_comment", "workflow_run")),
+        }
+        for slot, (path, name, events) in event_cases.items():
+            for event in events:
+                with self.subTest(slot=slot, event=event):
+                    info = run(path, event, branch="main" if event != "pull_request_target" else "external-branch", actor="external")
+                    candidate = policy.classify(info, job("ops", slot, name))
+                    self.assertEqual(candidate.role, "ops")
+                    self.assertEqual(candidate.event, event)
+                    self.assertTrue(policy.category_enabled(candidate, {
+                        "enabled": True, "repo": policy.REPOSITORY,
+                        "enabled_roles": ["ops"], "operations_accepted": True,
+                        "trusted_main_sha": SHA,
+                        "max_jobs_per_cycle": 1,
+                    }))
+        for slot, (path, name, _) in event_cases.items():
+            info = run(path, "workflow_dispatch", branch="main", actor="AyobamiH")
+            with self.subTest(slot=slot), self.assertRaisesRegex(policy.AdmissionHold, "unapproved_event"):
+                policy.classify(info, job("ops", slot, name))
+
+    def test_event_operations_reject_unpinned_or_stale_main_source(self):
+        c = policy.classify(run(".github/workflows/github-activity.yml", "issues", branch="main", actor="external"),
+                            job("ops", "notify", "notify"))
+        import base64, hashlib
+        content = b"name: immutable tested workflow\n"
+        digest = hashlib.sha256(content).hexdigest()
+        expected = {"trusted_main_sha": SHA, "trusted_workflow_sha256": {c.workflow: digest}}
+        def gh(path, *args):
+            if "git/ref/heads/main" in path:
+                return {"object": {"sha": SHA}}
+            return {"content": base64.b64encode(content).decode()}
+        with patch.object(executor, "gh", side_effect=gh):
+            self.assertTrue(executor.source_authorised(c, expected))
+            with self.assertRaisesRegex(policy.AdmissionHold, "default_branch_source_drift"):
+                executor.source_authorised(c.__class__(**{**vars(c), "sha": "b" * 40}), expected)
+            with self.assertRaisesRegex(policy.AdmissionHold, "trusted_workflow_head_changed"):
+                executor.source_authorised(c, {**expected, "trusted_main_sha": "b" * 40})
+
     def test_ops_never_executes_untrusted_pull_request(self):
         with self.assertRaisesRegex(policy.AdmissionHold, "untrusted_privileged_pull_request"):
             policy.classify(run(".github/workflows/repair-containment-smoke.yml",
                                 "pull_request", actor="external"),
                             job("ops", "provision", "Provision containment smoke compute"))
+
+    def test_privileged_pull_request_head_repository_is_not_implicit_authority(self):
+        workflow = ".github/workflows/repair-containment-smoke.yml"
+        base = run(workflow, "pull_request", branch="owner-pr", actor="AyobamiH")
+        candidate = policy.classify(base, job("ops", "provision", "Provision containment smoke compute"))
+        self.assertEqual(candidate.branch, "owner-pr")
+        # Even a trusted owner PR cannot receive privileged runner secrets
+        # until there is separately approved, pinned execution authority.
+        with self.assertRaisesRegex(policy.AdmissionHold, "branch_not_authorised"):
+            policy.category_enabled(candidate, {"enabled": True, "repo": policy.REPOSITORY,
+                "enabled_roles": ["ops"], "operations_accepted": True,
+                "trusted_main_sha": SHA, "max_jobs_per_cycle": 1})
+        for case in ("fork", "missing_head_repo", "missing_repository_id", "foreign_base"):
+            scenario = json.loads(json.dumps(base))
+            if case == "fork":
+                scenario["pull_requests"][0]["head"]["repo"]["id"] = 99
+            elif case == "missing_head_repo":
+                del scenario["pull_requests"][0]["head"]["repo"]
+            elif case == "missing_repository_id":
+                del scenario["repository"]["id"]
+            else:
+                scenario["pull_requests"][0]["base"]["repo"]["id"] = 99
+            with self.subTest(case=case), self.assertRaisesRegex(
+                    policy.AdmissionHold, "privileged_pull_request_source"):
+                policy.classify(scenario, job("ops", "provision", "Provision containment smoke compute"))
 
     def test_stacked_pr_target_never_gets_a_main_privileged_runner(self):
         scenario = run(".github/workflows/clawsweeper-dispatch.yml",
