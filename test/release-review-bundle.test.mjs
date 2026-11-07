@@ -104,6 +104,24 @@ test("offline export emits all exact code and systemd bytes without making an in
   );
 });
 
+test("symlinked export parent refuses before publishing any final output", (t) => {
+  const input = fixture(t);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-review-parent-"));
+  t.after(() => fs.rmSync(temp, { force: true, recursive: true }));
+  const real = path.join(temp, "real");
+  const alias = path.join(temp, "alias");
+  fs.mkdirSync(real);
+  fs.symlinkSync(real, alias);
+  const result = invoke({ ...input, out: path.join(alias, "review.json") });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /\"status\":\"refused\"/);
+  assert.equal(fs.existsSync(path.join(real, "review.json")), false);
+  assert.deepEqual(
+    fs.readdirSync(real).filter((entry) => entry.startsWith(".clawsweeper-review-stage-")),
+    [],
+  );
+});
+
 test("changed tracked credential and stale commit refuse before creating a source bundle", (t) => {
   const input = fixture(t);
   const wrong = invoke({ ...input, head: "0".repeat(40) });

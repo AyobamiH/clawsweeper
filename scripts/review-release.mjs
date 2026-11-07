@@ -12,6 +12,7 @@ import {
   mkdtempSync,
   openSync,
   rmdirSync,
+  realpathSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -44,9 +45,16 @@ if (
 function writeImmutableBundle(destination, content) {
   const output = resolve(destination);
   const parent = dirname(output);
-  const stage = mkdtempSync(join(parent, ".clawsweeper-review-stage-"));
-  const stagedFile = join(stage, "source.json");
+  // Refuse aliased parent paths before publishing. Previously the late
+  // O_NOFOLLOW check could fail after a final bundle was already linked.
+  if (realpathSync.native(parent) !== parent)
+    throw new Error("review bundle parent must not contain symlinks");
+  const dirfd = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  let stage;
+  let stagedFile;
   try {
+    stage = mkdtempSync(join(parent, ".clawsweeper-review-stage-"));
+    stagedFile = join(stage, "source.json");
     const fd = openSync(
       stagedFile,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
@@ -59,25 +67,22 @@ function writeImmutableBundle(destination, content) {
       closeSync(fd);
     }
     linkSync(stagedFile, output);
-    const dirfd = openSync(
-      parent,
-      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-    );
-    try {
-      fsyncSync(dirfd);
-    } finally {
-      closeSync(dirfd);
-    }
+    fsyncSync(dirfd);
   } finally {
-    try {
-      unlinkSync(stagedFile);
-    } catch {
-      /* fail closed; preserve other owner files */
+    closeSync(dirfd);
+    if (stagedFile) {
+      try {
+        unlinkSync(stagedFile);
+      } catch {
+        /* fail closed; preserve other owner files */
+      }
     }
-    try {
-      rmdirSync(stage);
-    } catch {
-      /* stage is private; never delete foreign paths */
+    if (stage) {
+      try {
+        rmdirSync(stage);
+      } catch {
+        /* stage is private; never delete foreign paths */
+      }
     }
   }
 }
