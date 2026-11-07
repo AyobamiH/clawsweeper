@@ -199,9 +199,13 @@ def stop_owned(name, owner):
     for attempt in range(5):
         try:
             obj = inspect_owned(name, owner)
-        except (RuntimeError, subprocess.TimeoutExpired):
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            # An ownership mismatch is a security refusal, not transient API
+            # unavailability. Never retry it or accidentally stop that name.
+            if isinstance(exc, RuntimeError) and str(exc) != "container_inspection_unavailable":
+                raise
             if attempt == 4:
-                raise RuntimeError("owned_container_identity_unverified")
+                raise RuntimeError("owned_container_identity_unverified") from exc
             time.sleep(2)
             continue
         if obj is None:

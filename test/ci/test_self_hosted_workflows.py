@@ -190,6 +190,16 @@ class PolicyTests(unittest.TestCase):
             stop.assert_not_called()
             inspect.assert_called_once()
 
+    def test_foreign_container_label_fails_immediately_without_stopping_it(self):
+        with patch.object(executor, "inspect_owned", side_effect=RuntimeError("container_ownership_mismatch")) as inspect, \
+             patch.object(executor, "run_cli") as stop, \
+             patch.object(executor.time, "sleep") as wait:
+            with self.assertRaisesRegex(RuntimeError, "container_ownership_mismatch"):
+                executor.stop_owned("csw-ci-owned-worker", "different-owner")
+            inspect.assert_called_once()
+            stop.assert_not_called()
+            wait.assert_not_called()
+
     def test_existing_attempt_never_registers_another_runner(self):
         c = policy.classify(run(), job())
         with tempfile.TemporaryDirectory() as d:
