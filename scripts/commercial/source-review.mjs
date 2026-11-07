@@ -42,6 +42,10 @@ const git = (root, ...args) =>
   });
 export const SOURCE_FILE_LIMIT = 512 * 1024;
 const GENERATED_ROOTS = [".artifacts/", ".wrangler/"];
+// The source bundle already limits changed files to 80. Keep every release
+// review entry point aligned with that bound instead of rejecting the valid
+// 68-file integration before cost admission; spending limits stay unchanged.
+export const MAX_RELEASE_REVIEW_FILES = 80;
 const generatedPath = (name) => GENERATED_ROOTS.some((prefix) => name.startsWith(prefix));
 
 async function sourceFile(root, name) {
@@ -358,7 +362,10 @@ export function aggregateReleaseFindings(findings) {
 // production inference call. A preflight must never claim a review is ready
 // when the complete pinned source is ineligible under the fixed cost cap.
 export function assertLiveReleaseReviewBudget(bundle, env = {}) {
-  assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
+  assert(
+    bundle.files.length > 0 && bundle.files.length <= MAX_RELEASE_REVIEW_FILES,
+    "unsupported release file count",
+  );
   const requiredCalls = bundle.files.reduce(
     (sum, file) => sum + releaseSourceChunks(file).length,
     1,
@@ -380,7 +387,10 @@ export function assertLiveReleaseReviewBudget(bundle, env = {}) {
 // cross-file pass. A missing/truncated response refuses the whole release.
 export async function reviewReleaseUnits(route, prompt, bundle, env, infer = workersAiJson) {
   assert(route.provider === "cloudflare-workers-ai", "Workers AI route required");
-  assert(bundle.files.length > 0 && bundle.files.length <= 64, "unsupported release file count");
+  assert(
+    bundle.files.length > 0 && bundle.files.length <= MAX_RELEASE_REVIEW_FILES,
+    "unsupported release file count",
+  );
   if (infer === workersAiJson) assertLiveReleaseReviewBudget(bundle, env);
   const findings = [];
   const summaries = [];
