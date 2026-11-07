@@ -38,6 +38,26 @@ class WorkflowSources(unittest.TestCase):
         self.assertNotIn('|| \'ubuntu-latest\'',s)
         self.assertIn('needs.provision.outputs.plan !=',s)
 
+    def test_privileged_containment_checkouts_never_use_incoming_pr_code(self):
+        # A same-repo owner PR can alter the composite lifecycle action. It
+        # must not be checked out before minting the GitHub App/Cloudflare token.
+        s=self.text('repair-containment-smoke.yml')
+        for job, boundary in (('provision:', '  containment-smoke:'),
+                              ('cleanup:', None)):
+            section=s.split('  '+job+'\n', 1)[1]
+            if boundary:
+                section=section.split(boundary, 1)[0]
+            self.assertIn("github.event.pull_request.base.ref == 'main'", section)
+            self.assertIn('ref: ${{ github.event.pull_request.base.sha }}', section)
+            self.assertIn('Verify privileged lifecycle source before credentials',section)
+            self.assertIn('test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"',section)
+            self.assertLess(section.index('Verify privileged lifecycle source before credentials'),
+                            section.index('Mint bounded GitHub App credential'))
+            self.assertNotIn('ref: ${{ github.event.pull_request.head.sha }}',section)
+        # Only unprivileged smoke test jobs may run against PR source.
+        smoke=s.split('  containment-smoke:\n',1)[1].split('  cleanup:\n',1)[0]
+        self.assertNotIn('permission-administration: write',smoke)
+
     def test_automerge_keeps_full_hermetic_scenarios_no_host_socket(self):
         s=self.text('automerge-e2e.yml')
         for fragment in ('clawsweeper-ci-isolation-${{ github.run_id }}-e2e',
