@@ -35,7 +35,9 @@ jobs:
     # The isolated nested-Docker executor is deliberately held until live sandbox acceptance.
     # Never grant a self-hosted test the host Docker socket.
     runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-isolation-${{ github.run_id }}-e2e"]
-    timeout-minutes: 15
+    # Complete 14 tiny and 14 OpenClaw-shaped scenarios took >70 minutes on
+    # the independent rootless owner machine. Never "pass" a shortened suite.
+    timeout-minutes: 120
     env:
       AUTOMERGE_E2E_BASE_ARCHIVE: /tmp/clawsweeper-automerge-e2e-base.tar
       AUTOMERGE_E2E_BASE_IMAGE: clawsweeper-automerge-e2e-base:repository
@@ -44,11 +46,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Enable nested unprivileged namespaces on the disposable CI host
+      - name: Prove nested unprivileged namespaces without host mutation
         run: |
           set -euo pipefail
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          test "$(id -u)" -ne 0
+          test ! -S /run/docker.sock
+          test -z "${DOCKER_HOST:-}"
+          command -v docker
+          unshare --user --map-root-user --pid --fork sh -ec 'test "$(id -u)" -eq 0'
 
       - name: Restore repository-built base image
         id: base-cache

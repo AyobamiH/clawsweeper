@@ -13,7 +13,11 @@ test("automerge E2E preserves full containment while holding the dedicated self-
   assert.doesNotMatch(workflow, /\/var\/run\/docker\.sock/);
   assert.match(workflow, /isolated nested-Docker executor is deliberately held/);
   assert.match(workflow, /node scripts\/e2e\/automerge-container\.mjs/);
-  assert.match(workflow, /kernel\.apparmor_restrict_unprivileged_userns=0/);
+  assert.match(workflow, /timeout-minutes: 120/);
+  assert.match(workflow, /Prove nested unprivileged namespaces without host mutation/);
+  assert.match(workflow, /unshare --user --map-root-user --pid --fork/);
+  assert.match(workflow, /test ! -S \/run\/docker\.sock/);
+  assert.doesNotMatch(workflow, /sysctl -w/);
   assert.match(
     fs.readFileSync("scripts/e2e/automerge-container.mjs", "utf8"),
     /apparmor=unconfined/,

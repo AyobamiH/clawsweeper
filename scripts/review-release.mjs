@@ -1,8 +1,20 @@
 #!/usr/bin/env node
 // Read-only release review: use existing Codex admission / Workers AI fallback.
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
-import { writeFileSync, appendFileSync } from "node:fs";
+import { digest } from "./commercial/contract.mjs";
+import { dirname, join, resolve } from "node:path";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fsyncSync,
+  linkSync,
+  mkdtempSync,
+  openSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import {
   assertLiveReleaseReviewBudget,
   prepareSourceReview,
@@ -13,7 +25,8 @@ import { classifyReviewFailure } from "./commercial/review-errors.mjs";
 
 const args = process.argv.slice(2);
 const preflight = args[0] === "--preflight";
-const values = preflight ? args.slice(1) : args;
+const exportBundle = args[0] === "--export-bundle";
+const values = preflight || exportBundle ? args.slice(1) : args;
 if (
   (preflight && values.length !== 3) ||
   (!preflight && values.length !== 4) ||
@@ -21,10 +34,54 @@ if (
   !/^[a-f0-9]{40}$/.test(values[2])
 ) {
   console.error(
-    "usage: node scripts/review-release.mjs [--preflight] <checkout> <base-sha> <head-sha> [new-output-json]",
+    "usage: node scripts/review-release.mjs [--preflight|--export-bundle] <checkout> <base-sha> <head-sha> [new-output-json]",
   );
   process.exit(2);
 }
+// Never expose a partial export as complete if the process dies mid-write.
+// Stage on the same filesystem, fsync it, then create the final name with
+// link(2): an existing file or symlink cannot be overwritten by a retry.
+function writeImmutableBundle(destination, content) {
+  const output = resolve(destination);
+  const parent = dirname(output);
+  const stage = mkdtempSync(join(parent, ".clawsweeper-review-stage-"));
+  const stagedFile = join(stage, "source.json");
+  try {
+    const fd = openSync(
+      stagedFile,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      writeFileSync(fd, content);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    linkSync(stagedFile, output);
+    const dirfd = openSync(
+      parent,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    try {
+      fsyncSync(dirfd);
+    } finally {
+      closeSync(dirfd);
+    }
+  } finally {
+    try {
+      unlinkSync(stagedFile);
+    } catch {
+      /* fail closed; preserve other owner files */
+    }
+    try {
+      rmdirSync(stage);
+    } catch {
+      /* stage is private; never delete foreign paths */
+    }
+  }
+}
+
 const root = resolve(values[0]);
 const git = (...params) =>
   execFileSync("git", ["-C", root, ...params], {
@@ -47,7 +104,37 @@ try {
   );
   if (bundle.files.some((file) => !tracked.has(file.path)))
     throw new Error("untracked source in review");
-  if (preflight) {
+  if (exportBundle) {
+    // Portable, complete source for an independent reviewer. This is source
+    // evidence, not an inference call, review verdict or approval to merge.
+    // Never use a mutable checkout, untracked bytes or an already-existing
+    // destination as release evidence.
+    const evidence = {
+      schema: "clawsweeper.release-review-bundle.v1",
+      reviewStatus: "unreviewed",
+      base: bundle.base,
+      head: bundle.head,
+      repository: bundle.repository,
+      sourceDigest: digest(bundle),
+      fileCount: bundle.files.length,
+      files: bundle.files,
+    };
+    const content = JSON.stringify(evidence, null, 2) + "\n";
+    if (Buffer.byteLength(content, "utf8") > 45 * 1024 * 1024)
+      throw new Error("release review bundle exceeds bounded output size");
+    writeImmutableBundle(values[3], content);
+    console.log(
+      JSON.stringify({
+        exported: true,
+        reviewStatus: "unreviewed",
+        base: bundle.base,
+        head: bundle.head,
+        sourceDigest: evidence.sourceDigest,
+        files: bundle.files.length,
+        modelCalls: 0,
+      }),
+    );
+  } else if (preflight) {
     await prepareSourceReview(root, values[1], "repository-release");
     const { selectCommercialRoute } = await import("./commercial/inference.mjs");
     const route = await selectCommercialRoute(process.env);

@@ -76,6 +76,43 @@ python3 scripts/ci/verify_codeql_release.py \
 Do not use this verifier to override independent source review, protected
 dispatch, live containment, hermetic automerge E2E, or owner merge approval.
 
+## Portable exact-head source review without paid model calls
+
+A release of up to 80 changed, regular UTF-8 source files can be exported for
+a genuinely independent reviewer without consuming inference allowance:
+
+```bash
+node scripts/review-release.mjs --export-bundle \
+  /absolute/path/to/clean-checked-out-clawsweeper \
+  <signed-base-commit> <signed-final-head-commit> \
+  /absolute/path/to/new-owner-only-review-bundle.json
+```
+
+The command requires a clean exact-head checkout, a direct ancestor base, the
+owned GitHub origin, and the source bundle's existing path, size, symlink and
+sensitive-filename restrictions. It preserves the complete before/after bytes,
+original file modes and exact digest of **every** changed file, including
+systemd `.service` and `.timer` units. The bundle is created with owner-only
+permissions and cannot overwrite an earlier review artifact.
+
+Every bundle has `reviewStatus: unreviewed` and reports `modelCalls: 0`.
+**Export is not a source-review verdict.** An independent reviewer must
+examine the entire bundle, cross-file dependencies and security boundaries,
+record exact-head findings/coverage, and return a separately attributable
+verdict before release. The existing eight-call Workers AI ceiling is unchanged;
+this command cannot convert incomplete inference or author-side examination
+into approval.
+
+### Isolated automerge acceptance
+
+The full 28-case automerge test may take longer than one hour on a rootless
+host. The GitHub job has a 120-minute timeout and performs only a read-only
+nested-user-namespace/no-host-socket preflight. It must never change host
+kernel sysctls or use a rootful host Docker socket to shorten execution.
+The dedicated isolation JIT role remains default-denied until a real
+container-in-container provider, network isolation, all-case completion,
+receipt and process-cleanup acceptance has been independently demonstrated.
+
 ## CodeQL bootstrap repair (6 November 2026)
 
 Controlled [run #42270282058](https://github.com/AyobamiH/clawsweeper/actions/runs/42270282058) accepted the exact SHA on a one-job runner and checked out source, but `github/codeql-action/init@v4` spent the original 20-minute limit downloading CodeQL. GitHub cancelled the `actions` job before analysis and the `javascript-typescript` job remained queued; the incomplete run was cancelled cleanly after independent readback. Neither language was scanned and no analysis was uploaded. The executor recorded a held (not successful) receipt and deregistered its worker.
