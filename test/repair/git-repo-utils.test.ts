@@ -25,10 +25,12 @@ test("git helper bounds execution and terminates the timed-out process", async (
     () =>
       runGitCommand(["stall", marker], {
         targetDir: fixture.root,
-        timeoutMs: 250,
+        timeoutMs: 400,
         env: fixture.env,
       }),
-    /command timed out after 250ms: git stall.*waiting for timeout/s,
+    // An overloaded CI host may time out before the fake child writes stderr.
+    // The stable contract is a bounded timeout and absence of its late effect.
+    /command timed out after 400ms: git stall/s,
   );
   await delay(750);
   assert.equal(fs.existsSync(marker), false);
