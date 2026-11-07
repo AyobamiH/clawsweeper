@@ -136,7 +136,9 @@ export async function sourceBundle(root, base, includeUntracked = true) {
   for (const name of names) {
     safePath(name);
     assert(
-      /\.(?:md|js|mjs|ts|tsx|yml|yaml|json|jsonc|sh|py|sql)$/.test(name) &&
+      // Systemd units are executable deployment authority and must be reviewed
+      // alongside the scripts and workflows that install them.
+      /\.(?:md|js|mjs|ts|tsx|yml|yaml|json|jsonc|sh|py|sql|service|timer)$/.test(name) &&
         !/(?:^|\/)(?:\.env|auth\.json|credentials|secrets)/i.test(name),
       "unsupported source review path",
     );
