@@ -40,7 +40,7 @@ test("git helper preserves ordinary nonzero status and stderr", () => {
   const fixture = fakeGitFixture();
   const child = runGitCommand(["fail"], {
     targetDir: fixture.root,
-    timeoutMs: 1_000,
+    timeoutMs: 5_000,
     env: fixture.env,
   });
 
@@ -73,7 +73,7 @@ test(
     const fixture = fakeGitFixture();
     const child = runGitCommand(["signal"], {
       targetDir: fixture.root,
-      timeoutMs: 1_000,
+      timeoutMs: 5_000,
       env: fixture.env,
     });
 

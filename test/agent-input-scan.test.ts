@@ -350,8 +350,15 @@ test("repair admission includes staged bytes when working bytes were restored", 
 function useGitConfigHome(t: test.TestContext, root: string) {
   const home = join(root, "home");
   mkdirSync(home);
-  const previous = new Map(["HOME", "XDG_CONFIG_HOME"].map((key) => [key, process.env[key]]));
-  for (const key of previous.keys()) process.env[key] = home;
+  // The full-suite runner intentionally hides the host's signing settings by
+  // pinning GIT_CONFIG_GLOBAL to the null device. Tests that exercise global
+  // settings must override that setting with their own disposable config file.
+  const previous = new Map(
+    ["HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL"].map((key) => [key, process.env[key]]),
+  );
+  process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = home;
+  process.env.GIT_CONFIG_GLOBAL = join(home, ".gitconfig");
   t.after(() => {
     for (const [key, original] of previous) {
       if (original === undefined) delete process.env[key];
