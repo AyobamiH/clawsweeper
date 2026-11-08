@@ -205,4 +205,3 @@ class EstateInventoryPreflight(unittest.TestCase):
             ctl.preflight_runtime_inventory(self.ledger, api=lambda p: {
                 "runners": [], "total_count": 5}, list_containers=lambda: [],
                 legacy_controls=self.legacy)
-

@@ -188,4 +188,3 @@ class ControllerAcceptance(unittest.TestCase):
         record = next(iter(self.ledger.inspect()["attempts"].values()))
         self.assertEqual(record["state_before_reconciliation"], "awaiting_evidence")
         self.assertEqual(record["state"], "reconciled")
-

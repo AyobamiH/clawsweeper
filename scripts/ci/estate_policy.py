@@ -350,4 +350,3 @@ def admit(candidate, manifest, controls, *, source_sha256, host_platform="linux"
 
 def workflow_digest(source_bytes):
     return hashlib.sha256(source_bytes).hexdigest()
-

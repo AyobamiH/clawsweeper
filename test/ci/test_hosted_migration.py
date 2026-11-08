@@ -112,4 +112,3 @@ class MigrationParity(unittest.TestCase):
             self.assertEqual(current[key]["kind"], "dynamic_or_other")
         intake = current[".github/workflows/repair-issue-implementation-intake.yml#intake"]
         self.assertNotIn("github.event.client_payload.intake_runner", intake["runs_on"])
-

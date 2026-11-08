@@ -194,4 +194,3 @@ class SlotTests(unittest.TestCase):
         link_root.symlink_to(self.root, target_is_directory=True)
         with self.assertRaisesRegex(Hold, "unsafe_estate_state_permissions"):
             SlotLedger(link_root)
-

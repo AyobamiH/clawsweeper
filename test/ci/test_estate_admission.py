@@ -226,4 +226,3 @@ class ManifestPolicy(unittest.TestCase):
                 controls["approved_jobs"][c.job_key]["source_sha256"] = "b" * 64
                 with self.assertRaisesRegex(Hold, "workflow_source_digest_mismatch"):
                     admit(c, MANIFEST, controls, source_sha256=item["source_sha256"])
-

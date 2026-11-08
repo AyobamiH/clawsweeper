@@ -116,6 +116,38 @@ def fetch_workflow_digest(run, main_sha, api=git_api):
     return digests[0]
 
 
+def verified_run_jobs(run_id, api=git_api, *, max_pages=20):
+    """Read all job pages or fail closed before admitting any ephemeral JIT."""
+    if type(run_id) is not int or run_id <= 0 or type(max_pages) is not int or not (1 <= max_pages <= 20):
+        raise Hold("invalid_github_job_inventory_parameters")
+    jobs = []
+    seen = set()
+    expected_total = None
+    for page in range(1, max_pages + 1):
+        response = api(f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100&page={page}")
+        if not isinstance(response, dict):
+            raise Hold("incomplete_github_job_inventory")
+        entries, total = response.get("jobs"), response.get("total_count")
+        if (not isinstance(entries, list) or type(total) is not int or total < 0
+                or total > max_pages * 100 or len(entries) > 100
+                or (expected_total is not None and expected_total != total)):
+            raise Hold("incomplete_github_job_inventory")
+        if expected_total is None:
+            expected_total = total
+        for entry in entries:
+            if (not isinstance(entry, dict) or type(entry.get("id")) is not int
+                    or entry["id"] <= 0 or entry["id"] in seen
+                    or entry.get("run_id") not in (None, run_id)):
+                raise Hold("inconsistent_github_job_inventory")
+            seen.add(entry["id"])
+            jobs.append(entry)
+        if len(jobs) == expected_total:
+            return jobs
+        if len(entries) != 100 or len(jobs) > expected_total:
+            raise Hold("incomplete_github_job_inventory")
+    raise Hold("github_job_inventory_page_limit")
+
+
 def discover(manifest, api=git_api, *, max_pages=4):
     """Inspect queue; never return a partial page set as complete."""
     paths = {s["path"] for s in manifest["sources"]}
@@ -132,14 +164,7 @@ def discover(manifest, api=git_api, *, max_pages=4):
                 if run.get("path") not in paths or run.get("id") in visited:
                     continue
                 visited.add(run.get("id"))
-                jobs = api(f"repos/{REPO}/actions/runs/{run['id']}/jobs?per_page=100")
-                entries = jobs.get("jobs")
-                total = jobs.get("total_count")
-                if not isinstance(entries, list) or not isinstance(total, int) or total != len(entries):
-                    # Refuse truncated multi-page job inventory; a second JIT
-                    # registration must never depend on omitted job records.
-                    raise Hold("incomplete_github_job_inventory")
-                for job in entries:
+                for job in verified_run_jobs(run["id"], api):
                     try:
                         results.append((classify(manifest, run, job), run, job))
                     except Hold:
@@ -451,6 +476,11 @@ def _cycle_under_shared_lock(manifest, controls, ledger, *, api, worker):
         try:
             digest = fetch_workflow_digest(run, main, api)
             admit(c, manifest, controls, source_sha256=digest, host_platform="linux")
+            # The installed driver can execute only CodeQL. Do not reserve a
+            # durable one-shot attempt for another class and then poison its
+            # slot with a guaranteed pre-registration driver rejection.
+            if worker is native_driver and c.job_class != "codeql":
+                raise Hold("dedicated_class_driver_not_accepted")
             if c.job_class in ("e2e", "windows"):
                 raise Hold("dedicated_driver_not_proven")
             options.append(item)
@@ -503,4 +533,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
