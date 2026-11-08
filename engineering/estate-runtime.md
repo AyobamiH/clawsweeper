@@ -95,3 +95,21 @@ The 36 GitHub workflow-registry paths absent from main are historical registry
 entries, NOT 36 additional workflows to resurrect automatically. Decide their
 retirement separately from the 41 current source files.
 
+
+## Owner-operated complete check timeout contract (2026-11-08)
+
+The `.github/workflows/ci.yml#check` job executes the **unchanged complete**
+`pnpm run check` suite. On authorised `web` with two CPU cores, an
+independently hash-verified check ran for 26m42s (18:04:17–18:30:59 UTC).
+The previous 15-minute GitHub job deadline therefore cannot accommodate
+the observed workload. Source-stage sets the job deadline to **38 minutes**,
+inside the disposable JIT executor's **42-minute** hard cap, retaining
+four minutes for GitHub conclusion, deregistration and cleanup. This is a
+bounded timeout correction, *not* a relaxation of the test suite.
+
+`test/ci/test_validation_full_check_budget.py` fails on the old 15-minute
+deadline, an unbounded deadline, a return to billable generic runners,
+lost `persist-credentials: false`, or removed canonical validation.
+No actual GitHub check job has yet been exercised at this new timeout.
+The staged correction is uncommitted, requires full exact-source validation
+and remains subject to independent review and owner approval.

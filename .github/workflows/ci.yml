@@ -98,7 +98,9 @@ jobs:
   check:
     name: pnpm check
     runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-validation-${{ github.run_id }}-check"]
-    timeout-minutes: 15
+    # Full owner-hosted canonical checks have taken over 26 minutes on 2 CPUs.
+    # Keep a bounded JIT exit/cleanup margin under MAX_SECONDS=42 minutes.
+    timeout-minutes: 38
     steps:
       - uses: actions/checkout@v7
         with:
