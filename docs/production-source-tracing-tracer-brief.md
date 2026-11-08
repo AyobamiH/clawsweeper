@@ -43,7 +43,7 @@ If direct provider readback or valid source ancestry is unavailable, mark `provi
 
 1. Confirm no active release controller or independent reviewer owns the target source/worktree or shared runner before modifying it.
 2. Pull a clean, exact-source reviewed commit and run `node scripts/generate-tracing-canary.mjs`. This local-only generator refuses dirty trees and produces no production binding, route, Cron or secret.
-3. Run a pinned local Wrangler development instance with the generated canary file. The canary may only issue safe public `GET /api/health` requests and controlled local scheduled mocks; it must not send real webhook payloads to production.
+3. Run a pinned local Wrangler development instance with the generated canary file. First request `GET /__local/trace-capability` (available only in the isolated fixture) and verify native `ctx.tracing.enterSpan` support. Then issue safe local `GET /api/health` requests and controlled scheduled mocks; it must not send real webhook payloads to production.
 4. Confirm identical HTTP response semantics and no duplicate callbacks between tracing enabled/disabled; demonstrate real Cloudflare-native `ctx.tracing.enterSpan` support under the existing compatibility date.
 5. Record a redacted trace showing the custom `clawsweeper.http.health` span and source-claim attribute alongside automatic platform spans **only if actually observed**. If local Miniflare does not expose native span readback, mark this gate not independently verified.
 6. Obtain independent reviewer **source and canary APPROVE** before attempting any real Worker trace rollout.

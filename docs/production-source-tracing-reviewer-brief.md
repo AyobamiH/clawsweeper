@@ -51,7 +51,7 @@ Relevant changes:
 
 - Retrieve exact head SHA from GitHub and verify all local file hashes against it.
 - `tsc -p tsconfig.dashboard.json --noEmit` and focused tests (`test/dashboard-source-tracing.test.ts`, existing dashboard health, webhook ingress, status-privacy and observability regressions).
-- Run a **local-only** Wrangler/Miniflare canary using a clean, committed source. Probe `GET /api/health` and assert identical pre/post tracing response body and status.
+- Run a **local-only** Wrangler/Miniflare canary using a clean, committed source. Probe `GET /__local/trace-capability` (the fixture-only route) to verify the actual native `ctx.tracing.enterSpan` availability under the existing compatibility date. Probe `GET /api/health` and assert identical pre/post tracing response body and status. The fixture-only route must not be present in production.
 - Force tracing failures **before** and **after** callback invocation. Demonstrate no duplicated external effect.
 - Validate scheduled `ctx.waitUntil` boundaries and no false success when its asynchronous work fails.
 - Negative: feature disabled, invalid/missing source SHA, missing `ctx.tracing`, nonallowlisted routes, throw/rejection, malicious query strings, potentially sensitive headers, repeated webhook delivery.

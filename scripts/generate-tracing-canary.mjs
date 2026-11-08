@@ -19,9 +19,10 @@ const output = path.join(root,"dashboard",".wrangler-trace-canary.local.toml");
 if (fs.existsSync(output)) throw Error("Refusing to overwrite an existing canary config");
 const text = [
   "# LOCAL-ONLY: do not deploy this config or route it to production.",
-  "# Uses no secrets, DO namespaces, queues, cron triggers, R2, service bindings or custom routes.",
+  "# Uses no secrets, DO namespaces, queues, cron triggers, R2 or service bindings.",
+  "# The /__local/trace-capability route exists only in this test fixture; it is NOT in production.",
   'name = "clawsweeper-source-trace-local-only"',
-  'main = "worker.ts"',
+  'main = "../test/fixtures/native-cloudflare-tracing-worker.ts"',
   'compatibility_date = "2026-05-11"',
   'workers_dev = false',
   "",
