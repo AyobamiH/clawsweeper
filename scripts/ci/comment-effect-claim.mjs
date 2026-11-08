@@ -15,8 +15,6 @@ const SHA = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const EFFECTS = new Set(["pr_ack", "command_status"]);
 const MAX_API_BYTES = 1_000_000;
-// Constant patterns prevent CLI-controlled values becoming regular-expression source.
-// Compare exact captured decimal identities after existing strict input validation.
 const PR_ACK_MARKER = /<!--\s*clawsweeper-pr-ack:(?:opened|ready_for_review) item=([0-9]+)\s*-->/g;
 const COMMAND_ACK_MARKER = /<!--\s*clawsweeper-command-ack:([0-9]+)\s*-->/g;
 
@@ -104,8 +102,11 @@ export async function findExistingCommentMarker(input, getPage, maxPages = 20) {
   if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 20) {
     throw new Error("invalid_comment_scan_bound");
   }
+  // Match against static patterns only. RegExp construction with any
+  // user-derived string creates a regex-injection sink even when upstream
+  // validation expects decimal IDs. Compare the captured ID exactly instead.
+  const expectedId = effect === "pr_ack" ? String(number) : String(sourceId);
   const marker = effect === "pr_ack" ? PR_ACK_MARKER : COMMAND_ACK_MARKER;
-  const expected = effect === "pr_ack" ? String(number) : String(sourceId);
   for (let page = 1; page <= maxPages; page++) {
     const comments = await getPage(page);
     if (!Array.isArray(comments) || comments.length > 100) {
@@ -113,8 +114,8 @@ export async function findExistingCommentMarker(input, getPage, maxPages = 20) {
     }
     for (const comment of comments) {
       if (typeof comment?.body !== "string") continue;
-      for (const [, found] of comment.body.matchAll(marker)) {
-        if (found === expected) return "present";
+      for (const match of comment.body.matchAll(marker)) {
+        if (match[1] === expectedId) return "present";
       }
     }
     if (comments.length < 100) return "absent";

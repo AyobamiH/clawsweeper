@@ -281,3 +281,45 @@ test("adversarial comment marker identity is rejected before readback", async ()
   );
   assert.equal(calls, 0);
 });
+
+test("exact static marker matching cannot be redirected by regex-shaped input", async () => {
+  const calls = [];
+  const page = async (index) => {
+    calls.push(index);
+    return [
+      { body: "<!-- clawsweeper-command-ack:1182 -->" },
+      { body: "<!-- clawsweeper-command-ack:182 -->" },
+    ];
+  };
+  assert.equal(await findExistingCommentMarker(input, page), "present");
+  assert.deepEqual(calls, [1]);
+  await assert.rejects(
+    findExistingCommentMarker({ ...input, sourceId: "182|.*" }, page),
+    /invalid_source_id/,
+  );
+  assert.deepEqual(calls, [1], "rejected IDs never reach GitHub pagination");
+});
+
+test("PR markers require canonical full item numbers, not prefixes", async () => {
+  const target = { repo: input.repo, number: 41, sourceId: 41, effect: "pr_ack" };
+  assert.equal(
+    await findExistingCommentMarker(target, async () => [
+      { body: "<!-- clawsweeper-pr-ack:opened item=410 -->" },
+      { body: "<!-- clawsweeper-pr-ack:ready_for_review item=41 -->" },
+    ]),
+    "present",
+  );
+  assert.equal(
+    await findExistingCommentMarker(target, async () => [
+      { body: "<!-- clawsweeper-pr-ack:opened item=410 -->" },
+    ]),
+    "absent",
+  );
+});
+
+test("untrusted values never create runtime regular expressions", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync("scripts/ci/comment-effect-claim.mjs", "utf8");
+  assert.doesNotMatch(source, /new RegExp\s*\(/);
+  assert.match(source, /matchAll\(marker\)/);
+});
