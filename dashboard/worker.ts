@@ -1,4 +1,9 @@
 import {
+  withSourceTrace,
+  traceScopeForRequest,
+  type SourceTraceContext,
+} from "./source-tracing.ts";
+import {
   commandTextForClawSweeperFastAck,
   directReReviewAdditionalPrompt,
   isClawSweeperReReviewCommandText,
@@ -115,7 +120,7 @@ export {
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
 const QUEUED_RUN_STATUSES = new Set(["queued", "waiting", "requested", "pending"]);
 const OPERATIONAL_QUEUED_RUN_STATUSES = new Set(["queued", "requested", "pending"]);
-type DashboardContext = { waitUntil?: (promise: Promise<unknown>) => void };
+type DashboardContext = SourceTraceContext & { waitUntil?: (promise: Promise<unknown>) => void };
 type GithubJsonReader = (path: string) => ReturnType<typeof githubJson>;
 type StoredValue = { value: string; expires_at?: number };
 type GithubWebhookDeliveryHeaders = {
@@ -914,343 +919,370 @@ export class StatusStore {
 
 export default {
   async fetch(request: Request, env: DashboardEnv = {}, ctx?: DashboardContext) {
-    const url = new URL(request.url);
-    if (
-      url.hostname.includes("-ingest.") &&
-      url.pathname !== "/api/events" &&
-      url.pathname !== "/api/health"
-    ) {
-      return json({ error: "not_found" }, 404);
-    }
-    if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
-    if (url.pathname === "/api/health") {
-      return json({
-        ok: true,
-        service: "clawsweeper-status",
-        deployment_sha: nullableString(env.CLAWSWEEPER_DEPLOY_SHA),
-      });
-    }
-    if (url.pathname === "/api/subscription-quota" && request.method === "GET")
-      return exactReviewQueueRequest(env, "/subscription-quota");
-    if (url.pathname === "/internal/subscription-quota" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/subscription-quota");
-    if (url.pathname === "/api/events" && request.method === "POST")
-      return ingestEvent(request, env);
-    if (url.pathname === "/github/webhook" && request.method === "GET")
-      return json({ ok: true, service: "clawsweeper-github-webhook" });
-    if (url.pathname === "/github/webhook" && request.method === "POST")
-      return githubWebhook(request, env, ctx);
-    if (url.pathname === "/internal/exact-review/command-intake" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/command-intake");
-    if (url.pathname === "/internal/exact-review/enqueue" && request.method === "POST")
-      return authenticatedExactReviewEnqueue(request, env);
-    if (url.pathname === "/internal/exact-review/branch-authority" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/branch-authority");
-    if (url.pathname === "/internal/exact-review/source-authority" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/source-authority");
-    if (url.pathname === "/internal/review-coverage/inventory" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/review-coverage/inventory");
-    const operationalCursorPath =
-      /^\/internal\/state\/cursors\/(hot-intake|normal-review|audit|review-placeholder-[a-f0-9]{16}-(?:open|closed))$/.exec(
-        url.pathname,
-      );
-    if (operationalCursorPath && (request.method === "GET" || request.method === "PUT"))
-      return authenticatedExactReviewQueueCursorRequest(
-        request,
-        env,
-        url.pathname.slice("/internal/state".length),
-      );
-    const canonicalRecordPath =
-      request.method === "GET"
-        ? /^\/internal\/state\/records\/[^/]+\/(items|closed|plans|decision-packets)\/[1-9]\d*$/.exec(
-            url.pathname,
-          )
-        : null;
-    if (canonicalRecordPath)
-      return authenticatedExactReviewQueueRead(
-        request,
-        env,
-        url.pathname.slice("/internal/state".length),
-        canonicalRecordPath[1] === "items",
-      );
-    if (url.pathname === "/internal/state/records/slugs" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/slugs");
-    if (url.pathname === "/internal/state/records/list" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/list");
-    if (url.pathname === "/internal/state/records/export" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/export");
-    if (url.pathname === "/internal/state/records/tuples" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/tuples");
-    if (url.pathname === "/internal/state/records/commits" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/commits");
-    if (url.pathname === "/internal/state/records/snapshots/latest" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/latest");
-    if (url.pathname === "/internal/state/records/snapshots/trigger" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/trigger");
-    if (url.pathname === "/internal/state/records/snapshots/chunk" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/chunk");
-    if (url.pathname.startsWith("/internal/state/blobs/") && request.method === "POST") {
-      const operation = url.pathname.slice("/internal/state/blobs/".length);
-      if (STATE_BLOB_OPERATIONS.includes(operation as StateBlobOperation)) {
-        return authenticatedStateBlobRequest(request, env, operation as StateBlobOperation);
+    return withSourceTrace(env, ctx, traceScopeForRequest(request), async () => {
+      const url = new URL(request.url);
+      if (
+        url.hostname.includes("-ingest.") &&
+        url.pathname !== "/api/events" &&
+        url.pathname !== "/api/health"
+      ) {
+        return json({ error: "not_found" }, 404);
       }
-      return json({ error: "not_found" }, 404);
-    }
-    if (url.pathname === "/internal/state-writer/acquire" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/state-writer/acquire");
-    if (url.pathname === "/internal/state-writer/heartbeat" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/state-writer/heartbeat");
-    if (url.pathname === "/internal/state-writer/release" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/state-writer/release");
-    if (url.pathname === "/internal/exact-review/claim" && request.method === "POST")
-      return exactReviewQueueRequest(env, "/claim", request);
-    // Heartbeat authenticates by full lease tuple, matching /claim and /complete: the
-    // tuple is a per-lease capability, so the shared webhook secret never has to enter
-    // the review job that runs Codex over untrusted content.
-    if (url.pathname === "/internal/exact-review/heartbeat" && request.method === "POST")
-      return exactReviewQueueRequest(env, "/heartbeat", request);
-    if (
-      url.pathname === "/internal/exact-review/github-read-model/item" &&
-      request.method === "POST"
-    )
-      return exactReviewQueueRequest(env, "/github-read-model/lease-item", request);
-    if (
-      url.pathname === "/internal/exact-review/state-writer-progress" &&
-      request.method === "POST"
-    )
-      return exactReviewQueueRequest(env, "/state-writer-progress", request);
-    if (url.pathname === "/internal/exact-review/complete" && request.method === "POST")
-      return exactReviewQueueRequest(env, "/complete", request);
-    if (
-      url.pathname === "/internal/exact-review/terminal-finalization/attempt" &&
-      request.method === "POST"
-    )
-      return exactReviewQueueRequest(env, "/terminal-finalization/attempt", request);
-    if (
-      url.pathname === "/internal/exact-review/terminal-finalization/retry" &&
-      request.method === "POST"
-    )
-      return exactReviewQueueRequest(env, "/terminal-finalization/retry", request);
-    if (
-      url.pathname === "/internal/exact-review/terminal-finalization/skip" &&
-      request.method === "POST"
-    )
-      return exactReviewQueueRequest(env, "/terminal-finalization/skip", request);
-    if (url.pathname === "/internal/exact-review/claimed-runs" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/claimed-runs");
-    if (url.pathname === "/internal/exact-review/dead-letters/list" && request.method === "POST")
-      return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/list");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle-audit/inventory" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewOperatorRequest(request, env, "/lifecycle-audit/inventory");
-    if (
-      url.pathname === "/internal/exact-review/telemetry-reconciliation" &&
-      request.method === "POST"
-    ) {
-      const scope = new URLSearchParams();
-      for (const repository of verifiedPublicBayRepositories(env)) {
-        scope.append("public_repo", repository);
+      if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
+      if (url.pathname === "/api/health") {
+        return json({
+          ok: true,
+          service: "clawsweeper-status",
+          deployment_sha: nullableString(env.CLAWSWEEPER_DEPLOY_SHA),
+        });
       }
-      const query = scope.size ? `?${scope.toString()}` : "";
-      return authenticatedExactReviewOperatorRequest(
-        request,
-        env,
-        `/telemetry-reconciliation${query}`,
-      );
-    }
-    if (url.pathname === "/internal/exact-review/dead-letters/replay" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/dead-letters/replay");
-    if (
-      url.pathname === "/internal/exact-review/dead-letters/recover-fresh" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/recover-fresh");
-    if (url.pathname === "/internal/exact-review/dead-letters/resolve" && request.method === "POST")
-      return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/resolve");
-    if (url.pathname === "/internal/exact-review/parked-reviews/list" && request.method === "POST")
-      return authenticatedExactReviewOperatorRequest(request, env, "/parked-reviews/list");
-    if (
-      url.pathname === "/internal/exact-review/parked-reviews/resolve" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewOperatorRequest(request, env, "/parked-reviews/resolve");
-    if (
-      url.pathname === "/internal/exact-review/parked-reviews/recover-fresh" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewOperatorRequest(request, env, "/parked-reviews/recover-fresh");
-    if (url.pathname === "/internal/exact-review/publications/list" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/publications/list");
-    if (
-      url.pathname === "/internal/exact-review/publications/supersede" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publications/supersede");
-    if (
-      url.pathname === "/internal/exact-review/publications/reconcile" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publications/reconcile");
-    if (url.pathname === "/internal/exact-review/publication-results" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-results");
-    if (
-      url.pathname === "/internal/exact-review/publication-batch-results" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-batch-results");
-    // This is an automated cache data-plane operation, so it uses the scoped
-    // publisher/webhook secret already present in the batch job. The operator
-    // secret remains confined to human recovery and administrative reads.
-    if (
-      url.pathname === "/internal/exact-review/artifact-cache/receipt/lookup" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/artifact-cache/receipt/lookup");
-    if (
-      url.pathname === "/internal/exact-review/artifact-cache/receipt/store" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/artifact-cache/receipt/store");
-    // Like the artifact cache, this automated data plane uses the publisher-scoped
-    // webhook secret already present in publication jobs. The operator credential
-    // remains reserved for human recovery and administrative access.
-    if (
-      url.pathname === "/internal/exact-review/github-etag-cache/lookup" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/lookup");
-    if (
-      url.pathname === "/internal/exact-review/github-etag-cache/store" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/store");
-    if (
-      url.pathname === "/internal/exact-review/github-etag-cache/confirm" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/confirm");
-    const githubReadModelRoute =
-      request.method === "POST"
-        ? /^\/internal\/state\/github-read-model\/(item|comments|activity|workflows|placeholders|repair)$/.exec(
-            url.pathname,
-          )
-        : null;
-    if (githubReadModelRoute)
-      return authenticatedExactReviewQueueRequest(
-        request,
-        env,
-        `/github-read-model/${githubReadModelRoute[1]}`,
-      );
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/router-receipt" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/router-receipt");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/canonical-receipt" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/canonical-receipt");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/terminal-disposition" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/terminal-disposition");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/command-ack/attempt" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/command-ack/attempt");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/command-ack/failed" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/command-ack/failed");
-    if (
-      url.pathname === "/internal/exact-review/lifecycle/command-ack/observed" &&
-      request.method === "POST"
-    )
-      return authenticatedLifecycleCommandAcknowledgement(request, env, ctx);
-    if (url.pathname === "/internal/exact-review/review-run-telemetry" && request.method === "POST")
-      return authenticatedExactReviewQueueRequest(request, env, "/review-run-telemetry");
-    if (
-      url.pathname === "/internal/exact-review/publication-batches/claim" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/claim");
-    if (
-      url.pathname === "/internal/exact-review/publication-batches/fetch" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/fetch");
-    if (
-      url.pathname === "/internal/exact-review/publication-batches/heartbeat" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/heartbeat");
-    if (
-      url.pathname === "/internal/exact-review/publication-batches/complete" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/complete");
-    if (
-      url.pathname === "/internal/exact-review/github-egress-telemetry" &&
-      request.method === "POST"
-    )
-      return authenticatedExactReviewQueueRequest(request, env, "/github-egress-telemetry");
-    if (url.pathname === "/internal/apply-observability" && request.method === "POST")
-      return authenticatedApplyObservability(request, env);
-    if (url.pathname === "/internal/exact-review/reconcile" && request.method === "POST")
-      return authenticatedExactReviewReconcile(request, env);
-    if (url.pathname === "/api/exact-review-queue" && request.method === "GET")
-      return publicExactReviewQueueJson(env);
-    if (url.pathname === "/api/durable-lifecycle-bay" && request.method === "GET")
-      return json({ durable_lifecycle_bay: await durableLifecycleBaySnapshot(env) });
-    if (url.pathname === "/api/live-activity-bay" && request.method === "GET")
-      return json({
-        live_activity_bay: await liveActivityBaySnapshotForRequest(request, env, ctx),
-      });
-    if (url.pathname === "/api/recent-durable-publication-events" && request.method === "GET")
-      return publicRecentDurablePublicationEventsJson(env, url.searchParams);
-    if (url.pathname === "/api/exact-review-queue/item" && request.method === "GET")
-      return json(
-        {
-          error: "item_status_not_public",
-          collection: { state: "unavailable", reason: "aggregate_only" },
-        },
-        410,
-      );
-    if (url.pathname === "/api/exact-review-queue/reviews" && request.method === "GET")
-      return emptyPerItemReviewsJson();
-    if (url.pathname === "/api/review-observability" && request.method === "GET")
-      return publicReviewObservabilityJson(env, url.searchParams);
-    if (url.pathname === "/api/github-egress-observability" && request.method === "GET")
-      return publicGithubEgressObservabilityJson(env, url.searchParams);
-    if (url.pathname === "/api/review-coverage" && request.method === "GET")
-      return publicReviewCoverageJson(env);
-    if (url.pathname === "/api/apply-observability" && request.method === "GET")
-      return applyObservabilityJson(request, env);
-    if (url.pathname === "/api/health-history" && request.method === "GET")
-      return healthHistoryJson(request, env);
-    if (url.pathname === "/api/automerge-metrics" && request.method === "GET")
-      return automergeMetricsJson(request, env);
-    if (url.pathname === "/api/status") return statusJson(request, env, ctx);
-    if (url.pathname === "/api/triage") return triageJson(request, env, ctx);
-    if (url.pathname === "/api/pr-proof-triage") return prProofTriageJson(request, env, ctx);
-    if (url.pathname === "/" || url.pathname === "/index.html") return html(dashboardHtml(env));
-    if (url.pathname === "/bay") return demoHtml(bayHtml());
-    if (url.pathname === "/bay-demo")
-      return Response.redirect(new URL("/bay", url.origin).toString(), 308);
-    if (url.pathname === "/triage" || url.pathname === "/triage.html")
-      return html(triageHtml(issueTriagePageConfig()));
-    if (url.pathname === "/pr-proof-triage" || url.pathname === "/pr-proof-triage.html")
-      return html(triageHtml(prProofTriagePageConfig()));
-    return json({ error: "not_found" }, 404);
+      if (url.pathname === "/api/subscription-quota" && request.method === "GET")
+        return exactReviewQueueRequest(env, "/subscription-quota");
+      if (url.pathname === "/internal/subscription-quota" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/subscription-quota");
+      if (url.pathname === "/api/events" && request.method === "POST")
+        return ingestEvent(request, env);
+      if (url.pathname === "/github/webhook" && request.method === "GET")
+        return json({ ok: true, service: "clawsweeper-github-webhook" });
+      if (url.pathname === "/github/webhook" && request.method === "POST")
+        return githubWebhook(request, env, ctx);
+      if (url.pathname === "/internal/exact-review/command-intake" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/command-intake");
+      if (url.pathname === "/internal/exact-review/enqueue" && request.method === "POST")
+        return authenticatedExactReviewEnqueue(request, env);
+      if (url.pathname === "/internal/exact-review/branch-authority" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/branch-authority");
+      if (url.pathname === "/internal/exact-review/source-authority" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/source-authority");
+      if (url.pathname === "/internal/review-coverage/inventory" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/review-coverage/inventory");
+      const operationalCursorPath =
+        /^\/internal\/state\/cursors\/(hot-intake|normal-review|audit|review-placeholder-[a-f0-9]{16}-(?:open|closed))$/.exec(
+          url.pathname,
+        );
+      if (operationalCursorPath && (request.method === "GET" || request.method === "PUT"))
+        return authenticatedExactReviewQueueCursorRequest(
+          request,
+          env,
+          url.pathname.slice("/internal/state".length),
+        );
+      const canonicalRecordPath =
+        request.method === "GET"
+          ? /^\/internal\/state\/records\/[^/]+\/(items|closed|plans|decision-packets)\/[1-9]\d*$/.exec(
+              url.pathname,
+            )
+          : null;
+      if (canonicalRecordPath)
+        return authenticatedExactReviewQueueRead(
+          request,
+          env,
+          url.pathname.slice("/internal/state".length),
+          canonicalRecordPath[1] === "items",
+        );
+      if (url.pathname === "/internal/state/records/slugs" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/slugs");
+      if (url.pathname === "/internal/state/records/list" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/list");
+      if (url.pathname === "/internal/state/records/export" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/export");
+      if (url.pathname === "/internal/state/records/tuples" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/tuples");
+      if (url.pathname === "/internal/state/records/commits" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/commits");
+      if (url.pathname === "/internal/state/records/snapshots/latest" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/latest");
+      if (url.pathname === "/internal/state/records/snapshots/trigger" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/trigger");
+      if (url.pathname === "/internal/state/records/snapshots/chunk" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/records/snapshots/chunk");
+      if (url.pathname.startsWith("/internal/state/blobs/") && request.method === "POST") {
+        const operation = url.pathname.slice("/internal/state/blobs/".length);
+        if (STATE_BLOB_OPERATIONS.includes(operation as StateBlobOperation)) {
+          return authenticatedStateBlobRequest(request, env, operation as StateBlobOperation);
+        }
+        return json({ error: "not_found" }, 404);
+      }
+      if (url.pathname === "/internal/state-writer/acquire" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/state-writer/acquire");
+      if (url.pathname === "/internal/state-writer/heartbeat" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/state-writer/heartbeat");
+      if (url.pathname === "/internal/state-writer/release" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/state-writer/release");
+      if (url.pathname === "/internal/exact-review/claim" && request.method === "POST")
+        return exactReviewQueueRequest(env, "/claim", request);
+      // Heartbeat authenticates by full lease tuple, matching /claim and /complete: the
+      // tuple is a per-lease capability, so the shared webhook secret never has to enter
+      // the review job that runs Codex over untrusted content.
+      if (url.pathname === "/internal/exact-review/heartbeat" && request.method === "POST")
+        return exactReviewQueueRequest(env, "/heartbeat", request);
+      if (
+        url.pathname === "/internal/exact-review/github-read-model/item" &&
+        request.method === "POST"
+      )
+        return exactReviewQueueRequest(env, "/github-read-model/lease-item", request);
+      if (
+        url.pathname === "/internal/exact-review/state-writer-progress" &&
+        request.method === "POST"
+      )
+        return exactReviewQueueRequest(env, "/state-writer-progress", request);
+      if (url.pathname === "/internal/exact-review/complete" && request.method === "POST")
+        return exactReviewQueueRequest(env, "/complete", request);
+      if (
+        url.pathname === "/internal/exact-review/terminal-finalization/attempt" &&
+        request.method === "POST"
+      )
+        return exactReviewQueueRequest(env, "/terminal-finalization/attempt", request);
+      if (
+        url.pathname === "/internal/exact-review/terminal-finalization/retry" &&
+        request.method === "POST"
+      )
+        return exactReviewQueueRequest(env, "/terminal-finalization/retry", request);
+      if (
+        url.pathname === "/internal/exact-review/terminal-finalization/skip" &&
+        request.method === "POST"
+      )
+        return exactReviewQueueRequest(env, "/terminal-finalization/skip", request);
+      if (url.pathname === "/internal/exact-review/claimed-runs" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/claimed-runs");
+      if (url.pathname === "/internal/exact-review/dead-letters/list" && request.method === "POST")
+        return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/list");
+      if (
+        url.pathname === "/internal/exact-review/lifecycle-audit/inventory" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(request, env, "/lifecycle-audit/inventory");
+      if (
+        url.pathname === "/internal/exact-review/telemetry-reconciliation" &&
+        request.method === "POST"
+      ) {
+        const scope = new URLSearchParams();
+        for (const repository of verifiedPublicBayRepositories(env)) {
+          scope.append("public_repo", repository);
+        }
+        const query = scope.size ? `?${scope.toString()}` : "";
+        return authenticatedExactReviewOperatorRequest(
+          request,
+          env,
+          `/telemetry-reconciliation${query}`,
+        );
+      }
+      if (
+        url.pathname === "/internal/exact-review/dead-letters/replay" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/dead-letters/replay");
+      if (
+        url.pathname === "/internal/exact-review/dead-letters/recover-fresh" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/recover-fresh");
+      if (
+        url.pathname === "/internal/exact-review/dead-letters/resolve" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(request, env, "/dead-letters/resolve");
+      if (
+        url.pathname === "/internal/exact-review/parked-reviews/list" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(request, env, "/parked-reviews/list");
+      if (
+        url.pathname === "/internal/exact-review/parked-reviews/resolve" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(request, env, "/parked-reviews/resolve");
+      if (
+        url.pathname === "/internal/exact-review/parked-reviews/recover-fresh" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewOperatorRequest(
+          request,
+          env,
+          "/parked-reviews/recover-fresh",
+        );
+      if (url.pathname === "/internal/exact-review/publications/list" && request.method === "POST")
+        return authenticatedExactReviewQueueRequest(request, env, "/publications/list");
+      if (
+        url.pathname === "/internal/exact-review/publications/supersede" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publications/supersede");
+      if (
+        url.pathname === "/internal/exact-review/publications/reconcile" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publications/reconcile");
+      if (
+        url.pathname === "/internal/exact-review/publication-results" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-results");
+      if (
+        url.pathname === "/internal/exact-review/publication-batch-results" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-batch-results");
+      // This is an automated cache data-plane operation, so it uses the scoped
+      // publisher/webhook secret already present in the batch job. The operator
+      // secret remains confined to human recovery and administrative reads.
+      if (
+        url.pathname === "/internal/exact-review/artifact-cache/receipt/lookup" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/artifact-cache/receipt/lookup");
+      if (
+        url.pathname === "/internal/exact-review/artifact-cache/receipt/store" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/artifact-cache/receipt/store");
+      // Like the artifact cache, this automated data plane uses the publisher-scoped
+      // webhook secret already present in publication jobs. The operator credential
+      // remains reserved for human recovery and administrative access.
+      if (
+        url.pathname === "/internal/exact-review/github-etag-cache/lookup" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/lookup");
+      if (
+        url.pathname === "/internal/exact-review/github-etag-cache/store" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/store");
+      if (
+        url.pathname === "/internal/exact-review/github-etag-cache/confirm" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/github-etag-cache/confirm");
+      const githubReadModelRoute =
+        request.method === "POST"
+          ? /^\/internal\/state\/github-read-model\/(item|comments|activity|workflows|placeholders|repair)$/.exec(
+              url.pathname,
+            )
+          : null;
+      if (githubReadModelRoute)
+        return authenticatedExactReviewQueueRequest(
+          request,
+          env,
+          `/github-read-model/${githubReadModelRoute[1]}`,
+        );
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/router-receipt" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/router-receipt");
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/canonical-receipt" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/canonical-receipt");
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/terminal-disposition" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(
+          request,
+          env,
+          "/lifecycle/terminal-disposition",
+        );
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/command-ack/attempt" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/command-ack/attempt");
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/command-ack/failed" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/lifecycle/command-ack/failed");
+      if (
+        url.pathname === "/internal/exact-review/lifecycle/command-ack/observed" &&
+        request.method === "POST"
+      )
+        return authenticatedLifecycleCommandAcknowledgement(request, env, ctx);
+      if (
+        url.pathname === "/internal/exact-review/review-run-telemetry" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/review-run-telemetry");
+      if (
+        url.pathname === "/internal/exact-review/publication-batches/claim" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/claim");
+      if (
+        url.pathname === "/internal/exact-review/publication-batches/fetch" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/fetch");
+      if (
+        url.pathname === "/internal/exact-review/publication-batches/heartbeat" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/heartbeat");
+      if (
+        url.pathname === "/internal/exact-review/publication-batches/complete" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/publication-batches/complete");
+      if (
+        url.pathname === "/internal/exact-review/github-egress-telemetry" &&
+        request.method === "POST"
+      )
+        return authenticatedExactReviewQueueRequest(request, env, "/github-egress-telemetry");
+      if (url.pathname === "/internal/apply-observability" && request.method === "POST")
+        return authenticatedApplyObservability(request, env);
+      if (url.pathname === "/internal/exact-review/reconcile" && request.method === "POST")
+        return authenticatedExactReviewReconcile(request, env);
+      if (url.pathname === "/api/exact-review-queue" && request.method === "GET")
+        return publicExactReviewQueueJson(env);
+      if (url.pathname === "/api/durable-lifecycle-bay" && request.method === "GET")
+        return json({ durable_lifecycle_bay: await durableLifecycleBaySnapshot(env) });
+      if (url.pathname === "/api/live-activity-bay" && request.method === "GET")
+        return json({
+          live_activity_bay: await liveActivityBaySnapshotForRequest(request, env, ctx),
+        });
+      if (url.pathname === "/api/recent-durable-publication-events" && request.method === "GET")
+        return publicRecentDurablePublicationEventsJson(env, url.searchParams);
+      if (url.pathname === "/api/exact-review-queue/item" && request.method === "GET")
+        return json(
+          {
+            error: "item_status_not_public",
+            collection: { state: "unavailable", reason: "aggregate_only" },
+          },
+          410,
+        );
+      if (url.pathname === "/api/exact-review-queue/reviews" && request.method === "GET")
+        return emptyPerItemReviewsJson();
+      if (url.pathname === "/api/review-observability" && request.method === "GET")
+        return publicReviewObservabilityJson(env, url.searchParams);
+      if (url.pathname === "/api/github-egress-observability" && request.method === "GET")
+        return publicGithubEgressObservabilityJson(env, url.searchParams);
+      if (url.pathname === "/api/review-coverage" && request.method === "GET")
+        return publicReviewCoverageJson(env);
+      if (url.pathname === "/api/apply-observability" && request.method === "GET")
+        return applyObservabilityJson(request, env);
+      if (url.pathname === "/api/health-history" && request.method === "GET")
+        return healthHistoryJson(request, env);
+      if (url.pathname === "/api/automerge-metrics" && request.method === "GET")
+        return automergeMetricsJson(request, env);
+      if (url.pathname === "/api/status") return statusJson(request, env, ctx);
+      if (url.pathname === "/api/triage") return triageJson(request, env, ctx);
+      if (url.pathname === "/api/pr-proof-triage") return prProofTriageJson(request, env, ctx);
+      if (url.pathname === "/" || url.pathname === "/index.html") return html(dashboardHtml(env));
+      if (url.pathname === "/bay") return demoHtml(bayHtml());
+      if (url.pathname === "/bay-demo")
+        return Response.redirect(new URL("/bay", url.origin).toString(), 308);
+      if (url.pathname === "/triage" || url.pathname === "/triage.html")
+        return html(triageHtml(issueTriagePageConfig()));
+      if (url.pathname === "/pr-proof-triage" || url.pathname === "/pr-proof-triage.html")
+        return html(triageHtml(prProofTriagePageConfig()));
+      return json({ error: "not_found" }, 404);
+    });
   },
   async scheduled(_controller, env: DashboardEnv = {}, ctx?: DashboardContext) {
-    const maintenance = recordScheduledHealthSample(env);
+    const maintenance = Promise.resolve(
+      withSourceTrace(env, ctx, "cron.health_sample", () => recordScheduledHealthSample(env)),
+    );
     if (ctx?.waitUntil) ctx.waitUntil(maintenance);
     else await maintenance;
   },
