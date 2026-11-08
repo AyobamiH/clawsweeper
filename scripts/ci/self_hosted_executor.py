@@ -6,6 +6,7 @@ owner-only 0600 controls file. No GH-hosted runner, personal host mounts, host
 Docker socket or model inference is exposed to executable workflow code.
 """
 import argparse
+from contextlib import contextmanager
 import datetime as dt
 import fcntl
 import hashlib
@@ -27,6 +28,8 @@ ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
 CONTROLS = ROOT / "controls.json"
 LOCK = ROOT / "executor.lock"
 FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
+FLEET_CONTROL_LOCK = HOME / ".local/share/local-ci/control.lock"
+FLEET_OWNER_MARKER = HOME / ".local/share/local-ci/OWNED_BY_LOCAL_CI"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
@@ -335,6 +338,45 @@ def detached_fleet_quiescent():
             sqlite3.Error, OSError) as exc:
         raise AdmissionHold("detached_ci_inventory_unavailable") from exc
     return True
+
+
+@contextmanager
+def shared_fleet_admission_lock():
+    """Hold the local fleet's existing exclusive lock across JIT effects.
+
+    Its controller uses local_ci.lock() on precisely the same inode. A
+    point-in-time service/lease check alone is not atomic: another scheduler
+    may admit a job between the capacity read and GitHub registration.
+    Do not change the fleet controller or its lock's ownership contract.
+    """
+    parent = FLEET_CONTROL_LOCK.parent
+    try:
+        if (parent.is_symlink() or not parent.is_dir()
+                or parent.stat().st_uid != os.getuid()
+                or FLEET_OWNER_MARKER.is_symlink()
+                or FLEET_OWNER_MARKER.read_text() != "local-ci-v1\n"):
+            raise AdmissionHold("shared_fleet_lock_owner_unverified")
+        fd = os.open(FLEET_CONTROL_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except AdmissionHold:
+        raise
+    except OSError as exc:
+        raise AdmissionHold("shared_fleet_lock_unavailable") from exc
+    try:
+        meta = os.fstat(fd)
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.getuid()
+                or (meta.st_mode & 0o077)):
+            raise AdmissionHold("shared_fleet_lock_unsafe")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AdmissionHold("shared_fleet_lock_busy") from exc
+        except OSError as exc:
+            raise AdmissionHold("shared_fleet_lock_unavailable") from exc
+        # This is deliberately held through runner registration, external
+        # execution, durable receipts and owned cleanup, not only capacity().
+        yield
+    finally:
+        os.close(fd)
 
 
 def capacity(candidate, controls):
@@ -657,8 +699,12 @@ def main():
             try:
                 category_enabled(c, controls)
                 source_authorised(c, controls)
-                capacity(c, controls)
-                result = runner_job(c, controls)
+                # The detached fleet uses this same durable host lock to
+                # reserve/dispatch work. Hold it through cleanup so neither
+                # owner can admit a concurrent external effect.
+                with shared_fleet_admission_lock():
+                    capacity(c, controls)
+                    result = runner_job(c, controls)
                 print(json.dumps(result))
                 return
             except AdmissionHold as exc:
