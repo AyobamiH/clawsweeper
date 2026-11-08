@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { seedHermeticE2EPnpm, runE2ECorepackProxy } from "./corepack-proxy.mjs";
 
 function fixture(t) {
@@ -113,5 +115,35 @@ test("hermetic E2E refuses unseeded package managers before delegation", (t) => 
         path.join(f.scratch, "missing"),
       ),
     /pinned E2E Corepack seed unavailable/,
+  );
+});
+
+
+test("symlinked Corepack entrypoint delegates both CLI commands", (t) => {
+  const f = fixture(t);
+  const entrypoint = path.join(f.scratch, "corepack");
+  fs.symlinkSync(fileURLToPath(new URL("./corepack-proxy.mjs", import.meta.url)), entrypoint);
+  const marker = path.join(f.scratch, "delegated-arguments");
+  const fake = path.join(f.scratch, "record-corepack.sh");
+  fs.writeFileSync(fake, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CLAWSWEEPER_TEST_DELEGATED_PATH"\n');
+  fs.chmodSync(fake, 0o700);
+  for (const args of [
+    ["enable", "--install-directory", path.join(f.home, "bin"), "pnpm"],
+    ["prepare", "pnpm@11.10.0", "--activate"],
+  ]) {
+    const result = spawnSync(process.execPath, [entrypoint, ...args], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        COREPACK_HOME: f.home,
+        CLAWSWEEPER_E2E_REAL_COREPACK: fake,
+        CLAWSWEEPER_TEST_DELEGATED_PATH: marker,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  assert.equal(
+    fs.readFileSync(marker, "utf8"),
+    "enable --install-directory " + path.join(f.home, "bin") + " pnpm\nprepare pnpm@11.10.0 --activate\n",
   );
 });

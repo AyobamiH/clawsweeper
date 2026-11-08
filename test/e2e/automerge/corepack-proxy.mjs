@@ -74,7 +74,12 @@ export function runE2ECorepackProxy(argsToRun, env, sourceRoot) {
   return result.status ?? 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+// The E2E command bin invokes this module through a symlink; compare resolved
+// filesystem identities so the CLI executes while test imports remain inert.
+if (
+  process.argv[1] &&
+  fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))
+) {
   if (!realCorepack) fail("CLAWSWEEPER_E2E_REAL_COREPACK is required");
   try {
     process.exitCode = runE2ECorepackProxy(delegatedArgs, process.env);
