@@ -6,6 +6,7 @@ owner-only 0600 controls file. No GH-hosted runner, personal host mounts, host
 Docker socket or model inference is exposed to executable workflow code.
 """
 import argparse
+from contextlib import contextmanager
 import datetime as dt
 import fcntl
 import hashlib
@@ -27,6 +28,8 @@ ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
 CONTROLS = ROOT / "controls.json"
 LOCK = ROOT / "executor.lock"
 FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
+FLEET_CONTROL_LOCK = HOME / ".local/share/local-ci/control.lock"
+FLEET_OWNER_MARKER = HOME / ".local/share/local-ci/OWNED_BY_LOCAL_CI"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
@@ -335,6 +338,58 @@ def detached_fleet_quiescent():
             sqlite3.Error, OSError) as exc:
         raise AdmissionHold("detached_ci_inventory_unavailable") from exc
     return True
+
+
+@contextmanager
+def shared_fleet_admission_lock():
+    """Use the existing, private fleet inode across admission AND execution.
+
+    The shared local fleet owns control.lock and uses its exact inode. Creating
+    or accepting a replacement lock, hard link, symlink or public directory
+    could leave two concurrent owners thinking they have exclusive admission.
+    """
+    parent = FLEET_CONTROL_LOCK.parent
+    fd = None
+    try:
+        if (parent.is_symlink() or not parent.is_dir()
+                or parent.stat().st_uid != os.getuid()
+                or parent.stat().st_mode & 0o077
+                or FLEET_OWNER_MARKER.is_symlink()
+                or not FLEET_OWNER_MARKER.is_file()
+                or FLEET_OWNER_MARKER.read_bytes() != b"local-ci-v1\n"):
+            raise AdmissionHold("shared_fleet_lock_owner_unverified")
+        if FLEET_CONTROL_LOCK.is_symlink() or not FLEET_CONTROL_LOCK.is_file():
+            raise AdmissionHold("shared_fleet_lock_unavailable")
+        fd = os.open(FLEET_CONTROL_LOCK, os.O_RDWR | os.O_NOFOLLOW |
+                     getattr(os, "O_CLOEXEC", 0))
+        meta = os.fstat(fd)
+        # Check the path identity before the hard-link metadata: an inode
+        # replaced during open may have nlink=0, and that is source drift.
+        latest = FLEET_CONTROL_LOCK.stat()
+        if (meta.st_dev, meta.st_ino) != (latest.st_dev, latest.st_ino):
+            raise AdmissionHold("shared_fleet_lock_replaced")
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.getuid()
+                or meta.st_mode & 0o077 or meta.st_nlink != 1):
+            raise AdmissionHold("shared_fleet_lock_unsafe")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AdmissionHold("shared_fleet_lock_busy") from exc
+        except OSError as exc:
+            raise AdmissionHold("shared_fleet_lock_unavailable") from exc
+        # A trusted same-UID controller might have replaced the path between
+        # the first identity check and lock admission; fail closed if so.
+        after = FLEET_CONTROL_LOCK.stat()
+        if (meta.st_dev, meta.st_ino) != (after.st_dev, after.st_ino):
+            raise AdmissionHold("shared_fleet_lock_replaced")
+        yield
+    except AdmissionHold:
+        raise
+    except OSError as exc:
+        raise AdmissionHold("shared_fleet_lock_unavailable") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def capacity(candidate, controls):
@@ -657,8 +712,12 @@ def main():
             try:
                 category_enabled(c, controls)
                 source_authorised(c, controls)
-                capacity(c, controls)
-                result = runner_job(c, controls)
+                # The detached fleet uses this same durable host lock to
+                # reserve/dispatch work. Hold it through cleanup so neither
+                # owner can admit a concurrent external effect.
+                with shared_fleet_admission_lock():
+                    capacity(c, controls)
+                    result = runner_job(c, controls)
                 print(json.dumps(result))
                 return
             except AdmissionHold as exc:
