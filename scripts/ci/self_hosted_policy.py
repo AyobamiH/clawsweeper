@@ -243,6 +243,6 @@ def category_enabled(candidate, controls):
         if not isinstance(allowed_branches, list) or candidate.branch not in allowed_branches:
             raise AdmissionHold("branch_not_authorised")
     max_jobs = controls.get("max_jobs_per_cycle", 1)
-    if max_jobs != 1:
+    if type(max_jobs) is not int or max_jobs != 1:
         raise AdmissionHold("unbounded_worker_configuration")
     return True

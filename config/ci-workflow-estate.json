@@ -1,0 +1,1291 @@
+{
+  "schema": "clawsweeper.workflow-estate.v1",
+  "summary": {
+    "workflows": 41,
+    "jobs": 88,
+    "github_hosted": 67,
+    "dynamic_hosted_fallback": 4,
+    "local_label": 12,
+    "dynamic_or_other": 5,
+    "reusable": 0
+  },
+  "sources": [
+    {
+      "path": ".github/workflows/assist.yml",
+      "sha256": "5ad7cda5b8a26bda26ee0015a638485b6ab82d459ae75c07f524d6d9328713d5",
+      "events": ["repository_dispatch", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/automerge-e2e.yml",
+      "sha256": "90bc4f94b96c13d8d78291177a4cf5e4cf0de290632a622aacca83d7a81758a6",
+      "events": ["pull_request", "push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/chatgpt-private-acceptance-probe.yml",
+      "sha256": "34baab59fdef177e6b6974d76957df9a4d53270b6fa30797c928924e6c60bab7",
+      "events": ["push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "860baf3a0ced6c8b62f8130caf448903774139b7a866bbed3dc4a9e27e4ad759",
+      "events": ["pull_request", "push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/clawsweeper-dispatch.yml",
+      "sha256": "60a0aadb24b6d80e14db664eb892d30853937d3dd0d0304ffb0b8f8765edbe68",
+      "events": ["issue_comment", "issues", "pull_request_target"]
+    },
+    {
+      "path": ".github/workflows/cloudflare-operator-fixtures.yml",
+      "sha256": "0fb855b2ff99ef98589314bcbd245dbd0bfd5d07c9cfb18d4ecfa1e562bcb87a",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/cloudflare-repair-provision.yml",
+      "sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "events": ["push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/codeql.yml",
+      "sha256": "9c2b7d2b3775d9587e3c01341573babf5bb9f759a2adbc5992b2e428e29e4b3b",
+      "events": ["pull_request", "push", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/commercial-fulfilment.yml",
+      "sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/crabbox-hydrate.yml",
+      "sha256": "25fc7b310684aedf0caeeef26be98628d88a778445e1ea985fe05cb8f4deb104",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/dashboard-ci.yml",
+      "sha256": "efb83abfb995598e72fc9b6b41d145935cdd211ee4792a2b543062b13499a450",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/dashboard.yml",
+      "sha256": "9d3ff17e804da27048d459404d3ee1bce5170d95fbeba79ba7f123433304f581",
+      "events": ["push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/exact-review-batch-publish.yml",
+      "sha256": "178f6843aba9db67b01c77e66bf0b84e340be90c7a15573fc4684898eafb89c8",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/exact-review-dead-letter-operator.yml",
+      "sha256": "a6a9a4a5b0e9a4bde410b55889f0446d69c59cd53cde03610b34f6a610528850",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/exact-review-dead-letter-reconcile.yml",
+      "sha256": "fbadb5942b2a106d1eebbc772b9a1e61155422b13f847f8833f1cdd9cc7bf02d",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/exact-review-queue-maintenance.yml",
+      "sha256": "1ff1ad4318ae0e3f96ce0dd28b4d5b5e2a83c33501a465b41a86c7f205ada369",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/exact-review-reconcile.yml",
+      "sha256": "2463fa4f5e45cd98790761629cecd5f1797363997582877e549fc99d1ec8839a",
+      "events": ["schedule", "workflow_dispatch", "workflow_run"]
+    },
+    {
+      "path": ".github/workflows/github-activity.yml",
+      "sha256": "c24ceb52bf215b503ebcc89322c36154f86c98313f019a1cac82db9b36f05290",
+      "events": [
+        "issue_comment",
+        "issues",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "pull_request_target",
+        "repository_dispatch",
+        "workflow_run"
+      ]
+    },
+    {
+      "path": ".github/workflows/idea-archive-revival.yml",
+      "sha256": "38e5c7a63db05c22c13b3e52e7cd379b88859673b625342a37fb8e19f3150db8",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/live-proof-maintenance.yml",
+      "sha256": "cea8e9905428e3648a66a50abee57fd9a74f9c84fcdb7713adff2a9e2b6ddb24",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/maintainer-activity-report.yml",
+      "sha256": "d105f04271c6a64442ed0c8e0877aad82c8e3cd118c881d1da5fb6f2a17b0ad5",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/maintainer-report-discord.yml",
+      "sha256": "a1059b4994e3fbfb2034b17c68372f2df889243a21c5348dfced974c03408fc8",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/pages.yml",
+      "sha256": "6bbf370c3130622fe1239245fb680691be9be3550930ba515ad8675b43e79a16",
+      "events": ["push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/release-offline-replay.yml",
+      "sha256": "e0483a0dec0b8bec890923d50afe09185c24aae80330a12d674d3d7f82316875",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-cluster-intake.yml",
+      "sha256": "f2f1c4084147a1b8dc7ada93fe9c9b76333a5da57271584e15b2b5583d3c9ea8",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-cluster-worker.yml",
+      "sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-comment-router.yml",
+      "sha256": "d63bc05858a9d302fc949ac6e6ec8acf1044a8f2ba1a8e1602a4ec664a92e7ec",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-conflict-self-heal.yml",
+      "sha256": "0e004413672db371a596ec86df11268a09d735c3be466d56d7e0d9da7eea48dc",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-containment-smoke.yml",
+      "sha256": "d3f747052bb04d248d4322797962d92f702d15d758cdb4b7cc3dc4b22ca441d7",
+      "events": ["pull_request", "push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-issue-implementation-backfill.yml",
+      "sha256": "64cc22679054a749498d37628cd465dae27532f4aced2a87ec0e1f45bed123f9",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-issue-implementation-intake.yml",
+      "sha256": "3c2991c174ac4a3f70a2b1fb1b588b1e5ec960a664b6f40ec8f7a4033e0a32dc",
+      "events": ["repository_dispatch", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/repair-publish-results.yml",
+      "sha256": "21f2a40b351129ff86c9a9c0c7408449d2ff1652ee10b77e2b0417fbc241e7aa",
+      "events": ["workflow_dispatch", "workflow_run"]
+    },
+    {
+      "path": ".github/workflows/repair-self-heal.yml",
+      "sha256": "9855d65da6a4017001cd2305f789c45333e02c1c3bdca53ab9018879ab83b151",
+      "events": ["schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/report-metadata-audit.yml",
+      "sha256": "81a2ce826e6906dacdd7c9510b4a2e64ed503af92e4aeced45056f2fb48a18d9",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/spam-comment-intake.yml",
+      "sha256": "ed8a64097bd626bc2b6f62196beaab3d2d46d247b32122f246f17e0fa174f975",
+      "events": ["repository_dispatch"]
+    },
+    {
+      "path": ".github/workflows/spam-scanner.yml",
+      "sha256": "f6e22c813c560e1fa5b80e858255a9cdc260281d46c5ba2929929803b0768975",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/subscription-allowance.yml",
+      "sha256": "7ab1ab74b5dc91fb033c22f25b9967468f4652a7b0abaff9621c561fcb3fcff4",
+      "events": ["push", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/sweep.yml",
+      "sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/worker-records-ops.yml",
+      "sha256": "edfd9c38f7c8800896130a7a22febd3e36afa7c12c1a62b0c24b27f586cab86c",
+      "events": ["workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/workers-ai-fallback-acceptance.yml",
+      "sha256": "a6f44f55ebaa5c74a4f39eeb8980810850a2f340524b15bff5cbd401dd5d6f47",
+      "events": ["push", "workflow_dispatch"]
+    },
+    {
+      "path": ".github/workflows/workers-ai-repair-current-main-rerun.yml",
+      "sha256": "daa89323b5be8e719e9493a54fb72bd4b6e7966508d6a801e1bed9b92582a90e",
+      "events": ["push"]
+    }
+  ],
+  "jobs": [
+    {
+      "workflow": ".github/workflows/assist.yml",
+      "id": "assist",
+      "display_name": "assist",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited"],
+      "source_sha256": "5ad7cda5b8a26bda26ee0015a638485b6ab82d459ae75c07f524d6d9328713d5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/assist.yml",
+      "id": "capacity",
+      "display_name": "capacity",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "workflow_dispatch"],
+      "risks": ["workflow_secret_inherited"],
+      "source_sha256": "5ad7cda5b8a26bda26ee0015a638485b6ab82d459ae75c07f524d6d9328713d5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/assist.yml",
+      "id": "publish",
+      "display_name": "Publish trusted assist comment",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited"],
+      "source_sha256": "5ad7cda5b8a26bda26ee0015a638485b6ab82d459ae75c07f524d6d9328713d5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/assist.yml",
+      "id": "receipt",
+      "display_name": "Deduplicate command dispatch receipt",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "workflow_dispatch"],
+      "risks": ["workflow_secret_inherited"],
+      "source_sha256": "5ad7cda5b8a26bda26ee0015a638485b6ab82d459ae75c07f524d6d9328713d5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/automerge-e2e.yml",
+      "id": "automerge-e2e",
+      "display_name": "production automerge flow",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-isolation-${{ github.run_id }}-e2e"
+      ],
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": ["container_runtime"],
+      "source_sha256": "90bc4f94b96c13d8d78291177a4cf5e4cf0de290632a622aacca83d7a81758a6",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/chatgpt-private-acceptance-probe.yml",
+      "id": "dispatch-private-auto-fallback",
+      "display_name": "dispatch-private-auto-fallback",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["write_permission"],
+      "source_sha256": "34baab59fdef177e6b6974d76957df9a4d53270b6fa30797c928924e6c60bab7",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "id": "check",
+      "display_name": "pnpm check",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "860baf3a0ced6c8b62f8130caf448903774139b7a866bbed3dc4a9e27e4ad759",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "id": "hosted-review-scan",
+      "display_name": "Hosted native review scan smoke",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-24.04",
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "860baf3a0ced6c8b62f8130caf448903774139b7a866bbed3dc4a9e27e4ad759",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "id": "sparse-repair-builds",
+      "display_name": "sparse repair build smoke",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "860baf3a0ced6c8b62f8130caf448903774139b7a866bbed3dc4a9e27e4ad759",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "id": "windows-codex-launch",
+      "display_name": "Windows Codex launcher",
+      "kind": "github_hosted",
+      "runs_on": "windows-latest",
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "860baf3a0ced6c8b62f8130caf448903774139b7a866bbed3dc4a9e27e4ad759",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/clawsweeper-dispatch.yml",
+      "id": "dispatch",
+      "display_name": "dispatch",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-dispatch"
+      ],
+      "events": ["issue_comment", "issues", "pull_request_target"],
+      "risks": ["secret_reference", "possible_write_effect"],
+      "source_sha256": "60a0aadb24b6d80e14db664eb892d30853937d3dd0d0304ffb0b8f8765edbe68",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-operator-fixtures.yml",
+      "id": "cleanup",
+      "display_name": "cleanup",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service", "possible_write_effect"],
+      "source_sha256": "0fb855b2ff99ef98589314bcbd245dbd0bfd5d07c9cfb18d4ecfa1e562bcb87a",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-operator-fixtures.yml",
+      "id": "launch",
+      "display_name": "launch",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service", "possible_write_effect"],
+      "source_sha256": "0fb855b2ff99ef98589314bcbd245dbd0bfd5d07c9cfb18d4ecfa1e562bcb87a",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-operator-fixtures.yml",
+      "id": "validate",
+      "display_name": "validate",
+      "kind": "dynamic_hosted_fallback",
+      "runs_on": "${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'ubuntu-latest' }}",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "0fb855b2ff99ef98589314bcbd245dbd0bfd5d07c9cfb18d4ecfa1e562bcb87a",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "cleanup",
+      "display_name": "Destroy ephemeral Cloudflare repair compute",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "deploy",
+      "display_name": "deploy",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "execute-proof",
+      "display_name": "execute-proof",
+      "kind": "dynamic_hosted_fallback",
+      "runs_on": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "plan-proof",
+      "display_name": "plan-proof",
+      "kind": "dynamic_hosted_fallback",
+      "runs_on": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "provision",
+      "display_name": "Provision ephemeral Cloudflare repair compute",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml",
+      "id": "review",
+      "display_name": "Fresh subscription-authenticated infrastructure review",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/codeql.yml",
+      "id": "analyze",
+      "display_name": "Analyze (${{ matrix.language }})",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-security-${{ github.run_id }}-${{ matrix.language }}"
+      ],
+      "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
+      "risks": ["write_permission"],
+      "source_sha256": "9c2b7d2b3775d9587e3c01341573babf5bb9f759a2adbc5992b2e428e29e4b3b",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "cleanup",
+      "display_name": "cleanup",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "generate",
+      "display_name": "generate",
+      "kind": "dynamic_or_other",
+      "runs_on": "${{ needs.provision.outputs.execute }}",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "prepare",
+      "display_name": "prepare",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["write_permission"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "provision",
+      "display_name": "provision",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "publish",
+      "display_name": "publish",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["write_permission"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "report-failure",
+      "display_name": "report-failure",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["write_permission"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "semantic-review",
+      "display_name": "semantic-review",
+      "kind": "dynamic_or_other",
+      "runs_on": "${{ needs.provision.outputs.plan }}",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/commercial-fulfilment.yml",
+      "id": "validate",
+      "display_name": "validate",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "3d785988450140d09915e52a242b6b25d61090cee8493b7d8d5e4f7d7128211d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/crabbox-hydrate.yml",
+      "id": "hydrate",
+      "display_name": "hydrate",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "crabbox",
+        "openclaw",
+        "clawsweeper",
+        "${{ inputs.crabbox_runner_label }}"
+      ],
+      "events": ["workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "25fc7b310684aedf0caeeef26be98628d88a778445e1ea985fe05cb8f4deb104",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/dashboard-ci.yml",
+      "id": "refresh",
+      "display_name": "Refresh live dashboard PR CI",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "efb83abfb995598e72fc9b6b41d145935cdd211ee4792a2b543062b13499a450",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/dashboard.yml",
+      "id": "deploy",
+      "display_name": "Deploy dashboard Worker",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "9d3ff17e804da27048d459404d3ee1bce5170d95fbeba79ba7f123433304f581",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-batch-publish.yml",
+      "id": "publish",
+      "display_name": "publish",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission", "possible_write_effect"],
+      "source_sha256": "178f6843aba9db67b01c77e66bf0b84e340be90c7a15573fc4684898eafb89c8",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-dead-letter-operator.yml",
+      "id": "operate",
+      "display_name": "operate",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "environment_scoped"],
+      "source_sha256": "a6a9a4a5b0e9a4bde410b55889f0446d69c59cd53cde03610b34f6a610528850",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-dead-letter-reconcile.yml",
+      "id": "reconcile",
+      "display_name": "reconcile",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "environment_scoped",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "fbadb5942b2a106d1eebbc772b9a1e61155422b13f847f8833f1cdd9cc7bf02d",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-queue-maintenance.yml",
+      "id": "reconcile",
+      "display_name": "reconcile",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "1ff1ad4318ae0e3f96ce0dd28b4d5b5e2a83c33501a465b41a86c7f205ada369",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-reconcile.yml",
+      "id": "reconcile",
+      "display_name": "Observe and reconcile terminal review run",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch", "workflow_run"],
+      "risks": ["secret_reference"],
+      "source_sha256": "2463fa4f5e45cd98790761629cecd5f1797363997582877e549fc99d1ec8839a",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/exact-review-reconcile.yml",
+      "id": "sweep",
+      "display_name": "Sweep terminal exact-review runs",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch", "workflow_run"],
+      "risks": ["secret_reference"],
+      "source_sha256": "2463fa4f5e45cd98790761629cecd5f1797363997582877e549fc99d1ec8839a",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/github-activity.yml",
+      "id": "notify",
+      "display_name": "notify",
+      "kind": "local_label",
+      "runs_on": ["self-hosted", "Linux", "X64", "clawsweeper-ci-ops-${{ github.run_id }}-notify"],
+      "events": [
+        "issue_comment",
+        "issues",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "pull_request_target",
+        "repository_dispatch",
+        "workflow_run"
+      ],
+      "risks": ["secret_reference", "write_permission", "possible_write_effect"],
+      "source_sha256": "c24ceb52bf215b503ebcc89322c36154f86c98313f019a1cac82db9b36f05290",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/idea-archive-revival.yml",
+      "id": "fanout",
+      "display_name": "Fan out idea archive revival targets",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission"],
+      "source_sha256": "38e5c7a63db05c22c13b3e52e7cd379b88859673b625342a37fb8e19f3150db8",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/idea-archive-revival.yml",
+      "id": "revive",
+      "display_name": "Revive sponsored or popular ideas",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "38e5c7a63db05c22c13b3e52e7cd379b88859673b625342a37fb8e19f3150db8",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/live-proof-maintenance.yml",
+      "id": "retract",
+      "display_name": "Retract published recording",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "cea8e9905428e3648a66a50abee57fd9a74f9c84fcdb7713adff2a9e2b6ddb24",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/maintainer-activity-report.yml",
+      "id": "deploy",
+      "display_name": "Deploy maintainer reports",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "d105f04271c6a64442ed0c8e0877aad82c8e3cd118c881d1da5fb6f2a17b0ad5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/maintainer-activity-report.yml",
+      "id": "generate",
+      "display_name": "Generate maintainer reports",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "d105f04271c6a64442ed0c8e0877aad82c8e3cd118c881d1da5fb6f2a17b0ad5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/maintainer-activity-report.yml",
+      "id": "publish",
+      "display_name": "Publish maintainer reports",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "d105f04271c6a64442ed0c8e0877aad82c8e3cd118c881d1da5fb6f2a17b0ad5",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/maintainer-report-discord.yml",
+      "id": "notify",
+      "display_name": "Summarize maintainer report",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "a1059b4994e3fbfb2034b17c68372f2df889243a21c5348dfced974c03408fc8",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/pages.yml",
+      "id": "deploy",
+      "display_name": "Deploy docs",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference", "environment_scoped", "write_permission"],
+      "source_sha256": "6bbf370c3130622fe1239245fb680691be9be3550930ba515ad8675b43e79a16",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/release-offline-replay.yml",
+      "id": "replay",
+      "display_name": "replay",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-offline-replay"
+      ],
+      "events": ["workflow_dispatch"],
+      "risks": [],
+      "source_sha256": "e0483a0dec0b8bec890923d50afe09185c24aae80330a12d674d3d7f82316875",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-intake.yml",
+      "id": "intake",
+      "display_name": "intake",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "f2f1c4084147a1b8dc7ada93fe9c9b76333a5da57271584e15b2b5583d3c9ea8",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-worker.yml",
+      "id": "cleanup",
+      "display_name": "Destroy ephemeral Cloudflare repair compute",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-cleanup"
+      ],
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "cloud_service"],
+      "source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-worker.yml",
+      "id": "cluster",
+      "display_name": "Plan and review cluster",
+      "kind": "dynamic_or_other",
+      "runs_on": "${{ needs.provision.outputs.plan || 'clawsweeper-disposable-plan-not-provisioned' }}",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "cloud_service"],
+      "source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-worker.yml",
+      "id": "execute",
+      "display_name": "Execute and apply cluster actions",
+      "kind": "dynamic_or_other",
+      "runs_on": "${{ needs.provision.outputs.execute || 'clawsweeper-disposable-execute-not-provisioned' }}",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "cloud_service"],
+      "source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-worker.yml",
+      "id": "provision",
+      "display_name": "Provision ephemeral Cloudflare repair compute",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-provision"
+      ],
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "cloud_service"],
+      "source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-cluster-worker.yml",
+      "id": "receipt",
+      "display_name": "Deduplicate command dispatch receipt",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-receipt"
+      ],
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited"],
+      "source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-comment-router.yml",
+      "id": "route-comments",
+      "display_name": "route-comments",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission", "cloud_service"],
+      "source_sha256": "d63bc05858a9d302fc949ac6e6ec8acf1044a8f2ba1a8e1602a4ec664a92e7ec",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-conflict-self-heal.yml",
+      "id": "self-heal",
+      "display_name": "self-heal",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission", "cloud_service"],
+      "source_sha256": "0e004413672db371a596ec86df11268a09d735c3be466d56d7e0d9da7eea48dc",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-containment-smoke.yml",
+      "id": "cleanup",
+      "display_name": "Destroy containment smoke compute",
+      "kind": "local_label",
+      "runs_on": ["self-hosted", "Linux", "X64", "clawsweeper-ci-ops-${{ github.run_id }}-cleanup"],
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "d3f747052bb04d248d4322797962d92f702d15d758cdb4b7cc3dc4b22ca441d7",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-containment-smoke.yml",
+      "id": "containment-smoke",
+      "display_name": "containment smoke (sample ${{ matrix.sample }})",
+      "kind": "dynamic_or_other",
+      "runs_on": "${{ needs.provision.outputs[matrix.lane] }}",
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": ["cloud_service"],
+      "source_sha256": "d3f747052bb04d248d4322797962d92f702d15d758cdb4b7cc3dc4b22ca441d7",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-containment-smoke.yml",
+      "id": "provision",
+      "display_name": "Provision containment smoke compute",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-provision"
+      ],
+      "events": ["pull_request", "push", "workflow_dispatch"],
+      "risks": ["secret_reference", "cloud_service"],
+      "source_sha256": "d3f747052bb04d248d4322797962d92f702d15d758cdb4b7cc3dc4b22ca441d7",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/repair-issue-implementation-backfill.yml",
+      "id": "backfill",
+      "display_name": "backfill",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission"],
+      "source_sha256": "64cc22679054a749498d37628cd465dae27532f4aced2a87ec0e1f45bed123f9",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-issue-implementation-intake.yml",
+      "id": "intake",
+      "display_name": "intake",
+      "kind": "dynamic_hosted_fallback",
+      "runs_on": "${{ github.event.client_payload.intake_runner || vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'ubuntu-latest' }}",
+      "events": ["repository_dispatch", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission", "cloud_service"],
+      "source_sha256": "3c2991c174ac4a3f70a2b1fb1b588b1e5ec960a664b6f40ec8f7a4033e0a32dc",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-publish-results.yml",
+      "id": "publish",
+      "display_name": "publish",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch", "workflow_run"],
+      "risks": ["secret_reference"],
+      "source_sha256": "21f2a40b351129ff86c9a9c0c7408449d2ff1652ee10b77e2b0417fbc241e7aa",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/repair-self-heal.yml",
+      "id": "self-heal",
+      "display_name": "self-heal",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "write_permission", "cloud_service", "possible_write_effect"],
+      "source_sha256": "9855d65da6a4017001cd2305f789c45333e02c1c3bdca53ab9018879ab83b151",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/report-metadata-audit.yml",
+      "id": "audit",
+      "display_name": "audit",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "81a2ce826e6906dacdd7c9510b4a2e64ed503af92e4aeced45056f2fb48a18d9",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/spam-comment-intake.yml",
+      "id": "intake",
+      "display_name": "intake",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch"],
+      "risks": ["secret_reference", "possible_write_effect"],
+      "source_sha256": "ed8a64097bd626bc2b6f62196beaab3d2d46d247b32122f246f17e0fa174f975",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/spam-scanner.yml",
+      "id": "scan",
+      "display_name": "scan",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "f6e22c813c560e1fa5b80e858255a9cdc260281d46c5ba2929929803b0768975",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/subscription-allowance.yml",
+      "id": "refresh",
+      "display_name": "refresh",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-24.04",
+      "events": ["push", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "7ab1ab74b5dc91fb033c22f25b9967468f4652a7b0abaff9621c561fcb3fcff4",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "apply-existing",
+      "display_name": "Apply close proposals",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "apply-proof",
+      "display_name": "Prove close coverage without write credentials",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "audit-dashboard",
+      "display_name": "Audit state",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "event-disabled-target",
+      "display_name": "Skip disabled target event",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "event-review-apply",
+      "display_name": "Review exact event item",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "event-review-publish",
+      "display_name": "Publish exact review artifact",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "event-review-terminal-finalization",
+      "display_name": "Finalize exact-review command acknowledgement",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "legacy-event-queue-intake",
+      "display_name": "Queue legacy exact-review event",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "plan",
+      "display_name": "Plan review candidates",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "publish",
+      "display_name": "Publish review artifacts",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": [
+        "secret_reference",
+        "workflow_secret_inherited",
+        "write_permission",
+        "possible_write_effect"
+      ],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "publish-apply-observability",
+      "display_name": "Publish apply telemetry",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "publish-apply-proof-action-ledger",
+      "display_name": "Publish immutable apply proof action ledger",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "recover-review-failures",
+      "display_name": "Recover failed review shards",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "requeue-source-revision-drift",
+      "display_name": "Requeue source-revision drift",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["workflow_secret_inherited", "write_permission", "possible_write_effect"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "retry-failed-reviews",
+      "display_name": "Retry failed Codex reviews",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "review",
+      "display_name": "Review shard ${{ matrix.shard }} · ${{ needs.plan.outputs.target_repo }}#${{ matrix.item_numbers }}",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/sweep.yml",
+      "id": "target-fanout",
+      "display_name": "Fan out target repository sweeps",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["repository_dispatch", "schedule", "workflow_dispatch"],
+      "risks": ["secret_reference", "workflow_secret_inherited", "write_permission"],
+      "source_sha256": "e461a902ab33158dacf7abaeca70e4808b552d48f81f0d78a32b271390a7e8cf",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/worker-records-ops.yml",
+      "id": "snapshot",
+      "display_name": "Trigger canonical records snapshot",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "edfd9c38f7c8800896130a7a22febd3e36afa7c12c1a62b0c24b27f586cab86c",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/workers-ai-fallback-acceptance.yml",
+      "id": "release-source-review",
+      "display_name": "release-source-review",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-release-review"
+      ],
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "a6f44f55ebaa5c74a4f39eeb8980810850a2f340524b15bff5cbd401dd5d6f47",
+      "status": "labelled_local_not_operationally_verified"
+    },
+    {
+      "workflow": ".github/workflows/workers-ai-fallback-acceptance.yml",
+      "id": "smoke",
+      "display_name": "smoke",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-24.04",
+      "events": ["push", "workflow_dispatch"],
+      "risks": ["secret_reference"],
+      "source_sha256": "a6f44f55ebaa5c74a4f39eeb8980810850a2f340524b15bff5cbd401dd5d6f47",
+      "status": "unmigrated_or_requires_proof"
+    },
+    {
+      "workflow": ".github/workflows/workers-ai-repair-current-main-rerun.yml",
+      "id": "dispatch",
+      "display_name": "dispatch",
+      "kind": "github_hosted",
+      "runs_on": "ubuntu-latest",
+      "events": ["push"],
+      "risks": ["write_permission", "cloud_service"],
+      "source_sha256": "daa89323b5be8e719e9493a54fb72bd4b6e7966508d6a801e1bed9b92582a90e",
+      "status": "unmigrated_or_requires_proof"
+    }
+  ]
+}

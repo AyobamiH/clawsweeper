@@ -261,17 +261,20 @@ class RouteAcceptanceTests(unittest.TestCase):
             handler = object.__new__(server.Handler)
             handler.path = path
             handler.headers = {'Content-Length': str(len(payload)), 'X-GitHub-Event': 'push',
+                               'X-GitHub-Delivery': '0f0f0f0f-1234-4234-bbbb-abcdefabcdef',
                                'X-Hub-Signature-256': signature if valid_signature else 'sha256=' + '0' * 64}
             handler.rfile = io.BytesIO(payload)
-            handler.server = SimpleNamespace(secret=secret)
             replies = []
             handler.send_error = lambda code: replies.append(('error', code))
             handler.send_response = lambda code: replies.append(('response', code))
             handler.end_headers = lambda: None
-            with patch.object(server.subprocess, 'run',
-                              return_value=SimpleNamespace(returncode=0)) as run:
-                handler.do_POST()
-            return replies, run.called
+            with tempfile.TemporaryDirectory() as temp_ledger:
+                handler.server = SimpleNamespace(secret=secret,
+                    ledger=server.ledger_module.DeliveryLedger(pathlib.Path(temp_ledger)/'state'))
+                with patch.object(server.subprocess, 'run',
+                                  return_value=SimpleNamespace(returncode=0)) as run:
+                    handler.do_POST()
+                return replies, run.called
 
         for path in ('/github', '/github?cs_hook=' + 'b' * 48):
             self.assertEqual(request(path, True), ([('response', 202)], True))

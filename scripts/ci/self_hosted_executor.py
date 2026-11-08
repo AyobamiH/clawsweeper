@@ -225,11 +225,35 @@ def approved_job_image(candidate, controls):
 
 
 def capacity(candidate, controls):
-    # In-flight local CI belongs to another controller; defer, never compete.
-    fleet = subprocess.run(["systemctl", "--user", "is-active", "local-ci-fleet.service"],
-                           capture_output=True, text=True, timeout=5)
-    if fleet.stdout.strip() not in ("inactive", "failed"):
-        raise AdmissionHold("shared_fleet_busy")
+    # A scheduler can be inactive while its detached fleet workers and
+    # containers remain active. Every inventory failure must fail closed.
+    try:
+        fleet = subprocess.run(
+            ["systemctl", "--user", "is-active", "local-ci-fleet.service"],
+            capture_output=True, text=True, timeout=5)
+        if fleet.stdout.strip() != "inactive":
+            raise AdmissionHold("shared_fleet_busy")
+        units = subprocess.run(
+            ["systemctl", "--user", "list-units", "--type=service",
+             "--state=active,activating,reloading,deactivating", "--plain",
+             "--no-legend", "--no-pager",
+             "local-ci-job-*.service"],
+            capture_output=True, text=True, timeout=5)
+        if units.returncode:
+            raise AdmissionHold("shared_fleet_inventory_unavailable")
+        if units.stdout.strip():
+            raise AdmissionHold("shared_fleet_busy")
+        # Orphaned detached containers can survive a failed transient unit.
+        containers = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}",
+             "--filter", "name=^/local-fleet-"],
+            capture_output=True, text=True, timeout=8)
+        if containers.returncode:
+            raise AdmissionHold("shared_fleet_inventory_unavailable")
+        if containers.stdout.strip():
+            raise AdmissionHold("shared_fleet_busy")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AdmissionHold("shared_fleet_inventory_unavailable") from exc
     available = next(int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:")) // 1024
     required = 5500 if candidate.role == "security" else 3200
     if available < required:
@@ -386,13 +410,19 @@ def runner_job(candidate, controls):
             "labels": ["self-hosted", "Linux", "X64", candidate.label],
             "work_folder": "_work",
         })
+        if not isinstance(response, dict):
+            raise RuntimeError("jit_registration_response_incomplete")
         encoded = response.pop("encoded_jit_config", None)
-        registration = response.get("runner", {})
-        registered_id = registration.get("id") if isinstance(registration, dict) else None
-        if isinstance(registered_id, int) and not isinstance(registered_id, bool):
+        runner = response.get("runner")
+        registered_id = runner.get("id") if isinstance(runner, dict) else None
+        if isinstance(registered_id, bool) or not isinstance(registered_id, int) or registered_id <= 0:
+            registered_id = None
+        if registered_id is not None:
+            # Persist the identity as soon as it is known, including when
+            # GitHub supplied an incomplete config which must never execute.
             receipt.update(state="registered", runner_id=registered_id, registered_at=now())
             atomic(target / "receipt.json", receipt)
-        if not isinstance(encoded, str) or not isinstance(registered_id, int):
+        if not isinstance(encoded, str) or not encoded or registered_id is None:
             raise RuntimeError("jit_registration_response_incomplete")
         prepare_network(net, name)
         log_path = target / "runner.log"
@@ -429,8 +459,12 @@ def runner_job(candidate, controls):
             issues.append("github_job_not_successful")
         if process.poll() != 0:
             issues.append("runner_exit_not_zero")
-    except Exception as exc:
+    except BaseException as exc:
+        # An abnormal termination never yields a successful runner receipt;
+        # finally still attempts ownership-checked cleanup.
         issues.append(type(exc).__name__)
+        if not isinstance(exc, Exception):
+            raise
     finally:
         # A known runner identity is necessary to deregister; only owned Docker
         # labels may be touched. Cleanup errors always prevent a passing receipt.

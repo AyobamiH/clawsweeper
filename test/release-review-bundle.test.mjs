@@ -114,7 +114,7 @@ test("symlinked export parent refuses before publishing any final output", (t) =
   fs.symlinkSync(real, alias);
   const result = invoke({ ...input, out: path.join(alias, "review.json") });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /\"status\":\"refused\"/);
+  assert.match(result.stderr, /"status":"refused"/);
   assert.equal(fs.existsSync(path.join(real, "review.json")), false);
   assert.deepEqual(
     fs.readdirSync(real).filter((entry) => entry.startsWith(".clawsweeper-review-stage-")),
