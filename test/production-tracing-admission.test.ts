@@ -36,7 +36,7 @@ function repoFixture(options:{scriptName?:string;redact?:boolean;tracingEnabled?
  const wrangler=path.join(top,"wrangler-fixture");
  fs.writeFileSync(wrangler,`#!/usr/bin/env node
 const fs=require("node:fs"),path=require("node:path");
-if(process.argv.includes("--version")){console.log("wrangler 4.107.0");process.exit(0);}
+if(process.argv.includes("--version")){console.log("wrangler 4.151.2");process.exit(0);}
 const args=process.argv.slice(2);
 if(!args.includes("--dry-run")||!args.includes("--outdir"))process.exit(2);
 const output=args[args.indexOf("--outdir")+1];
@@ -60,7 +60,7 @@ function receipt(sha:string,bundle:Buffer,config:string,options={}) {
   provider_script_etag:ETAG,
   bundle_sha256:crypto.createHash("sha256").update(bundle).digest("hex"),
   production_config_sha256:crypto.createHash("sha256").update(fs.readFileSync(config)).digest("hex"),
-  wrangler_version:"4.107.0",...options,
+  wrangler_version:"4.151.2",...options,
  };
  return {claims,signature:crypto.createHmac("sha256",Buffer.from(KEY,"hex")).update(JSON.stringify(claims)).digest("hex")};
 }
@@ -137,7 +137,7 @@ test("synthetic provider byte readback and two independent dry-runs are bound to
   assert.equal(result.provider.versionId,VERSION);
   assert.equal(result.provider.deploymentId,DEPLOY);
   assert.equal(result.attestation.sourceBytesVerified,true);
-  assert.equal(result.attestation.wranglerVersion,"4.107.0");
+  assert.equal(result.attestation.wranglerVersion,"4.151.2");
   assert.equal(calls.length,7);
   assert.equal(calls.filter(x=>x.includes("/content/v2")).length,1);
   assert.ok(!JSON.stringify(result).includes("SYNTHETIC_TOKEN"));
@@ -229,7 +229,7 @@ test("tampered version, SHA or owner signature are refused",()=>{
   const actual=crypto.createHash("sha256").update(f.bundle).digest("hex");
   const bundle={sourceRevision:f.sha,bundleSha256:actual,providerContentSha256:actual,
    independentlyHashedProviderContent:true,twoIndependentLocalBuilds:true,wranglerDryRunsVerified:true,
-   verifiedIdentity:EXPECTED_WORKER,configSha256:crypto.createHash("sha256").update(fs.readFileSync(f.config)).digest("hex"),wranglerVersion:"4.107.0"};
+   verifiedIdentity:EXPECTED_WORKER,configSha256:crypto.createHash("sha256").update(fs.readFileSync(f.config)).digest("hex"),wranglerVersion:"4.151.2"};
   const valid=receipt(f.sha,f.bundle,f.config);
   assert.ok(verifySignedSourceAttestation(valid,KEY,f.sha,VERSION,ETAG,DEPLOY,bundle));
   assert.throws(()=>verifySignedSourceAttestation({...valid,signature:"0".repeat(64)},KEY,f.sha,VERSION,ETAG,DEPLOY,bundle),/owner_receipt_signature_invalid/);
@@ -295,5 +295,22 @@ test("caller-supplied verifier cannot bypass independent content hashing", async
   assert.equal(actual.state,"HOLD");
   assert.ok(actual.problems.includes("provider_content_digest_mismatch"));
   assert.equal(injectedCalls,0);
+ }finally{f.dispose()}
+});
+
+test("Wrangler 4.107.0 cannot attest redaction it ignores at runtime",async()=>{
+ const f=repoFixture();
+ try{
+  const legacy=fs.readFileSync(f.wrangler,"utf8").replace("wrangler 4.151.2","wrangler 4.107.0");
+  fs.writeFileSync(f.wrangler,legacy,{mode:0o700});
+  const {transport}=wire(f.sha,f.bundle);
+  const report=await checkProductionTracing({
+   expectedSource:f.sha,apiToken:"SYNTHETIC_TOKEN",
+   signedReceipt:receipt(f.sha,f.bundle,f.config),receiptKey:KEY,
+   sourceRoot:f.root,productionConfigFile:f.config,wranglerExecutable:f.wrangler,transport,
+  });
+  assert.equal(report.state,"HOLD");
+  assert.ok(report.problems.includes("unpinned_wrangler_version"));
+  assert.equal(report.attestation,null);
  }finally{f.dispose()}
 });

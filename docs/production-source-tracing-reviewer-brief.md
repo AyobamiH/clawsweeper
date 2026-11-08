@@ -80,3 +80,11 @@ State **APPROVE / REQUEST CHANGES / REJECT** separately for (a) source, (b) cana
 Reference documentation: https://developers.cloudflare.com/workers/observability/traces/ and https://developers.cloudflare.com/workers/observability/traces/custom-spans/.
 
 **No earlier assistant assertion or local test result may substitute for your independent source and runtime acceptance.**
+
+## Independent review addendum — Wrangler configuration compatibility (8 November 2026)
+
+The signed-head local canary on the former toolchain, **Wrangler 4.107.0**, emitted:
+`Unexpected fields found in observability field: "redact_query_string"`.
+That makes 4.107.0 unsafe for attesting query-string redaction. A separate isolated Wrangler **4.151.2** canary accepted the same `redact_query_string = true` setting without warning, and the byte-identical dry-run built successfully. The source verifier now explicitly requires 4.151.2; the negative test rejects 4.107.0. This does **not** verify Cloudflare automatic-span content in production.
+
+The existing `.github/workflows/dashboard.yml` still pins Wrangler 4.107.0; it belongs to the separate release-integration workstream. Do not change or trigger that workflow in this PR107 review without coordinating its owner. Production tracing stays disabled. Review `docs/production-source-tracing-review-corrections-20261108.md` at the *new exact signed PR head*.

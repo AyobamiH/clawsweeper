@@ -109,7 +109,9 @@ export async function reproduceAndVerifyWorkerBundle({
   const versionText=execFileSync(wranglerExecutable,["--version"],{
     cwd:sourceRoot,encoding:"utf8",timeout:12000,
   });
-  const version=/\b4\.107\.0\b/.exec(versionText)?.[0];
+  // Wrangler 4.107.0 ignored observability.redact_query_string.
+  // Use the separately verified 4.151.2 toolchain for this exact build.
+  const version=/\b4\.151\.2\b/.exec(versionText)?.[0];
   if(!version)throw Error("unpinned_wrangler_version");
   const temporary=fs.mkdtempSync(path.join(os.tmpdir(),"clawsweeper-reproducible-"));
   const dir1=path.join(temporary,"build-one"),dir2=path.join(temporary,"build-two");
