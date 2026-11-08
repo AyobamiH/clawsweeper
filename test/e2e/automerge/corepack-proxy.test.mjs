@@ -118,7 +118,6 @@ test("hermetic E2E refuses unseeded package managers before delegation", (t) => 
   );
 });
 
-
 test("symlinked Corepack entrypoint delegates both CLI commands", (t) => {
   const f = fixture(t);
   const entrypoint = path.join(f.scratch, "corepack");
@@ -144,6 +143,8 @@ test("symlinked Corepack entrypoint delegates both CLI commands", (t) => {
   }
   assert.equal(
     fs.readFileSync(marker, "utf8"),
-    "enable --install-directory " + path.join(f.home, "bin") + " pnpm\nprepare pnpm@11.10.0 --activate\n",
+    "enable --install-directory " +
+      path.join(f.home, "bin") +
+      " pnpm\nprepare pnpm@11.10.0 --activate\n",
   );
 });
