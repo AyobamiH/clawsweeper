@@ -1,3 +1,4 @@
+import { withSourceTrace, traceScopeForRequest, type SourceTraceContext } from "./source-tracing.ts";
 import {
   commandTextForClawSweeperFastAck,
   directReReviewAdditionalPrompt,
@@ -115,7 +116,7 @@ export {
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "waiting", "requested", "pending"]);
 const QUEUED_RUN_STATUSES = new Set(["queued", "waiting", "requested", "pending"]);
 const OPERATIONAL_QUEUED_RUN_STATUSES = new Set(["queued", "requested", "pending"]);
-type DashboardContext = { waitUntil?: (promise: Promise<unknown>) => void };
+type DashboardContext = SourceTraceContext & { waitUntil?: (promise: Promise<unknown>) => void };
 type GithubJsonReader = (path: string) => ReturnType<typeof githubJson>;
 type StoredValue = { value: string; expires_at?: number };
 type GithubWebhookDeliveryHeaders = {
@@ -914,6 +915,7 @@ export class StatusStore {
 
 export default {
   async fetch(request: Request, env: DashboardEnv = {}, ctx?: DashboardContext) {
+    return withSourceTrace(env, ctx, traceScopeForRequest(request), async () => {
     const url = new URL(request.url);
     if (
       url.hostname.includes("-ingest.") &&
@@ -1248,9 +1250,12 @@ export default {
     if (url.pathname === "/pr-proof-triage" || url.pathname === "/pr-proof-triage.html")
       return html(triageHtml(prProofTriagePageConfig()));
     return json({ error: "not_found" }, 404);
+    });
   },
   async scheduled(_controller, env: DashboardEnv = {}, ctx?: DashboardContext) {
-    const maintenance = recordScheduledHealthSample(env);
+    const maintenance = Promise.resolve(
+      withSourceTrace(env, ctx, "cron.health_sample", () => recordScheduledHealthSample(env)),
+    );
     if (ctx?.waitUntil) ctx.waitUntil(maintenance);
     else await maintenance;
   },

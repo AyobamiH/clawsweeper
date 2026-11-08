@@ -17,3 +17,8 @@ records/
 results/
 test-results/
 triage-dashboard-dev*.log
+
+# Guarded production-tracing local artefacts; never commit a local canary or owner receipt.
+/node_modules
+/dashboard/.wrangler-trace-canary.local.toml
+/.tracing-admission-readback.json

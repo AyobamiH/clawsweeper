@@ -3,6 +3,13 @@ main = "worker.ts"
 compatibility_date = "2026-05-11"
 workers_dev = true
 
+# Native Cloudflare Workers tracing remains OFF until the guarded tracing
+# release receives independent source approval and provider-side deployment
+# verification. A separate isolated canary config enables trace testing.
+[observability.traces]
+enabled = false
+head_sampling_rate = 0.005
+
 [triggers]
 crons = ["*/5 * * * *"]
 
