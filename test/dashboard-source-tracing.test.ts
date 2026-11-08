@@ -257,3 +257,113 @@ test("deferred tracing callback still executes the business operation exactly on
   assert.equal(result, 200);
   assert.equal(executed, 1);
 });
+
+test("throwing ctx.tracing getter cannot suppress the original business callback", async () => {
+  let calls = 0;
+  const context = {
+    get tracing(): SourceTraceApi | undefined {
+      throw new Error("observability proxy access failed");
+    },
+  };
+  const result = await withSourceTrace(enabled, context, "http.health", () => {
+    calls++;
+    return new Response("business-response", {status: 200});
+  });
+  assert.equal(result.status, 200);
+  assert.equal(await result.text(), "business-response");
+  assert.equal(calls, 1);
+});
+
+test("throwing ctx.tracing.enterSpan getter cannot suppress the business callback", async () => {
+  let calls = 0;
+  const context: SourceTraceContext = {
+    tracing: Object.defineProperty({}, "enterSpan", {
+      get(): never { throw new Error("trace capability getter broke"); },
+    }) as SourceTraceApi,
+  };
+  const result = await withSourceTrace(enabled, context, "http.github_webhook", () => {
+    calls++;
+    return 202;
+  });
+  assert.equal(result, 202);
+  assert.equal(calls, 1);
+});
+
+test("a deferred tracing callback after synchronous fallback must reuse memoised effect", async () => {
+  let calls = 0;
+  let callback: (() => unknown) | undefined;
+  const context: SourceTraceContext = {
+    tracing: {
+      enterSpan(_name, action) {
+        callback = () => action({setAttribute() {}});
+        return undefined as never;
+      },
+    },
+  };
+  const result = withSourceTrace(enabled, context, "http.event_intake", () => {
+    calls++;
+    return Promise.resolve("acknowledged");
+  });
+  assert.equal(await result, "acknowledged");
+  assert.equal(calls, 1);
+  assert.ok(callback);
+  assert.equal(await callback!(), "acknowledged");
+  assert.equal(await callback!(), "acknowledged");
+  assert.equal(calls, 1);
+});
+
+test("a Promise-delayed tracing callback cannot cause a second business invocation", async () => {
+  let calls = 0;
+  let resolveDeferred!: () => void;
+  const pending = new Promise<void>((resolve) => { resolveDeferred = resolve; });
+  const context: SourceTraceContext = {
+    tracing: {
+      enterSpan(_name, action) {
+        return pending.then(() => action({setAttribute() {}}));
+      },
+    },
+  };
+  const result = withSourceTrace(enabled, context, "cron.health_sample", () => {
+    calls++;
+    return Promise.resolve("maintained");
+  });
+  assert.equal(await result, "maintained");
+  assert.equal(calls, 1);
+  resolveDeferred();
+  await pending;
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  assert.equal(calls, 1);
+});
+
+test("a thenable with throwing then getter cannot replace a successful callback", () => {
+  let calls = 0;
+  const context: SourceTraceContext = {
+    tracing: {
+      enterSpan(_name, action) {
+        action({setAttribute() {}});
+        return Object.defineProperty({}, "then", {
+          get(): never { throw new Error("bad thenable"); },
+        }) as Promise<unknown>;
+      },
+    },
+  };
+  const result = withSourceTrace(enabled, context, "http.health", () => {
+    calls++;
+    return 200;
+  });
+  assert.equal(result, 200);
+  assert.equal(calls, 1);
+});
+
+test("throwing optional tracing configuration accessor cannot suppress business operation",()=>{
+ let calls=0;
+ const env=Object.defineProperty({}, "CLAWSWEEPER_ARCH_TRACE_ENABLED",{
+  get():never{throw new Error("unavailable optional trace configuration");},
+ }) as Record<string,unknown>;
+ const result=withSourceTrace(env,undefined,"http.health",()=>{
+  calls++;
+  return 200;
+ });
+ assert.equal(result,200);
+ assert.equal(calls,1);
+});

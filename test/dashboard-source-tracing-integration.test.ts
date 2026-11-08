@@ -59,3 +59,29 @@ test("real Worker does not create a span for unknown health-like routes",async()
   assert.equal(response.status,404);
   assert.equal(count,0);
 });
+
+test("real scheduled handler registers waitUntil once when tracing accessor throws", async()=>{
+  const scheduledPromises:Promise<unknown>[]=[];
+  const context={
+    waitUntil(promise:Promise<unknown>){scheduledPromises.push(promise);},
+    get tracing():never{throw new Error("injected tracing getter failure");},
+  };
+  const env={CLAWSWEEPER_DEPLOY_SHA:sourceSha,CLAWSWEEPER_ARCH_TRACE_ENABLED:"1"};
+  await worker.scheduled({},env,context);
+  assert.equal(scheduledPromises.length,1);
+  const results=await Promise.allSettled(scheduledPromises);
+  assert.equal(results.length,1);
+});
+
+test("real scheduled handler registers waitUntil when tracing is disabled",async()=>{
+  const scheduledPromises:Promise<unknown>[]=[];
+  const context={
+    waitUntil(promise:Promise<unknown>){scheduledPromises.push(promise);},
+    tracing:{enterSpan(){throw new Error("disabled tracing must not be accessed");}},
+  };
+  await worker.scheduled({},{
+    CLAWSWEEPER_DEPLOY_SHA:sourceSha,CLAWSWEEPER_ARCH_TRACE_ENABLED:"0",
+  },context as never);
+  assert.equal(scheduledPromises.length,1);
+  await Promise.allSettled(scheduledPromises);
+});

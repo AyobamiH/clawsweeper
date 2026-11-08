@@ -81,23 +81,54 @@ export function withSourceTrace<T>(
   scope: SourceTraceScope | null,
   action: () => T | Promise<T>,
 ): T | Promise<T> {
-  const configuredSha = configuredTraceRevision(env);
-  if (!configuredSha || !scope || !SAFE_SCOPES.has(scope)) return action();
-  const enter = ctx?.tracing?.enterSpan;
-  if (typeof enter !== "function") return action();
-
-  let invoked = false;
-  let businessReturned!: T | Promise<T>;
-  let businessThrew = false;
-  let businessError: unknown;
-  const restoreBusinessOutcome = (): T | Promise<T> => {
-    if (!invoked) return action();
-    if (businessThrew) throw businessError;
-    return businessReturned;
-  };
+  let configuredSha: string | null;
   try {
-    const traced = enter.call(ctx?.tracing, `clawsweeper.${scope}`, (span) => {
-      invoked = true;
+    configuredSha = configuredTraceRevision(env);
+  } catch {
+    // Integration shims may proxy tracing configuration. The original
+    // business handler must still execute on a tracing-only failure.
+    return action();
+  }
+  if (!configuredSha || !scope || !SAFE_SCOPES.has(scope)) return action();
+  // Accessing a tracing capability is itself an optional effect. Some proxies
+  // and instrumentation shims can throw from either property getter. No such
+  // failure may prevent the original handler from running.
+  let tracing: SourceTraceApi | undefined;
+  let enter: SourceTraceApi["enterSpan"] | undefined;
+  let called = false;
+  let result!: T | Promise<T>;
+  let thrown = false;
+  let originalError: unknown;
+
+  // The same function is shared by the synchronous handler and any deferred
+  // tracing callback. Once a business effect has started, *neither* a failed
+  // span nor a late callback may replay it.
+  const runOnce = (): T | Promise<T> => {
+    if (called) {
+      if (thrown) throw originalError;
+      return result;
+    }
+    called = true;
+    try {
+      result = action();
+      return result;
+    } catch (error) {
+      thrown = true;
+      originalError = error;
+      throw error;
+    }
+  };
+
+  try {
+    tracing = ctx?.tracing;
+    enter = tracing?.enterSpan;
+  } catch {
+    return runOnce();
+  }
+  if (typeof enter !== "function") return runOnce();
+
+  try {
+    const traced = enter.call(tracing, `clawsweeper.${scope}`, (span) => {
       // No URL, query string, request bodies, account names, tokens, user IDs,
       // IP addresses or provider response content may appear in our attributes.
       try {
@@ -106,31 +137,25 @@ export function withSourceTrace<T>(
         span.setAttribute("clawsweeper.route_family", scope);
         span.setAttribute("clawsweeper.trace_schema", SOURCE_TRACE_SCHEMA);
       } catch {
-        // Attribute failures must not change worker behaviour.
+        // An attribute or proxy failure is not a business failure.
       }
-      try {
-        businessReturned = action();
-        return businessReturned;
-      } catch (error) {
-        businessThrew = true;
-        businessError = error;
-        throw error;
-      }
+      return runOnce();
     });
 
-    // For a native synchronous enterSpan callback, businessReturned is the
-    // authoritative outcome. Do not wait for a failing trace exporter, and do
-    // not replay the action if the tracing promise rejects after invocation.
-    if (invoked) {
-      if (traced && typeof (traced as Promise<T>).then === "function") {
+    // The Cloudflare callback is synchronous. If a mock or future tracing
+    // implementation defers it, start business logic immediately and give the
+    // late callback the memoised result. Silently consume exporter failures,
+    // without swallowing a rejection from the original business promise.
+    try {
+      if (traced && typeof (traced as Promise<unknown>).then === "function") {
         void Promise.resolve(traced).catch(() => undefined);
       }
-      return restoreBusinessOutcome();
+    } catch {
+      // A throwing then getter is a tracer failure, not a business failure.
     }
-    // Defensive path for a tracing provider that schedules its callback
-    // asynchronously (unlike Cloudflare's documented enterSpan contract).
-    return Promise.resolve(traced).then(() => restoreBusinessOutcome(), () => restoreBusinessOutcome());
   } catch {
-    return restoreBusinessOutcome();
+    // Even if the tracer throws *after* invoking runOnce, its outcome is
+    // authoritative. runOnce will never execute the action a second time.
   }
+  return runOnce();
 }

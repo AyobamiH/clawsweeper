@@ -4,8 +4,14 @@ compatibility_date = "2026-05-11"
 workers_dev = true
 
 # Native Cloudflare Workers tracing remains OFF until the guarded tracing
-# release receives independent source approval and provider-side deployment
-# verification. A separate isolated canary config enables trace testing.
+# release receives independent source approval, provider-side deployment
+# verification AND an audited sample of real automatic platform spans.
+# Cloudflare's redact_query_string only protects query strings, not URL paths,
+# cache request URLs, storage keys or automatic error details. The below
+# setting is necessary but NOT sufficient for production privacy acceptance.
+[observability]
+redact_query_string = true
+
 [observability.traces]
 enabled = false
 head_sampling_rate = 0.005
