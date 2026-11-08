@@ -8,10 +8,12 @@ from dataclasses import dataclass
 import re
 
 REPOSITORY = "AyobamiH/clawsweeper"
-JOB_LABEL = re.compile(r"^clawsweeper-ci-(security|ops|isolation)-([1-9][0-9]*)-([a-z0-9-]+)$")
+JOB_LABEL = re.compile(r"^clawsweeper-ci-(security|ops|isolation|validation)-([1-9][0-9]*)-([a-z0-9-]+)$")
 SHA = re.compile(r"^[a-f0-9]{40}$")
 REVIEW_EVENTS = frozenset(("pull_request_review", "pull_request_review_comment"))
 WORKFLOWS = {
+    ("validation", "check"): (".github/workflows/ci.yml", "pnpm check"),
+    ("validation", "sparse"): (".github/workflows/ci.yml", "sparse repair build smoke"),
     ("security", "actions"): (".github/workflows/codeql.yml", "Analyze (actions)"),
     ("security", "javascript-typescript"): (
         ".github/workflows/codeql.yml", "Analyze (javascript-typescript)"),
@@ -30,6 +32,8 @@ WORKFLOWS = {
 # authority is separate: every privileged lane must still match the approved
 # default-branch workflow hash, regardless of who submitted the event payload.
 EVENTS = {
+    ("validation", "check"): frozenset(("push", "pull_request", "workflow_dispatch")),
+    ("validation", "sparse"): frozenset(("pull_request",)),
     ("security", "actions"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
     ("security", "javascript-typescript"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
     ("ops", "dispatch"): frozenset(("issues", "issue_comment", "pull_request_target")),
@@ -61,6 +65,7 @@ class Candidate:
     job_name: str
     branch: str
     trusted_base_sha: str | None = None
+    pr_number: int | None = None
 
 
 class AdmissionHold(ValueError):
@@ -105,6 +110,44 @@ def classify(run, job):
         raise AdmissionHold("invalid_branch")
     actor = run.get("actor", {}).get("login")
     trusted_base_sha = None
+    pr_number = None
+    if role == "validation":
+        if run.get("event") == "pull_request":
+            # Read-only CI admits PRs only when GitHub reports a valid main base.
+            pulls = run.get("pull_requests")
+            repo_id = run.get("repository", {}).get("id")
+            if (not isinstance(repo_id, int) or isinstance(repo_id, bool)
+                    or not isinstance(pulls, list) or len(pulls) != 1
+                    or not isinstance(pulls[0], dict)):
+                raise AdmissionHold("validation_pr_base_unverified")
+            record = pulls[0]
+            base, head = record.get("base"), record.get("head")
+            pr_number = record.get("number")
+            if (not isinstance(pr_number, int) or isinstance(pr_number, bool)
+                    or pr_number < 1
+                    or not isinstance(base, dict)
+                    or not isinstance(base.get("ref"), str)
+                    or not base.get("ref") or len(base["ref"]) > 200
+                    or not SHA.fullmatch(str(base.get("sha", "")))
+                    or not isinstance(base.get("repo"), dict)
+                    or base["repo"].get("id") != repo_id
+                    or not isinstance(head, dict)
+                    or not SHA.fullmatch(str(head.get("sha", "")))
+                    or head["sha"] != sha):
+                # An ordinary read-only CI PR may be stacked onto any branch;
+                # only the PR's actual immutable merge source is trusted.
+                raise AdmissionHold("validation_pr_base_unverified")
+            trusted_base_sha = base["sha"]
+        elif branch != "main" or (run.get("event") == "workflow_dispatch" and actor != "AyobamiH"):
+            # A signed main push from an approved bot may run the same CI;
+            # manual dispatch is owner-only and every workflow byte is pinned.
+            raise AdmissionHold("validation_default_branch_owner_unverified")
+    if (role == "ops" and run.get("event") == "workflow_dispatch"
+            and slot not in ("provision", "cleanup") and actor != "AyobamiH"):
+        # A writable-repository collaborator (or an unapproved service account)
+        # may request a manual workflow. That does not grant owner-operated
+        # privileged runner credentials. External event admission is separate.
+        raise AdmissionHold("untrusted_operations_dispatch_actor")
     if role == "ops":
         # GitHub's pull_request_target run metadata identifies the incoming PR
         # head branch and SHA, NOT the trusted workflow's base commit. The
@@ -166,7 +209,7 @@ def classify(run, job):
     if role == "isolation" and run.get("event") != "pull_request" and branch != "main":
         raise AdmissionHold("unexpected_e2e_branch")
     return Candidate(run_id, job_id, attempt, sha, path, run["event"], role, slot,
-                     unique[0], name, branch, trusted_base_sha)
+                     unique[0], name, branch, trusted_base_sha, pr_number)
 
 
 def is_release_preview(candidate, controls):
@@ -214,7 +257,16 @@ def category_enabled(candidate, controls):
     # held rather than using the host daemon or reducing E2E coverage.
     if candidate.role == "isolation":
         raise AdmissionHold("nested_docker_isolation_not_proven")
-    if candidate.role == "ops":
+    if candidate.role == "validation":
+        if controls.get("validation_accepted") is not True:
+            raise AdmissionHold("validation_not_accepted")
+        if not SHA.fullmatch(str(controls.get("trusted_main_sha", ""))):
+            raise AdmissionHold("validation_main_not_pinned")
+        # Unmerged workflow previews require owner-run-scoped approval.
+        if controls.get("validation_candidate_sha256") is not None:
+            if not isinstance(scoped_runs, list) or candidate.run_id not in scoped_runs:
+                raise AdmissionHold("validation_candidate_not_run_pinned")
+    elif candidate.role == "ops":
         if candidate.event in ("pull_request", "pull_request_review",
                                "pull_request_review_comment"):
             raise AdmissionHold("executed_pr_merge_workflow_unverifiable")

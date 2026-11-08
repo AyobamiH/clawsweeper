@@ -73,3 +73,19 @@ the existing registration-before-finally cleanup gap; prove a complete
 unreduced job in the pinned sandbox, including GH steps, log digest,
 runner deregistration and container cleanup. Do not reuse this
 credential-free lane for publishing, cloud or commercial actions.
+
+## Explicit execution-boundary audit (not runtime admission)
+
+The v2 manifest assigns **all** current jobs an execution boundary and
+preserves their exact-source SHA-256, triggers, dependency edges and risk
+hints. This classification is deliberately conservative and cannot authorise
+a workflow, register a runner or alter GitHub's control plane. Every boundary
+still needs its own complete source, execution and effect acceptance.
+
+The existing `crabbox-hydrate.yml` workflow uses a dynamic, stateful Crabbox
+runner that is externally provisioned and owns its lifecycle. The manifest
+marks it `external_crabbox_ephemeral` rather than accepting it into the
+general ClawSweeper JIT pool. Its dynamic checkout ref and persistent
+`~/.crabbox/actions` state prohibit interpreting its local label as evidence
+of safe generic runner equivalence. A real Crabbox owner-specific lifecycle
+review is required before any redesign or activation.

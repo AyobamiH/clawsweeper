@@ -247,7 +247,13 @@ jobs:
   event-disabled-target:
     name: Skip disabled target event
     if: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.target_repo == 'openclaw/clawhub' && vars.CLAWSWEEPER_ENABLE_CLAWHUB != '1' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-event-disabled-target",
+      ]
     steps:
       - name: Explain skipped event
         run: |
@@ -257,7 +263,13 @@ jobs:
   legacy-event-queue-intake:
     name: Queue legacy exact-review event
     if: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'clawsweeper_item' && github.event.client_payload.queue_lease_id == '' && !(github.event.client_payload.target_repo == 'openclaw/clawhub' && vars.CLAWSWEEPER_ENABLE_CLAWHUB != '1') }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-legacy-event-queue-intake",
+      ]
     timeout-minutes: 5
     steps:
       - name: Enqueue legacy event through the durable control plane
@@ -457,7 +469,8 @@ jobs:
   event-review-apply:
     name: Review exact event item
     if: ${{ github.event_name == 'repository_dispatch' && github.event.action != 'clawsweeper_target_sweep' && github.event.client_payload.queue_lease_id != '' && github.event.client_payload.source_action != 'exact_review_artifact_publish' && github.event.client_payload.source_action != 'exact_review_command_acknowledgement' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-apply"]
     timeout-minutes: 150
     concurrency:
       group: clawsweeper-event-review-${{ github.event.client_payload.queue_claim.item_key || github.event.client_payload.item_key || github.run_id }}
@@ -2070,7 +2083,13 @@ jobs:
   event-review-publish:
     name: Publish exact review artifact
     if: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.queue_lease_id != '' && github.event.client_payload.source_action == 'exact_review_artifact_publish' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-publish",
+      ]
     timeout-minutes: 60
     permissions:
       actions: write
@@ -3303,7 +3322,13 @@ jobs:
   event-review-terminal-finalization:
     name: Finalize exact-review command acknowledgement
     if: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.queue_lease_id != '' && github.event.client_payload.source_action == 'exact_review_command_acknowledgement' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-terminal-finalization",
+      ]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -3690,7 +3715,8 @@ jobs:
   target-fanout:
     name: Fan out target repository sweeps
     if: ${{ github.event_name == 'schedule' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-target-fanout"]
     timeout-minutes: 30
     permissions:
       actions: write
@@ -3782,7 +3808,7 @@ jobs:
   plan:
     name: Plan review candidates
     if: ${{ (github.event_name != 'repository_dispatch' || github.event.action == 'clawsweeper_target_sweep') && !((github.event_name == 'workflow_dispatch' && (github.event.inputs.apply_existing == 'true' || github.event.inputs.audit_dashboard == 'true')) || (github.event_name == 'schedule' && ((github.event.schedule == '3 * * * *' || github.event.schedule == '18 * * * *' || github.event.schedule == '33 * * * *' || github.event.schedule == '48 * * * *' || github.event.schedule == '8,23,38,53 * * * *' || github.event.schedule == '6,21,36,51 * * * *') || (github.event.schedule == '7 */6 * * *' || github.event.schedule == '12 */6 * * *' || github.event.schedule == '17 */6 * * *') || (github.event.schedule == '4/20 * * * *' || github.event.schedule == '41/10 * * * *' || github.event.schedule == '37 */6 * * *') || github.event.schedule == '13 * * * 0-6'))) && !(github.event_name == 'schedule' && (github.event.schedule == '2/5 * * * *' || github.event.schedule == '22 * * * *') && vars.CLAWSWEEPER_ENABLE_CLAWHUB != '1') && !(github.event_name == 'repository_dispatch' && github.event.client_payload.target_repo == 'openclaw/clawhub' && vars.CLAWSWEEPER_ENABLE_CLAWHUB != '1') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-plan"]
     timeout-minutes: 30
     concurrency:
       group: ${{ format('clawsweeper-planner-{0}', (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.item_number == '' && github.event.inputs.item_numbers == '')) && (github.event.inputs.target_repo || github.event.client_payload.target_repo || vars.CLAWSWEEPER_TARGET_REPO || 'AyobamiH/openclaw-operator') || github.run_id) }}
@@ -4305,7 +4331,7 @@ jobs:
     name: Review shard ${{ matrix.shard }} · ${{ needs.plan.outputs.target_repo }}#${{ matrix.item_numbers }}
     needs: plan
     if: ${{ needs.plan.outputs.queue_feed != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-review-${{ github.run_id }}-review"]
     timeout-minutes: 180
     continue-on-error: true
     permissions:
@@ -4615,7 +4641,13 @@ jobs:
     name: Requeue source-revision drift
     needs: [plan, review]
     if: ${{ always() && needs.plan.result == 'success' && needs.review.result != 'cancelled' && github.event_name == 'repository_dispatch' && github.event.action == 'clawsweeper_target_sweep' && github.event.client_payload.expected_source_revision != '' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-requeue-source-revision-drift",
+      ]
     permissions:
       actions: read
       contents: write
@@ -4680,7 +4712,7 @@ jobs:
     name: Publish review artifacts
     needs: [plan, review]
     if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.queue_feed != 'true' && needs.review.result != 'cancelled' && needs.plan.outputs.target_repo != '' && (github.event_name != 'repository_dispatch' || github.event.action == 'clawsweeper_target_sweep') && !((github.event_name == 'workflow_dispatch' && (github.event.inputs.apply_existing == 'true' || github.event.inputs.audit_dashboard == 'true')) || (github.event_name == 'schedule' && ((github.event.schedule == '3 * * * *' || github.event.schedule == '18 * * * *' || github.event.schedule == '33 * * * *' || github.event.schedule == '48 * * * *' || github.event.schedule == '8,23,38,53 * * * *' || github.event.schedule == '6,21,36,51 * * * *') || (github.event.schedule == '7 */6 * * *' || github.event.schedule == '12 */6 * * *' || github.event.schedule == '17 */6 * * *')))) }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-publish"]
     timeout-minutes: 60
     concurrency:
       group: clawsweeper-target-review-publish-${{ needs.plan.outputs.target_repo }}
@@ -5202,7 +5234,13 @@ jobs:
     name: Recover failed review shards
     needs: [plan, review, publish]
     if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.queue_feed != 'true' && needs.review.result != 'skipped' && !contains(github.event.inputs.additional_prompt || '', '[clawsweeper-recovery-attempt=1]') && needs.plan.outputs.planned_item_numbers != '' && github.event_name != 'repository_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-recover-review-failures",
+      ]
     timeout-minutes: 10
     permissions:
       actions: read
@@ -5347,7 +5385,13 @@ jobs:
   retry-failed-reviews:
     name: Retry failed Codex reviews
     if: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'clawsweeper_failed_review_retry' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-retry-failed-reviews",
+      ]
     timeout-minutes: 20
     permissions:
       actions: write
@@ -5521,7 +5565,8 @@ jobs:
   audit-dashboard:
     name: Audit state
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.audit_dashboard == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-audit-dashboard"]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -5660,7 +5705,7 @@ jobs:
   apply-proof:
     name: Prove close coverage without write credentials
     if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.apply_existing == 'true') || (github.event_name == 'repository_dispatch' && github.event.action == 'clawsweeper_apply_target') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-apply-proof"]
     timeout-minutes: 60
     permissions:
       actions: read
@@ -5950,7 +5995,13 @@ jobs:
     name: Publish immutable apply proof action ledger
     needs: apply-proof
     if: ${{ always() && needs.apply-proof.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-publish-apply-proof-action-ledger",
+      ]
     permissions:
       contents: read
     steps:
@@ -6007,7 +6058,8 @@ jobs:
       state_status_outcome: ${{ steps.retry-final-apply-status-publication.outcome || 'not_started' }}
       state_publication_outcome: ${{ steps.publish-apply-action-events.outcome || 'not_started' }}
       observability_started_at: ${{ steps.apply-telemetry-start.outputs.started_at || '' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-apply-existing"]
     timeout-minutes: 360
     concurrency:
       group: clawsweeper-target-apply-${{ needs.apply-proof.outputs.target_repo }}
@@ -6818,7 +6870,13 @@ jobs:
     name: Publish apply telemetry
     needs: [apply-proof, publish-apply-proof-action-ledger, apply-existing]
     if: ${{ always() && (needs.apply-proof.result == 'failure' || needs.publish-apply-proof-action-ledger.result == 'failure' || needs.apply-existing.result == 'failure' || needs.apply-existing.result == 'cancelled' || needs.apply-existing.result == 'success') }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-publish-apply-observability",
+      ]
     permissions:
       contents: read
     steps:

@@ -61,7 +61,7 @@ concurrency:
 jobs:
   intake:
     if: ${{ vars.CLAWSWEEPER_GITCRAWL_STORE_REPOSITORY != '' && (github.event_name != 'schedule' || vars.CLAWSWEEPER_FEATURE_CLUSTER_REPAIR_ENABLED == '1') }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-intake"]
     timeout-minutes: 45
     steps:
       - name: Create central GitHub App token

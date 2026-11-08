@@ -72,7 +72,7 @@ class JitPostBoundaryTests(unittest.TestCase):
                     return {"total_count": 1, "runners": [self.registered_runner()]}
                 return {"total_count": 0, "runners": []}
             self.fail("unexpected operation")
-        self.boundary(gh, ["RuntimeError"],
+        self.boundary(gh, ["execution_error_RuntimeError"],
                       lambda r, c: self.assertEqual(r["runner_id"], 481))
         self.assertEqual([m for m, _ in observed].count("POST"), 1)
         self.assertEqual([m for m, _ in observed].count("DELETE"), 1)
@@ -91,7 +91,7 @@ class JitPostBoundaryTests(unittest.TestCase):
                     "id": 481, "name": "csw-ci-123456789-888-1",
                     "labels": [{"name": "clawsweeper-ci-security-123456789-actions"}]}]}
             self.fail("must not DELETE a guessed runner ID")
-        self.boundary(gh, ["RuntimeError", "runner_deregistration_unverified"],
+        self.boundary(gh, ["execution_error_RuntimeError", "runner_deregistration_unverified"],
                       lambda r, c: self.assertNotIn("runner_id", r))
         self.assertEqual(observed, ["POST", "GET"])
 
@@ -104,7 +104,7 @@ class JitPostBoundaryTests(unittest.TestCase):
             if method == "GET":
                 return {"total_count": 0, "runners": []}
             self.fail("must not DELETE or repeat uncertain registration")
-        self.boundary(gh, ["RuntimeError"],
+        self.boundary(gh, ["execution_error_RuntimeError"],
                       lambda r, c: self.assertNotIn("runner_id", r))
         # One complete inventory authorises cleanup; an independent
         # second inventory confirms absence and seals the held receipt.
@@ -131,7 +131,7 @@ class JitPostBoundaryTests(unittest.TestCase):
                     executor.runner_job(candidate, {})
                 saved = json.loads((receipts / "run-123456789-job-888-attempt-1" / "receipt.json").read_text())
                 self.assertEqual(saved["state"], "held")
-                self.assertIn("KeyboardInterrupt", saved["issues"])
+                self.assertIn("execution_interrupted_KeyboardInterrupt", saved["issues"])
                 self.assertEqual(stop.call_count, 2)
                 with self.assertRaisesRegex(policy.AdmissionHold, "existing_or_uncertain_runner_intent"):
                     executor.runner_job(candidate, {})
@@ -160,7 +160,7 @@ class JitPostBoundaryTests(unittest.TestCase):
                 return {"total_count": 0, "runners": []}
             self.fail("unexpected operation")
         with patch.object(executor, "atomic", side_effect=atomic):
-            self.boundary(gh, ["OSError"],
+            self.boundary(gh, ["execution_error_OSError"],
                           lambda r, c: self.assertEqual(r["runner_id"], 481))
         self.assertEqual(writes, ["registration_uncertain", "registered", "held"])
         self.assertEqual(observed, ["POST", "GET", "DELETE", "GET"])

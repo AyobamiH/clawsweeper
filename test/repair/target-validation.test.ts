@@ -6495,20 +6495,24 @@ test("validation rejects scripts that mutate the checkout", () => {
   attachOrigin(cwd);
   fs.writeFileSync(path.join(cwd, "generated.txt"), "candidate\n");
 
-  assert.throws(
+  withPackageScriptPnpm(
     () =>
-      runAllowedValidationCommands(
-        ["pnpm verify"],
-        cwd,
-        validationOptions("steipete/example", {
-          toolchain: {
-            packageManager: "pnpm",
-            baseValidationCommands: [],
-            changedGate: null,
-          },
-        }),
+      assert.throws(
+        () =>
+          runAllowedValidationCommands(
+            ["pnpm verify"],
+            cwd,
+            validationOptions("steipete/example", {
+              toolchain: {
+                packageManager: "pnpm",
+                baseValidationCommands: [],
+                changedGate: null,
+              },
+            }),
+          ),
+        /unsafe validation command mutated checkout identity/,
       ),
-    /unsafe validation command mutated checkout identity/,
+    { name: "verify", file: "mutate.js" },
   );
 });
 
@@ -6527,20 +6531,24 @@ test("validation rejects scripts that mutate Git administrative state", () => {
   git(cwd, "commit", "-m", "initial");
   attachOrigin(cwd);
 
-  assert.throws(
+  withPackageScriptPnpm(
     () =>
-      runAllowedValidationCommands(
-        ["pnpm verify"],
-        cwd,
-        validationOptions("steipete/example", {
-          toolchain: {
-            packageManager: "pnpm",
-            baseValidationCommands: [],
-            changedGate: null,
-          },
-        }),
+      assert.throws(
+        () =>
+          runAllowedValidationCommands(
+            ["pnpm verify"],
+            cwd,
+            validationOptions("steipete/example", {
+              toolchain: {
+                packageManager: "pnpm",
+                baseValidationCommands: [],
+                changedGate: null,
+              },
+            }),
+          ),
+        /unsafe validation command mutated checkout identity/,
       ),
-    /unsafe validation command mutated checkout identity/,
+    { name: "verify", file: "mutate-git.js" },
   );
 });
 
@@ -8863,9 +8871,17 @@ test("target validation strips credentials and target-controlled environment inj
   const secretValues = Object.fromEntries(
     secretNames.map((name) => [name, `secret-${name.toLowerCase()}`]),
   );
-  const cwd = gitPackageFixture({
-    "check:env": `node -e 'for (const [key, value] of Object.entries(${JSON.stringify(secretValues)})) if (process.env[key] === value) process.exit(9); if (process.env.GIT_OPTIONAL_LOCKS !== "0") process.exit(10)'`,
-  });
+  // Exercise the same contained validation subprocess without permitting
+  // Corepack to fetch packages into the deliberately blank target profile.
+  const cwd = gitPackageFixture({ "check:env": "node check.js" });
+  fs.writeFileSync(
+    path.join(cwd, "check.js"),
+    `for (const [key, value] of Object.entries(${JSON.stringify(secretValues)})) {
+  if (process.env[key] === value) process.exit(9);
+}
+if (process.env.GIT_OPTIONAL_LOCKS !== "0") process.exit(10);
+`,
+  );
   git(cwd, "add", ".");
   git(cwd, "commit", "-m", "initial");
   attachOrigin(cwd);
@@ -8873,19 +8889,23 @@ test("target validation strips credentials and target-controlled environment inj
   const previous = Object.fromEntries(secretNames.map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(secretValues)) process.env[key] = value;
   try {
-    assert.deepEqual(
-      runAllowedValidationCommands(
-        ["pnpm check:env"],
-        cwd,
-        validationOptions("steipete/example", {
-          toolchain: {
-            packageManager: "pnpm",
-            baseValidationCommands: [],
-            changedGate: null,
-          },
-        }),
-      ),
-      ["pnpm check:env"],
+    withPackageScriptPnpm(
+      () =>
+        assert.deepEqual(
+          runAllowedValidationCommands(
+            ["pnpm check:env"],
+            cwd,
+            validationOptions("steipete/example", {
+              toolchain: {
+                packageManager: "pnpm",
+                baseValidationCommands: [],
+                changedGate: null,
+              },
+            }),
+          ),
+          ["pnpm check:env"],
+        ),
+      { name: "check:env", file: "check.js" },
     );
   } finally {
     for (const [key, value] of Object.entries(previous)) restoreEnv(key, value);
@@ -9095,19 +9115,23 @@ fs.writeFileSync(${JSON.stringify(observationPath)}, JSON.stringify({
   process.env.USERPROFILE = hostHome;
   process.env.XDG_CONFIG_HOME = hostConfig;
   try {
-    assert.deepEqual(
-      runAllowedValidationCommands(
-        ["pnpm check:env"],
-        cwd,
-        validationOptions("steipete/example", {
-          toolchain: {
-            packageManager: "pnpm",
-            baseValidationCommands: [],
-            changedGate: null,
-          },
-        }),
-      ),
-      ["pnpm check:env"],
+    withPackageScriptPnpm(
+      () =>
+        assert.deepEqual(
+          runAllowedValidationCommands(
+            ["pnpm check:env"],
+            cwd,
+            validationOptions("steipete/example", {
+              toolchain: {
+                packageManager: "pnpm",
+                baseValidationCommands: [],
+                changedGate: null,
+              },
+            }),
+          ),
+          ["pnpm check:env"],
+        ),
+      { name: "check:env", file: "write-global.mjs" },
     );
   } finally {
     for (const [key, value] of Object.entries(previous)) restoreEnv(key, value);

@@ -1,0 +1,34 @@
+{
+  "count": 4,
+  "entries": {
+    ".github/workflows/cloudflare-operator-fixtures.yml#validate": {
+      "current_source_sha256": "f41ab7c5cb1a9b68804786b2d8ac18056c2d1e084c89ad04ec42e432f69e9a6e",
+      "original_runner": "${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'ubuntu-latest' }}",
+      "original_source_sha256": "0fb855b2ff99ef98589314bcbd245dbd0bfd5d07c9cfb18d4ecfa1e562bcb87a",
+      "rationale": "unregistered_sentinel_when_dynamic_runner_missing",
+      "safe_runner": "${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'clawsweeper-unprovisioned-runner-held' }}"
+    },
+    ".github/workflows/cloudflare-repair-provision.yml#execute-proof": {
+      "current_source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "original_runner": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}",
+      "original_source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "rationale": "unregistered_sentinel_when_dynamic_runner_missing",
+      "safe_runner": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'clawsweeper-unprovisioned-runner-held' }}"
+    },
+    ".github/workflows/cloudflare-repair-provision.yml#plan-proof": {
+      "current_source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "original_runner": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}",
+      "original_source_sha256": "66dd663aba606d1739e3a411625303f68a2446e81c38dea5161c7b4002cd9165",
+      "rationale": "unregistered_sentinel_when_dynamic_runner_missing",
+      "safe_runner": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'clawsweeper-unprovisioned-runner-held' }}"
+    },
+    ".github/workflows/repair-issue-implementation-intake.yml#intake": {
+      "current_source_sha256": "4eff6f79cbe45d2d89f2e5b73f09503439409f49af9f0951df3e76f84afdd956",
+      "original_runner": "${{ github.event.client_payload.intake_runner || vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'ubuntu-latest' }}",
+      "original_source_sha256": "3c2991c174ac4a3f70a2b1fb1b588b1e5ec960a664b6f40ec8f7a4033e0a32dc",
+      "rationale": "unregistered_sentinel_when_dynamic_runner_missing",
+      "safe_runner": "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}"
+    }
+  },
+  "schema": "clawsweeper.dynamic-hosted-failclosed.v1"
+}

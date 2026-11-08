@@ -13,6 +13,7 @@ import pathlib
 import re
 import secrets
 import select
+import stat
 import subprocess
 import sys
 import tempfile
@@ -82,8 +83,11 @@ def durable_remove(path):
 def exclusive_reconcile():
     if LOCK.is_symlink():
         raise RuntimeError('Unsafe webhook lock symlink')
-    fd = os.open(LOCK, os.O_WRONLY | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise RuntimeError('Unverifiable owner-private webhook controller lock')
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
@@ -129,6 +133,13 @@ def verify_hook(hook_id, target):
         raise RuntimeError('GitHub hook URL or active readback mismatch')
     if sorted(remote.get('events', [])) != sorted(EVENTS):
         raise RuntimeError('GitHub hook event readback mismatch')
+    config = remote.get('config')
+    if (not isinstance(config, dict)
+            or config.get('content_type') != 'json'
+            or str(config.get('insecure_ssl')) != '0'):
+        # Matching URL/events alone does not prove TLS and JSON delivery.
+        # Reject a drifted remote hook even when no PATCH is otherwise needed.
+        raise RuntimeError('GitHub webhook JSON/TLS contract readback mismatch')
     return remote
 
 
@@ -225,7 +236,7 @@ def binding_assert(record, hook_id, remote_target):
         raise RuntimeError('Webhook destination drift from owner-private binding')
 
 
-def reconcile(url):
+def _reconcile_locked(url):
     secret = SECRET.read_text().strip()
     if len(secret) < 32:
         raise RuntimeError('Invalid webhook secret')
@@ -233,132 +244,136 @@ def reconcile(url):
     # observer. Validate it again before any possible remote mutation.
     if URL_RE.fullmatch(url) is None:
         raise RuntimeError('Untrusted tunnel destination')
-    with exclusive_reconcile():
-        hooks = complete_hook_inventory()
-        if not isinstance(hooks, list):
-            raise RuntimeError('Invalid GitHub webhook inventory')
-        if STATE.is_symlink():
-            raise RuntimeError('Unsafe webhook state symlink')
-        hook_id = STATE.read_text().strip() if STATE.exists() else None
-        binding = binding_read()
-        pending_update = update_intent_read()
-        intent = read_intent(secret)
-        if pending_update and not hook_id:
-            raise RuntimeError('Orphaned webhook update intent')
-        if hook_id:
-            if not hook_id.isdecimal():
-                raise RuntimeError('Invalid owned webhook identity')
-            hook = matching_hook(hooks, hook_id)
-            current = hook.get('config', {}).get('url', '')
-            current_marker = marker_of(current)
-            if intent:
-                # Only a complete exact creation intent may bootstrap missing
-                # binding after a crash between verified POST and state writes.
-                if (str(hook.get('id')) in intent['baseline_ids']
-                        or current != intent['target']
-                        or current_marker != intent['marker']):
-                    raise RuntimeError('Owned hook and pending intent disagree')
-                verify_hook(hook_id, current)
-                expected = bound_entry(hook_id, current)
-                if binding and binding != expected:
-                    raise RuntimeError('Owner binding and creation intent disagree')
-                if binding is None:
-                    durable_write(BINDING, json.dumps(expected, sort_keys=True))
-                    binding = expected
-                durable_remove(INTENT)
-            if binding is None:
-                # A numeric ID alone cannot establish what URL the owner last
-                # approved. Never silently trust a mutable remote webhook host.
-                raise RuntimeError('Legacy hook lacks owner-approved URL binding')
-            if pending_update:
-                if (pending_update['hook_id'] != str(hook_id)
-                        or binding['target'] not in (
-                            pending_update['previous_target'], pending_update['target'])):
-                    raise RuntimeError('Webhook update ownership drift')
-                if current == pending_update['target']:
-                    verify_hook(hook_id, current)
-                    expected = bound_entry(hook_id, current)
-                    durable_write(BINDING, json.dumps(expected, sort_keys=True))
-                    binding = expected
-                    durable_remove(UPDATE_INTENT)
-                    pending_update = None
-                elif (current == pending_update['previous_target']
-                      and binding['target'] == current):
-                    raise RuntimeError('Uncertain webhook PATCH: no unproved retry')
-                else:
-                    raise RuntimeError('Webhook update destination tampering')
-            binding_assert(binding, hook_id, current)
-            current_marker = binding['marker']
-        elif intent:
-            if pending_update:
-                raise RuntimeError('Update intent without an owned hook')
-            # A lost POST response cannot authorise another POST. Adopt only the
-            # exact target of the fsynced creation intent, with independent GET.
-            candidates = [h for h in hooks if h.get('config', {}).get('url') == intent['target']]
-            if len(candidates) != 1:
-                raise RuntimeError('Uncertain webhook creation: no unique owned hook readback')
-            hook = candidates[0]
-            hook_id = str(hook.get('id', ''))
-            if not hook_id.isdecimal() or hook_id in intent['baseline_ids']:
-                raise RuntimeError('Unverifiable webhook creation ownership')
-            verify_hook(hook_id, intent['target'])
-            expected = bound_entry(hook_id, intent['target'])
+    hooks = complete_hook_inventory()
+    if not isinstance(hooks, list):
+        raise RuntimeError('Invalid GitHub webhook inventory')
+    if STATE.is_symlink():
+        raise RuntimeError('Unsafe webhook state symlink')
+    hook_id = STATE.read_text().strip() if STATE.exists() else None
+    binding = binding_read()
+    pending_update = update_intent_read()
+    intent = read_intent(secret)
+    if pending_update and not hook_id:
+        raise RuntimeError('Orphaned webhook update intent')
+    if hook_id:
+        if not hook_id.isdecimal():
+            raise RuntimeError('Invalid owned webhook identity')
+        hook = matching_hook(hooks, hook_id)
+        current = hook.get('config', {}).get('url', '')
+        current_marker = marker_of(current)
+        if intent:
+            # Only a complete exact creation intent may bootstrap missing
+            # binding after a crash between verified POST and state writes.
+            if (str(hook.get('id')) in intent['baseline_ids']
+                    or current != intent['target']
+                    or current_marker != intent['marker']):
+                raise RuntimeError('Owned hook and pending intent disagree')
+            verify_hook(hook_id, current)
+            expected = bound_entry(hook_id, current)
             if binding and binding != expected:
-                raise RuntimeError('Orphaned webhook binding does not match creation intent')
+                raise RuntimeError('Owner binding and creation intent disagree')
             if binding is None:
                 durable_write(BINDING, json.dumps(expected, sort_keys=True))
-            durable_write(STATE, hook_id)
+                binding = expected
             durable_remove(INTENT)
-            current = intent['target']
-            current_marker = intent['marker']
-        else:
-            if binding or pending_update:
-                raise RuntimeError('Orphaned webhook binding without ownership receipt')
-            # Do not create another hook if an unowned, identical destination is
-            # already present; never infer ownership from URL equality alone.
-            if any(h.get('config', {}).get('url') == target_url(url) for h in hooks):
-                raise RuntimeError('Existing unowned matching hook')
-            marker = secrets.token_hex(24)
-            target = target_url(url, marker)
-            if any(h.get('config', {}).get('url') == target for h in hooks):
-                raise RuntimeError('Existing hook with generated marker')
-            intent = {'version': 1, 'repo': REPO, 'target': target, 'marker': marker,
-                      'secret_sha256': hashlib.sha256(secret.encode()).hexdigest(),
-                      'baseline_ids': [str(h['id']) for h in hooks]}
-            durable_write(INTENT, json.dumps(intent, sort_keys=True))
-            # Creation is non-idempotent. Never automatically retry this POST.
-            payload = {'name': 'web', 'active': True, 'events': EVENTS,
-                       'config': {'url': target, 'content_type': 'json',
-                                  'insecure_ssl': '0', 'secret': secret}}
-            created = api('POST', 'hooks', payload)
-            hook_id = str(created.get('id', ''))
-            if not hook_id.isdecimal():
-                raise RuntimeError('Unverifiable webhook create response')
-            verify_hook(hook_id, target)
-            durable_write(BINDING, json.dumps(bound_entry(hook_id, target), sort_keys=True))
-            durable_write(STATE, hook_id)
-            durable_remove(INTENT)
-            return int(hook_id)
-
-        target = target_url(url, current_marker)
-        if target == current:
-            verify_hook(hook_id, target)
-            return int(hook_id)
-        # A PATCH has an external effect and can have an ambiguous response.
-        # Persist exact old/new targets before issuing it. On crash or timeout,
-        # readback may prove that it happened; do not blindly repeat it.
-        update = {'version': 1, 'repo': REPO, 'hook_id': str(hook_id),
-                  'previous_target': current, 'target': target,
-                  'marker': current_marker}
-        durable_write(UPDATE_INTENT, json.dumps(update, sort_keys=True))
+        if binding is None:
+            # A numeric ID alone cannot establish what URL the owner last
+            # approved. Never silently trust a mutable remote webhook host.
+            raise RuntimeError('Legacy hook lacks owner-approved URL binding')
+        if pending_update:
+            if (pending_update['hook_id'] != str(hook_id)
+                    or binding['target'] not in (
+                        pending_update['previous_target'], pending_update['target'])):
+                raise RuntimeError('Webhook update ownership drift')
+            if current == pending_update['target']:
+                verify_hook(hook_id, current)
+                expected = bound_entry(hook_id, current)
+                durable_write(BINDING, json.dumps(expected, sort_keys=True))
+                binding = expected
+                durable_remove(UPDATE_INTENT)
+                pending_update = None
+            elif (current == pending_update['previous_target']
+                  and binding['target'] == current):
+                raise RuntimeError('Uncertain webhook PATCH: no unproved retry')
+            else:
+                raise RuntimeError('Webhook update destination tampering')
+        binding_assert(binding, hook_id, current)
+        current_marker = binding['marker']
+    elif intent:
+        if pending_update:
+            raise RuntimeError('Update intent without an owned hook')
+        # A lost POST response cannot authorise another POST. Adopt only the
+        # exact target of the fsynced creation intent, with independent GET.
+        candidates = [h for h in hooks if h.get('config', {}).get('url') == intent['target']]
+        if len(candidates) != 1:
+            raise RuntimeError('Uncertain webhook creation: no unique owned hook readback')
+        hook = candidates[0]
+        hook_id = str(hook.get('id', ''))
+        if not hook_id.isdecimal() or hook_id in intent['baseline_ids']:
+            raise RuntimeError('Unverifiable webhook creation ownership')
+        verify_hook(hook_id, intent['target'])
+        expected = bound_entry(hook_id, intent['target'])
+        if binding and binding != expected:
+            raise RuntimeError('Orphaned webhook binding does not match creation intent')
+        if binding is None:
+            durable_write(BINDING, json.dumps(expected, sort_keys=True))
+        durable_write(STATE, hook_id)
+        durable_remove(INTENT)
+        current = intent['target']
+        current_marker = intent['marker']
+    else:
+        if binding or pending_update:
+            raise RuntimeError('Orphaned webhook binding without ownership receipt')
+        # Do not create another hook if an unowned, identical destination is
+        # already present; never infer ownership from URL equality alone.
+        if any(h.get('config', {}).get('url') == target_url(url) for h in hooks):
+            raise RuntimeError('Existing unowned matching hook')
+        marker = secrets.token_hex(24)
+        target = target_url(url, marker)
+        if any(h.get('config', {}).get('url') == target for h in hooks):
+            raise RuntimeError('Existing hook with generated marker')
+        intent = {'version': 1, 'repo': REPO, 'target': target, 'marker': marker,
+                  'secret_sha256': hashlib.sha256(secret.encode()).hexdigest(),
+                  'baseline_ids': [str(h['id']) for h in hooks]}
+        durable_write(INTENT, json.dumps(intent, sort_keys=True))
+        # Creation is non-idempotent. Never automatically retry this POST.
         payload = {'name': 'web', 'active': True, 'events': EVENTS,
                    'config': {'url': target, 'content_type': 'json',
                               'insecure_ssl': '0', 'secret': secret}}
-        api('PATCH', 'hooks/' + hook_id, payload)
+        created = api('POST', 'hooks', payload)
+        hook_id = str(created.get('id', ''))
+        if not hook_id.isdecimal():
+            raise RuntimeError('Unverifiable webhook create response')
         verify_hook(hook_id, target)
         durable_write(BINDING, json.dumps(bound_entry(hook_id, target), sort_keys=True))
-        durable_remove(UPDATE_INTENT)
+        durable_write(STATE, hook_id)
+        durable_remove(INTENT)
         return int(hook_id)
+
+    target = target_url(url, current_marker)
+    if target == current:
+        verify_hook(hook_id, target)
+        return int(hook_id)
+    # A PATCH has an external effect and can have an ambiguous response.
+    # Persist exact old/new targets before issuing it. On crash or timeout,
+    # readback may prove that it happened; do not blindly repeat it.
+    update = {'version': 1, 'repo': REPO, 'hook_id': str(hook_id),
+              'previous_target': current, 'target': target,
+              'marker': current_marker}
+    durable_write(UPDATE_INTENT, json.dumps(update, sort_keys=True))
+    payload = {'name': 'web', 'active': True, 'events': EVENTS,
+               'config': {'url': target, 'content_type': 'json',
+                          'insecure_ssl': '0', 'secret': secret}}
+    api('PATCH', 'hooks/' + hook_id, payload)
+    verify_hook(hook_id, target)
+    durable_write(BINDING, json.dumps(bound_entry(hook_id, target), sort_keys=True))
+    durable_remove(UPDATE_INTENT)
+    return int(hook_id)
+
+
+def reconcile(url):
+    with exclusive_reconcile():
+        return _reconcile_locked(url)
 
 
 def wait_for_tunnel_url(tunnel, timeout=45):
@@ -395,21 +410,24 @@ def wait_for_tunnel_url(tunnel, timeout=45):
 
 
 def main():
-    tunnel = subprocess.Popen([str(HOME / '.local/bin/cloudflared'), 'tunnel',
-        '--no-autoupdate', '--loglevel', 'info', '--url', 'http://127.0.0.1:18763'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1)
-    try:
-        url = wait_for_tunnel_url(tunnel, timeout=45)
-        hook_id = reconcile(url)
-        print(json.dumps({'hook_id': hook_id, 'relay': 'connected'}), flush=True)
-        return tunnel.wait()
-    finally:
-        if tunnel.poll() is None:
-            tunnel.terminate()
-            try:
-                tunnel.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                tunnel.kill()
+    # Own the webhook for the entire tunnel lifetime; never allow a second
+    # controller to retarget GitHub while the first tunnel is still running.
+    with exclusive_reconcile():
+        tunnel = subprocess.Popen([str(HOME / '.local/bin/cloudflared'), 'tunnel',
+            '--no-autoupdate', '--loglevel', 'info', '--url', 'http://127.0.0.1:18763'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, bufsize=1)
+        try:
+            url = wait_for_tunnel_url(tunnel, timeout=45)
+            hook_id = _reconcile_locked(url)
+            print(json.dumps({'hook_id': hook_id, 'relay': 'connected'}), flush=True)
+            return tunnel.wait()
+        finally:
+            if tunnel.poll() is None:
+                tunnel.terminate()
+                try:
+                    tunnel.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    tunnel.kill()
 
 
 if __name__ == '__main__':

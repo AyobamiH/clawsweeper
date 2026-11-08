@@ -1,0 +1,26 @@
+{
+  "enabled": false,
+  "allow_live_mutations": false,
+  "repo": "AyobamiH/clawsweeper",
+  "trusted_main_sha": null,
+  "max_parallel": 2,
+  "class_parallel_caps": {
+    "ordinary": 2,
+    "privileged": 1,
+    "review": 1,
+    "codeql": 2,
+    "e2e": 1,
+    "windows": 1
+  },
+  "enabled_classes": [],
+  "approved_jobs": {},
+  "untrusted_isolation_verified": false,
+  "runner_network_isolation_verified": false,
+  "operations_accepted": false,
+  "review_source_verified": false,
+  "model_inference_permitted": false,
+  "codeql_sarif_accepted": false,
+  "rootless_nested_container_proven": false,
+  "native_windows_runner_proven": false,
+  "security_image_sha256": null
+}

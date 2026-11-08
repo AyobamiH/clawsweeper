@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   operate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-operate"]
     timeout-minutes: 15
     environment: exact-review-operator
     env:

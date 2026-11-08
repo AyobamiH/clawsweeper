@@ -87,7 +87,7 @@ class InterruptedJitTests(unittest.TestCase):
             self.assertEqual(stop.call_count, 2)
             data = json.loads((root / "run-123-job-456-attempt-1" / "receipt.json").read_text())
             self.assertEqual(data["state"], "held")
-            self.assertIn("RuntimeError", data["issues"])
+            self.assertIn("execution_error_RuntimeError", data["issues"])
             self.assertNotIn("runner_started_at", data)
 
     def test_exact_runner_lookup_rejects_partial_foreign_and_busy_inventory(self):

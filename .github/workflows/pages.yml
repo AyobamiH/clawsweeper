@@ -23,7 +23,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy docs
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-deploy"]
     timeout-minutes: 10
     env:
       PAGES_ARTIFACT_NAME: github-pages-${{ github.run_attempt }}

@@ -14,16 +14,19 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
+import stat
 import subprocess
 import sys
 import time
 
-from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, WORKFLOWS, category_enabled, classify, is_release_preview
+from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, SHA, WORKFLOWS, category_enabled, classify, is_release_preview
 
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
 CONTROLS = ROOT / "controls.json"
 LOCK = ROOT / "executor.lock"
+FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
@@ -125,6 +128,52 @@ def load_controls():
 
 
 def source_authorised(candidate, controls):
+    if candidate.role == "validation":
+        # Execute untrusted PR code ONLY with immutable trusted CI instructions.
+        # The workflow source and its approved hash are verified independently.
+        import base64
+        main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
+        if main != controls.get("trusted_main_sha"):
+            raise AdmissionHold("validation_main_changed")
+        baseline = controls.get("trusted_workflow_sha256", {})
+        expected = baseline.get(candidate.workflow) if isinstance(baseline, dict) else None
+        if not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
+            raise AdmissionHold("validation_baseline_missing")
+        approved = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={main}")
+        actual_main = hashlib.sha256(base64.b64decode(approved["content"])).hexdigest()
+        if actual_main != expected:
+            raise AdmissionHold("validation_baseline_changed")
+        if candidate.event == "pull_request":
+            # A GitHub workflow run's head_sha is the PR branch, but the
+            # actual pull_request execution may use refs/pull/N/merge. Verify
+            # the synthetic merge's exact parents before granting a JIT runner.
+            if (not isinstance(candidate.pr_number, int)
+                    or not SHA.fullmatch(str(candidate.trusted_base_sha or ""))):
+                raise AdmissionHold("validation_merge_identity_missing")
+            merge_ref = gh(f"{REPO_SLUG}/git/ref/pull/{candidate.pr_number}/merge")
+            merge_sha = merge_ref.get("object", {}).get("sha")
+            if not isinstance(merge_sha, str) or not re.fullmatch(r"[a-f0-9]{40}", merge_sha):
+                raise AdmissionHold("validation_merge_identity_missing")
+            merge = gh(f"{REPO_SLUG}/git/commits/{merge_sha}")
+            parents = [p.get("sha") for p in merge.get("parents", []) if isinstance(p, dict)]
+            if parents != [candidate.trusted_base_sha, candidate.sha]:
+                raise AdmissionHold("validation_merge_parents_changed")
+            sources = (candidate.sha, merge_sha)
+        else:
+            if candidate.sha != main:
+                raise AdmissionHold("validation_default_branch_sha_changed")
+            sources = (candidate.sha,)
+        preview = controls.get("validation_candidate_sha256")
+        approved_hash = preview if preview is not None else expected
+        if not isinstance(approved_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", approved_hash):
+            raise AdmissionHold("validation_candidate_workflow_drift")
+        for ref in sources:
+            obj = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={ref}")
+            digest = hashlib.sha256(base64.b64decode(obj["content"])).hexdigest()
+            if digest != approved_hash:
+                raise AdmissionHold("validation_candidate_workflow_drift"
+                                    if preview is not None else "validation_workflow_drift")
+        return True
     if candidate.role != "ops":
         return True
     # GitHub Actions REST run/check-suite metadata can report a PR head SHA
@@ -224,36 +273,82 @@ def approved_job_image(candidate, controls):
     return pinned
 
 
+def detached_fleet_quiescent():
+    """Fail closed on independently active local CI work and stale owned containers.
+
+    The parent fleet unit being inactive does NOT prove detached job units
+    or isolated CI containers are idle. Never mutate or clean up another
+    controller's resources from the admission path.
+    """
+    try:
+        units = run_cli(
+            ["systemctl", "--user", "list-units", "--all", "--type=service",
+             "--plain", "--no-legend", "local-ci-job-*.service"], timeout=10)
+        for row in units.splitlines():
+            parts = row.lstrip("● ").split()
+            if not parts or not parts[0].startswith("local-ci-job-"):
+                continue
+            if len(parts) < 3 or not parts[0].endswith(".service"):
+                raise AdmissionHold("detached_ci_unit_unverifiable")
+            if parts[2] not in ("inactive", "failed"):
+                raise AdmissionHold("detached_ci_unit_busy")
+        pending = run_cli(
+            ["systemctl", "--user", "list-jobs", "--plain", "--no-legend"],
+            timeout=10)
+        if "local-ci-job-" in pending:
+            raise AdmissionHold("detached_ci_unit_transition")
+        # The fleet reserves detached capacity in SQLite *before* systemd-run
+        # exposes its unit. Unit/container absence alone is not authoritative.
+        # Read only, refuse missing/unsafe inventory, never adjust fleet leases.
+        if FLEET_DB.is_symlink() or not FLEET_DB.is_file():
+            raise AdmissionHold("detached_ci_lease_inventory_unavailable")
+        metadata = FLEET_DB.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise AdmissionHold("detached_ci_lease_inventory_unverifiable")
+        database = sqlite3.connect(FLEET_DB.as_uri() + "?mode=ro",
+                                   timeout=5, uri=True)
+        try:
+            database.execute("PRAGMA query_only=ON")
+            row = database.execute("SELECT COUNT(*) FROM detached_leases").fetchone()
+        finally:
+            database.close()
+        if not row or type(row[0]) is not int:
+            raise AdmissionHold("detached_ci_lease_inventory_unverifiable")
+        if row[0] > 0:
+            raise AdmissionHold("detached_ci_lease_reserved")
+        containers = run_cli(
+            ["docker", "ps", "--all", "--format", "{{.Names}}|{{.State}}"],
+            timeout=15)
+        for row in containers.splitlines():
+            fields = row.split("|", 1)
+            if len(fields) != 2:
+                raise AdmissionHold("detached_ci_container_unverifiable")
+            name, state = fields
+            if name.startswith(("local-ci-job-", "csw-ci-", "local-fleet-", "clawsweeper-ci-")):
+                # Even an exited orphan needs ownership-checked reconciliation
+                # rather than treating it as evidence of an idle fleet.
+                raise AdmissionHold("detached_ci_container_present")
+    except AdmissionHold:
+        # Distinct policy refusals must retain their actionable reason.
+        raise
+    except (RuntimeError, subprocess.TimeoutExpired, ValueError,
+            sqlite3.Error, OSError) as exc:
+        raise AdmissionHold("detached_ci_inventory_unavailable") from exc
+    return True
+
+
 def capacity(candidate, controls):
-    # A scheduler can be inactive while its detached fleet workers and
-    # containers remain active. Every inventory failure must fail closed.
+    # A detached fleet may still hold leases or orphaned containers even when
+    # its scheduler reports inactive. Fail closed on a failed/unknown service.
     try:
         fleet = subprocess.run(
             ["systemctl", "--user", "is-active", "local-ci-fleet.service"],
             capture_output=True, text=True, timeout=5)
-        if fleet.stdout.strip() != "inactive":
-            raise AdmissionHold("shared_fleet_busy")
-        units = subprocess.run(
-            ["systemctl", "--user", "list-units", "--type=service",
-             "--state=active,activating,reloading,deactivating", "--plain",
-             "--no-legend", "--no-pager",
-             "local-ci-job-*.service"],
-            capture_output=True, text=True, timeout=5)
-        if units.returncode:
-            raise AdmissionHold("shared_fleet_inventory_unavailable")
-        if units.stdout.strip():
-            raise AdmissionHold("shared_fleet_busy")
-        # Orphaned detached containers can survive a failed transient unit.
-        containers = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}",
-             "--filter", "name=^/local-fleet-"],
-            capture_output=True, text=True, timeout=8)
-        if containers.returncode:
-            raise AdmissionHold("shared_fleet_inventory_unavailable")
-        if containers.stdout.strip():
-            raise AdmissionHold("shared_fleet_busy")
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise AdmissionHold("shared_fleet_inventory_unavailable") from exc
+    if fleet.stdout.strip() != "inactive":
+        raise AdmissionHold("shared_fleet_busy")
+    detached_fleet_quiescent()
     available = next(int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:")) // 1024
     required = 5500 if candidate.role == "security" else 3200
     if available < required:
@@ -404,6 +499,15 @@ def runner_job(candidate, controls):
     registered_id = None
     process = None
     issues = []
+    job_success_verified = False
+    interruption = None
+
+    def record_cleanup_error(exc, reason):
+        nonlocal interruption
+        issues.append(reason)
+        if not isinstance(exc, Exception) and interruption is None:
+            interruption = exc
+
     try:
         response = gh(f"{REPO_SLUG}/actions/runners/generate-jitconfig", "POST", {
             "name": name, "runner_group_id": 1,
@@ -459,43 +563,61 @@ def runner_job(candidate, controls):
             issues.append("github_job_not_successful")
         if process.poll() != 0:
             issues.append("runner_exit_not_zero")
+        # A successful job still requires subsequent independently verified
+        # cleanup; unexpected process interruption is durably held.
+        job_success_verified = not issues
     except BaseException as exc:
-        # An abnormal termination never yields a successful runner receipt;
-        # finally still attempts ownership-checked cleanup.
-        issues.append(type(exc).__name__)
+        issues.append(("execution_interrupted_" if not isinstance(exc, Exception)
+                       else "execution_error_") + type(exc).__name__)
         if not isinstance(exc, Exception):
-            raise
+            interruption = exc
     finally:
         # A known runner identity is necessary to deregister; only owned Docker
         # labels may be touched. Cleanup errors always prevent a passing receipt.
         for child in (worker, net):
             try:
                 stop_owned(child, name)
-            except Exception:
-                issues.append("owned_cleanup_unverified")
+            except BaseException as exc:
+                record_cleanup_error(exc, "owned_cleanup_unverified")
         if process is not None:
             try:
                 process.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 issues.append("worker_process_reaping_unverified")
+            except BaseException as exc:
+                record_cleanup_error(exc, "worker_process_reaping_unverified")
         try:
             # The POST may have succeeded without returning a complete response.
             # Resolve ONLY this exact owned name+labels, then independently prove
             # absence. Cleanup is a hold when identity or inventory is ambiguous.
             current_id = lookup_owned_runner(name, candidate.label, registered_id,
                                              allow_busy=True)
+            if registered_id is None:
+                # An uncertain POST is never repeated. Retain independently
+                # observed identity/absence to support later reconciliation,
+                # without treating safe cleanup as job success.
+                if current_id is None:
+                    receipt["uncertain_registration_absent"] = True
+                else:
+                    registered_id = current_id
+                    receipt["runner_id"] = current_id
+                    receipt["uncertain_registration_matched"] = True
             if current_id is not None:
                 try:
                     gh(f"{REPO_SLUG}/actions/runners/{current_id}", "DELETE")
                 except Exception:
                     pass  # Need independent absence readback, not DELETE success.
             runner_absent_verified(registered_id or current_id, name)
-        except Exception:
-            issues.append("runner_deregistration_unverified")
+        except BaseException as exc:
+            record_cleanup_error(exc, "runner_deregistration_unverified")
         receipt["issues"] = issues
-        receipt["state"] = "passed" if not issues else "held"
+        receipt["state"] = ("passed" if job_success_verified and not issues
+                            and interruption is None else "held")
         receipt["finished_at"] = now()
         atomic(target / "receipt.json", receipt)
+        if interruption is not None:
+            # Preserve the original interruption after its durable held receipt.
+            raise interruption
     return {"run_id": candidate.run_id, "job_id": candidate.job_id,
             "state": receipt["state"], "issues": issues, "receipt": str(target / "receipt.json")}
 

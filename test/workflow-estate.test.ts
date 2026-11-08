@@ -4,7 +4,12 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyRunner, inspectEstate, compareRegistry } from "../scripts/ci/workflow-estate.mjs";
+import {
+  classifyRunner,
+  classifyExecutionBoundary,
+  inspectEstate,
+  compareRegistry,
+} from "../scripts/ci/workflow-estate.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -87,52 +92,132 @@ test("source byte changes invalidate the pinned hash", () => {
   }
 });
 
-test("workflow-level secrets and environment approvals reach every inherited job", () => {
-  const estate = inspectEstate(root);
-  for (const jobId of ["receipt", "capacity"]) {
-    const record = estate.jobs.find(
-      (j) => j.workflow === ".github/workflows/assist.yml" && j.id === jobId,
-    );
-    assert.ok(record, jobId);
-    assert.ok(record.risks.includes("workflow_secret_inherited"), jobId);
-  }
-  const dir = mkdtempSync(path.join(tmpdir(), "clawsweeper-estate-inheritance-"));
+test("workflow-scoped secrets are inherited by jobs without direct secret references", () => {
+  const base = mkdtempSync(path.join(tmpdir(), "clawsweeper-workflow-inherited-"));
   try {
-    const folder = path.join(dir, ".github/workflows");
-    mkdirSync(folder, { recursive: true });
+    const dir = path.join(base, ".github/workflows");
+    mkdirSync(dir, { recursive: true });
     writeFileSync(
-      path.join(folder, "probe.yml"),
+      path.join(dir, "inherited.yml"),
       [
-        "name: Inherited trust",
-        "on: [workflow_dispatch]",
+        "on: [push]",
         "env:",
-        "  PROVIDER: ${{ secrets.PROVIDER_KEY }}",
+        '  TOKEN: "${{ secrets.TOP_SECRET }}"',
         "jobs:",
-        "  fresh:",
+        "  bare:",
         "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: echo safe",
-        "  environment-bound:",
-        "    runs-on: ubuntu-latest",
-        "    environment: production",
-        "    steps:",
-        "      - run: echo safe",
-        "  delegates:",
-        "    uses: owner/repo/.github/workflows/gated.yml@main",
-        "    secrets: inherit",
-        "",
-      ].join("\n"),
+        "    steps: [{ run: 'echo ok' }]",
+      ].join("\n") + "\n",
     );
-    const inventory = inspectEstate(dir);
-    assert.equal(inventory.summary.jobs, 3);
-    const delegated = inventory.jobs.find((j) => j.id === "delegates");
-    assert.ok(delegated?.risks.includes("reusable_secrets_inherit"));
-    const fresh = inventory.jobs.find((j) => j.id === "fresh");
-    const protectedJob = inventory.jobs.find((j) => j.id === "environment-bound");
-    assert.ok(fresh?.risks.includes("workflow_secret_inherited"));
-    assert.ok(protectedJob?.risks.includes("workflow_secret_inherited"));
-    assert.ok(protectedJob?.risks.includes("environment_scoped"));
+    const observed = inspectEstate(base);
+    assert.deepEqual(observed.jobs[0].risks, ["workflow_secret_reference"]);
+    assert.deepEqual(observed.jobs[0].needs, []);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("sensitive needs propagate transitively but not to unrelated jobs", () => {
+  const base = mkdtempSync(path.join(tmpdir(), "clawsweeper-needs-"));
+  try {
+    const dir = path.join(base, ".github/workflows");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "chain.yml"),
+      [
+        "on: [push]",
+        "jobs:",
+        "  origin:",
+        "    runs-on: ubuntu-latest",
+        "    permissions: { contents: write }",
+        "    steps: [{ run: 'echo origin' }]",
+        "  middle:",
+        "    needs: origin",
+        "    runs-on: ubuntu-latest",
+        "    steps: [{ run: 'echo middle' }]",
+        "  final:",
+        "    needs: [middle]",
+        "    runs-on: ubuntu-latest",
+        "    steps: [{ run: 'echo final' }]",
+        "  unrelated:",
+        "    runs-on: ubuntu-latest",
+        "    steps: [{ run: 'echo unrelated' }]",
+      ].join("\n") + "\n",
+    );
+    const byId = new Map(inspectEstate(base).jobs.map((job) => [job.id, job]));
+    assert.ok(byId.get("origin").risks.includes("write_permission"));
+    assert.ok(byId.get("middle").risks.includes("sensitive_upstream_dependency"));
+    assert.ok(byId.get("final").risks.includes("sensitive_upstream_dependency"));
+    assert.deepEqual(byId.get("unrelated").risks, []);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("unknown and cyclic needs fail closed instead of marking jobs safe", () => {
+  const base = mkdtempSync(path.join(tmpdir(), "clawsweeper-invalid-needs-"));
+  try {
+    const dir = path.join(base, ".github/workflows");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "invalid.yml");
+    const prefix = ["on: [push]", "jobs:", "  a:", "    runs-on: ubuntu-latest"];
+    writeFileSync(file, [...prefix, "    needs: missing"].join("\n") + "\n");
+    assert.throws(() => inspectEstate(base), /Unknown needs dependency/);
+    writeFileSync(
+      file,
+      [...prefix, "    needs: b", "  b:", "    runs-on: ubuntu-latest", "    needs: a"].join("\n") +
+        "\n",
+    );
+    assert.throws(() => inspectEstate(base), /Cyclic needs dependency/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("every estate job has an explicit default-deny execution boundary", () => {
+  const observed = inspectEstate(root);
+  assert.equal(
+    Object.values(observed.execution_boundaries).reduce((a, b) => a + b, 0),
+    observed.summary.jobs,
+  );
+  assert.ok(
+    observed.jobs.every((job) => job.execution_boundary && !/accepted|approved/.test(job.status)),
+  );
+  const crabbox = observed.jobs.filter((job) => job.workflow.endsWith("/crabbox-hydrate.yml"));
+  assert.equal(crabbox.length, 1);
+  assert.equal(crabbox[0].execution_boundary, "external_crabbox_ephemeral");
+  assert.equal(crabbox[0].status, "external_ephemeral_not_generic_jit");
+  assert.ok(crabbox[0].runs_on.includes("crabbox"));
+});
+
+test("sensitive, native Windows and dynamic jobs never become generic read-only jobs", () => {
+  const fixture = (changes) => ({
+    kind: "github_hosted",
+    workflow: ".github/workflows/example.yml",
+    runs_on: "ubuntu-latest",
+    risks: [],
+    ...changes,
+  });
+  assert.equal(
+    classifyExecutionBoundary(fixture({ runs_on: "windows-2025", risks: ["write_permission"] })),
+    "genuine_windows_required",
+  );
+  assert.equal(
+    classifyExecutionBoundary(fixture({ risks: ["sensitive_upstream_dependency"] })),
+    "guarded_sensitive_effects",
+  );
+  assert.equal(
+    classifyExecutionBoundary(fixture({ kind: "dynamic_or_other", runs_on: "${{ matrix.os }}" })),
+    "dynamic_runner_requires_review",
+  );
+  assert.equal(
+    classifyExecutionBoundary(
+      fixture({ kind: "local_label", runs_on: ["self-hosted", "crabbox"] }),
+    ),
+    "external_crabbox_ephemeral",
+  );
+  assert.equal(
+    classifyExecutionBoundary(fixture({ workflow: ".github/workflows/codeql.yml" })),
+    "dedicated_codeql_security",
+  );
 });

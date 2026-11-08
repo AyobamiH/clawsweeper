@@ -41,7 +41,32 @@ class PolicyTests(unittest.TestCase):
                 "repo": policy.REPOSITORY, "enabled_roles": ["security"],
                 "allowed_branches": ["feature"], "max_jobs_per_cycle": 1}))
 
-    def test_privileged_pr_target_uses_pinned_base_not_incoming_pr_branch(self):
+    def test_privileged_manual_dispatch_is_owner_only_for_every_registered_slot(self):
+        slots = [(slot, path, name) for (role, slot), (path, name) in policy.WORKFLOWS.items()
+                 if role == "ops" and "workflow_dispatch" in policy.EVENTS[(role, slot)]]
+        self.assertGreaterEqual(len(slots), 5)
+        for slot, path, name in slots:
+            with self.subTest(slot=slot, actor="AyobamiH"):
+                result = policy.classify(
+                    run(path, event="workflow_dispatch", branch="main", actor="AyobamiH"),
+                    job("ops", slot, name))
+                self.assertEqual(result.slot, slot)
+            for actor in ("external", "github-actions[bot]", "", "ayobamih"):
+                with self.subTest(slot=slot, actor=actor):
+                    denial = ("untrusted_operations_source" if slot in ("provision", "cleanup")
+                              else "untrusted_operations_dispatch_actor")
+                    with self.assertRaisesRegex(policy.AdmissionHold, denial):
+                        policy.classify(
+                            run(path, event="workflow_dispatch", branch="main", actor=actor),
+                            job("ops", slot, name))
+            with self.subTest(slot=slot, actor="missing"):
+                missing = run(path, event="workflow_dispatch", branch="main")
+                missing["actor"] = {}
+                denial = ("untrusted_operations_source" if slot in ("provision", "cleanup")
+                          else "untrusted_operations_dispatch_actor")
+                with self.assertRaisesRegex(policy.AdmissionHold, denial):
+                    policy.classify(missing, job("ops", slot, name))
+
         c = policy.classify(run(".github/workflows/clawsweeper-dispatch.yml",
                                 "pull_request_target", branch="outside-contributor", actor="external"),
                             job("ops", "dispatch", "dispatch"))

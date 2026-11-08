@@ -31,7 +31,7 @@ concurrency:
 jobs:
   notify:
     name: Summarize maintainer report
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-notify"]
     timeout-minutes: 10
     steps:
       - name: Create maintainer repo token

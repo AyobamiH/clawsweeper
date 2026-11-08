@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   launch:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-launch"]
     timeout-minutes: 10
     steps:
       - name: Create scoped runner and dispatch token
@@ -68,8 +68,9 @@ jobs:
       runner: ${{ steps.launch.outputs.runner }}
       attempt: ${{ steps.launch.outputs.attempt }}
   validate:
+    if: ${{ needs.launch.result == 'success' && needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner != '' }}
     needs: launch
-    runs-on: ${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'ubuntu-latest' }}
+    runs-on: ${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 20
     steps:
       - name: Require fresh fixture compute for this attempt
@@ -136,7 +137,7 @@ jobs:
       - launch
       - validate
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup"]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7

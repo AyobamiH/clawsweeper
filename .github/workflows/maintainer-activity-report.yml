@@ -52,7 +52,7 @@ jobs:
   generate:
     name: Generate maintainer reports
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.generate }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-generate"]
     timeout-minutes: 45
     outputs:
       maintainers_sha: ${{ steps.maintainers-base.outputs.sha }}
@@ -146,7 +146,7 @@ jobs:
     name: Publish maintainer reports
     needs: generate
     if: ${{ always() && needs.generate.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-publish"]
     timeout-minutes: 15
     steps:
       - name: Check out ClawSweeper
@@ -216,7 +216,7 @@ jobs:
           needs.generate.result == 'skipped'
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-deploy"]
     timeout-minutes: 20
     steps:
       - name: Create maintainer repo read token

@@ -217,3 +217,67 @@ test("GitHub matching refs returns only exact note identity and bounds ambiguity
   assert.throws(() => exactMatchingReference(ref, null), /unbounded_comment_claim_refs/);
   assert.throws(() => exactMatchingReference(ref, [record, record]), /ambiguous_comment_claim_ref/);
 });
+
+test("comment markers compare exact captured digits rather than CLI-built regex source", async () => {
+  const examples = [
+    {
+      effect: "pr_ack",
+      sourceId: 41,
+      number: 41,
+      matched: "<!-- clawsweeper-pr-ack:ready_for_review item=41 -->",
+      notMatched: [
+        "<!-- clawsweeper-pr-ack:opened item=410 -->",
+        "<!-- clawsweeper-pr-ack:opened item=041 -->",
+        "<!-- clawsweeper-pr-ack:opened item=4 -->",
+      ],
+    },
+    {
+      effect: "command_status",
+      sourceId: 182,
+      number: 41,
+      matched: "<!-- clawsweeper-command-ack:182 -->",
+      notMatched: [
+        "<!-- clawsweeper-command-ack:1820 -->",
+        "<!-- clawsweeper-command-ack:0182 -->",
+        "<!-- clawsweeper-command-ack:18 -->",
+      ],
+    },
+  ];
+  for (const item of examples) {
+    const payload = {
+      repo: input.repo,
+      number: item.number,
+      sourceId: item.sourceId,
+      effect: item.effect,
+    };
+    assert.equal(
+      await findExistingCommentMarker(payload, async () => [{ body: item.notMatched.join("\n") }]),
+      "absent",
+    );
+    assert.equal(
+      await findExistingCommentMarker(payload, async () => [
+        { body: `prefix\n${item.matched}\npostfix` },
+      ]),
+      "present",
+    );
+  }
+});
+
+test("adversarial comment marker identity is rejected before readback", async () => {
+  let calls = 0;
+  await assert.rejects(
+    findExistingCommentMarker({ ...input, sourceId: "182(?:.*)" }, async () => {
+      calls++;
+      return [];
+    }),
+    /invalid_source_id/,
+  );
+  await assert.rejects(
+    findExistingCommentMarker({ ...input, number: "41|999", effect: "pr_ack" }, async () => {
+      calls++;
+      return [];
+    }),
+    /invalid_item_number/,
+  );
+  assert.equal(calls, 0);
+});
