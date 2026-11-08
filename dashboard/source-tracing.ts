@@ -52,8 +52,7 @@ export function traceScopeForRequest(request: Request): SourceTraceScope | null 
   const method = request.method;
   if (method === "GET" && path === "/api/health") return "http.health";
   if (method === "GET" && path === "/api/status") return "http.status";
-  if (method === "GET" && path === "/api/review-observability")
-    return "http.review_observability";
+  if (method === "GET" && path === "/api/review-observability") return "http.review_observability";
   if (method === "POST" && path === "/github/webhook") return "http.github_webhook";
   if (method === "POST" && path === "/api/events") return "http.event_intake";
   if (method === "POST" && path.startsWith("/internal/exact-review/"))

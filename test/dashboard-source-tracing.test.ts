@@ -23,10 +23,18 @@ test("trace scope is a strict method and path allowlist without query strings", 
   const cases = [
     ["GET", "https://status.example/api/health?token=secret", "http.health"],
     ["GET", "https://status.example/api/status?private=abc", "http.status"],
-    ["GET", "https://status.example/api/review-observability?repo=secret", "http.review_observability"],
+    [
+      "GET",
+      "https://status.example/api/review-observability?repo=secret",
+      "http.review_observability",
+    ],
     ["POST", "https://status.example/github/webhook?id=private", "http.github_webhook"],
     ["POST", "https://status.example/api/events?token=private", "http.event_intake"],
-    ["POST", "https://status.example/internal/exact-review/sensitive/a", "http.exact_review_internal"],
+    [
+      "POST",
+      "https://status.example/internal/exact-review/sensitive/a",
+      "http.exact_review_internal",
+    ],
     ["GET", "https://status.example/internal/exact-review/sensitive/a", null],
     ["POST", "https://status.example/api/health", null],
     ["GET", "https://status.example/account/private?id=3", null],
@@ -39,7 +47,11 @@ test("trace scope is a strict method and path allowlist without query strings", 
 test("tracing remains disabled by default; callback executes once", async () => {
   let calls = 0;
   const ctx: SourceTraceContext = {
-    tracing: { enterSpan() { throw new Error("should-not-be-called"); } },
+    tracing: {
+      enterSpan() {
+        throw new Error("should-not-be-called");
+      },
+    },
   };
   const result = await withSourceTrace(disabled, ctx, "http.health", async () => {
     calls++;
@@ -81,21 +93,32 @@ test("native span contains only approved non-sensitive static source attributes"
       enterSpan(name, action) {
         const attributes: Record<string, unknown> = {};
         spans.push({ name, attributes });
-        return action({ setAttribute(key, value) { attributes[key] = value; } });
+        return action({
+          setAttribute(key, value) {
+            attributes[key] = value;
+          },
+        });
       },
     },
   };
-  const result = await withSourceTrace(enabled, ctx, "http.github_webhook", async () => "published-safe");
+  const result = await withSourceTrace(
+    enabled,
+    ctx,
+    "http.github_webhook",
+    async () => "published-safe",
+  );
   assert.equal(result, "published-safe");
-  assert.deepEqual(spans, [{
-    name: "clawsweeper.http.github_webhook",
-    attributes: {
-      "clawsweeper.source_revision_claim": SOURCE_SHA,
-      "clawsweeper.module": SOURCE_TRACE_MODULE,
-      "clawsweeper.route_family": "http.github_webhook",
-      "clawsweeper.trace_schema": SOURCE_TRACE_SCHEMA,
+  assert.deepEqual(spans, [
+    {
+      name: "clawsweeper.http.github_webhook",
+      attributes: {
+        "clawsweeper.source_revision_claim": SOURCE_SHA,
+        "clawsweeper.module": SOURCE_TRACE_MODULE,
+        "clawsweeper.route_family": "http.github_webhook",
+        "clawsweeper.trace_schema": SOURCE_TRACE_SCHEMA,
+      },
     },
-  }]);
+  ]);
   assert.ok(!JSON.stringify(spans).includes("token="));
   assert.ok(!JSON.stringify(spans).includes("private"));
 });
@@ -103,7 +126,11 @@ test("native span contains only approved non-sensitive static source attributes"
 test("tracing API failure before invocation falls back once", async () => {
   let invocations = 0;
   const ctx: SourceTraceContext = {
-    tracing: { enterSpan() { throw new Error("backend unavailable before invocation"); } },
+    tracing: {
+      enterSpan() {
+        throw new Error("backend unavailable before invocation");
+      },
+    },
   };
   const value = await withSourceTrace(enabled, ctx, "http.health", async () => {
     invocations++;
@@ -155,15 +182,21 @@ test("business sync errors cannot be replaced by tracing backend errors", () => 
   const ctx: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
-        try { action({ setAttribute() {} }); } catch {}
+        try {
+          action({ setAttribute() {} });
+        } catch {}
         throw new Error("tracing-backend-error");
       },
     },
   };
-  assert.throws(() => withSourceTrace(enabled, ctx, "http.github_webhook", () => {
-    calls++;
-    throw businessFailure;
-  }), (error: unknown) => error === businessFailure);
+  assert.throws(
+    () =>
+      withSourceTrace(enabled, ctx, "http.github_webhook", () => {
+        calls++;
+        throw businessFailure;
+      }),
+    (error: unknown) => error === businessFailure,
+  );
   assert.equal(calls, 1);
 });
 
@@ -171,12 +204,20 @@ test("business logic errors propagate unchanged and cannot trigger retries", asy
   const failure = new Error("expected business failure");
   let calls = 0;
   const ctx: SourceTraceContext = {
-    tracing: { enterSpan(_name, action) { return action({ setAttribute() {} }); } },
+    tracing: {
+      enterSpan(_name, action) {
+        return action({ setAttribute() {} });
+      },
+    },
   };
-  await assert.rejects(async () => withSourceTrace(enabled, ctx, "http.exact_review_internal", async () => {
-    calls++;
-    throw failure;
-  }), (error: unknown) => error === failure);
+  await assert.rejects(
+    async () =>
+      withSourceTrace(enabled, ctx, "http.exact_review_internal", async () => {
+        calls++;
+        throw failure;
+      }),
+    (error: unknown) => error === failure,
+  );
   assert.equal(calls, 1);
 });
 
@@ -185,7 +226,11 @@ test("tracer attribute errors cannot change the original response", async () => 
   const ctx: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
-        return action({ setAttribute() { throw new Error("invalid attribute"); } });
+        return action({
+          setAttribute() {
+            throw new Error("invalid attribute");
+          },
+        });
       },
     },
   };
@@ -200,17 +245,23 @@ test("tracer attribute errors cannot change the original response", async () => 
 
 test("a scheduled waitUntil promise stays active until its actual operation settles", async () => {
   let release!: (value: string) => void;
-  const original = new Promise<string>((resolve) => { release = resolve; });
+  const original = new Promise<string>((resolve) => {
+    release = resolve;
+  });
   let spanResolved = false;
   const ctx: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
         const result = action({ setAttribute() {} });
-        return Promise.resolve(result).finally(() => { spanResolved = true; });
+        return Promise.resolve(result).finally(() => {
+          spanResolved = true;
+        });
       },
     },
   };
-  const maintenance = Promise.resolve(withSourceTrace(enabled, ctx, "cron.health_sample", () => original));
+  const maintenance = Promise.resolve(
+    withSourceTrace(enabled, ctx, "cron.health_sample", () => original),
+  );
   assert.equal(spanResolved, false);
   release("complete");
   assert.equal(await maintenance, "complete");
@@ -219,7 +270,11 @@ test("a scheduled waitUntil promise stays active until its actual operation sett
 
 test("unclassified routes never create custom spans", async () => {
   const ctx: SourceTraceContext = {
-    tracing: { enterSpan() { throw Error("attempted trace of unknown route"); } },
+    tracing: {
+      enterSpan() {
+        throw Error("attempted trace of unknown route");
+      },
+    },
   };
   assert.equal(await withSourceTrace(enabled, ctx, null, () => 404), 404);
 });
@@ -245,8 +300,8 @@ test("deferred tracing callback still executes the business operation exactly on
   let executed = 0;
   const ctx: SourceTraceContext = {
     tracing: {
-      enterSpan(_name,action) {
-        return Promise.resolve().then(() => action({setAttribute() {}}));
+      enterSpan(_name, action) {
+        return Promise.resolve().then(() => action({ setAttribute() {} }));
       },
     },
   };
@@ -267,7 +322,7 @@ test("throwing ctx.tracing getter cannot suppress the original business callback
   };
   const result = await withSourceTrace(enabled, context, "http.health", () => {
     calls++;
-    return new Response("business-response", {status: 200});
+    return new Response("business-response", { status: 200 });
   });
   assert.equal(result.status, 200);
   assert.equal(await result.text(), "business-response");
@@ -278,7 +333,9 @@ test("throwing ctx.tracing.enterSpan getter cannot suppress the business callbac
   let calls = 0;
   const context: SourceTraceContext = {
     tracing: Object.defineProperty({}, "enterSpan", {
-      get(): never { throw new Error("trace capability getter broke"); },
+      get(): never {
+        throw new Error("trace capability getter broke");
+      },
     }) as SourceTraceApi,
   };
   const result = await withSourceTrace(enabled, context, "http.github_webhook", () => {
@@ -295,7 +352,7 @@ test("a deferred tracing callback after synchronous fallback must reuse memoised
   const context: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
-        callback = () => action({setAttribute() {}});
+        callback = () => action({ setAttribute() {} });
         return undefined as never;
       },
     },
@@ -315,11 +372,13 @@ test("a deferred tracing callback after synchronous fallback must reuse memoised
 test("a Promise-delayed tracing callback cannot cause a second business invocation", async () => {
   let calls = 0;
   let resolveDeferred!: () => void;
-  const pending = new Promise<void>((resolve) => { resolveDeferred = resolve; });
+  const pending = new Promise<void>((resolve) => {
+    resolveDeferred = resolve;
+  });
   const context: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
-        return pending.then(() => action({setAttribute() {}}));
+        return pending.then(() => action({ setAttribute() {} }));
       },
     },
   };
@@ -340,9 +399,11 @@ test("a thenable with throwing then getter cannot replace a successful callback"
   const context: SourceTraceContext = {
     tracing: {
       enterSpan(_name, action) {
-        action({setAttribute() {}});
+        action({ setAttribute() {} });
         return Object.defineProperty({}, "then", {
-          get(): never { throw new Error("bad thenable"); },
+          get(): never {
+            throw new Error("bad thenable");
+          },
         }) as Promise<unknown>;
       },
     },
@@ -355,15 +416,17 @@ test("a thenable with throwing then getter cannot replace a successful callback"
   assert.equal(calls, 1);
 });
 
-test("throwing optional tracing configuration accessor cannot suppress business operation",()=>{
- let calls=0;
- const env=Object.defineProperty({}, "CLAWSWEEPER_ARCH_TRACE_ENABLED",{
-  get():never{throw new Error("unavailable optional trace configuration");},
- }) as Record<string,unknown>;
- const result=withSourceTrace(env,undefined,"http.health",()=>{
-  calls++;
-  return 200;
- });
- assert.equal(result,200);
- assert.equal(calls,1);
+test("throwing optional tracing configuration accessor cannot suppress business operation", () => {
+  let calls = 0;
+  const env = Object.defineProperty({}, "CLAWSWEEPER_ARCH_TRACE_ENABLED", {
+    get(): never {
+      throw new Error("unavailable optional trace configuration");
+    },
+  }) as Record<string, unknown>;
+  const result = withSourceTrace(env, undefined, "http.health", () => {
+    calls++;
+    return 200;
+  });
+  assert.equal(result, 200);
+  assert.equal(calls, 1);
 });
