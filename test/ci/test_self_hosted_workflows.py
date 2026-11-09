@@ -287,6 +287,163 @@ class PolicyTests(unittest.TestCase):
             policy.category_enabled(c, {"enabled": True, "repo": policy.REPOSITORY,
                 "enabled_roles": ["isolation"], "allowed_branches": ["feature"]})
 
+    def test_rootless_e2e_requires_exact_owner_run_and_nested_image(self):
+        info = run(".github/workflows/automerge-e2e.yml", actor="AyobamiH")
+        info["pull_requests"][0]["base"]["sha"] = "b" * 40
+        candidate = policy.classify(
+            info, job("isolation", "e2e", "production automerge flow"))
+        self.assertEqual((candidate.pr_number, candidate.trusted_base_sha),
+                         (123, "b" * 40))
+        valid = {
+            "enabled": True, "repo": policy.REPOSITORY,
+            "enabled_roles": ["isolation"], "operations_accepted": False,
+            "allowed_run_ids": [candidate.run_id], "allowed_branches": [candidate.branch],
+            "max_jobs_per_cycle": 1, "isolation_accepted": True,
+            "isolation_head_sha": candidate.sha,
+            "isolation_base_sha": candidate.trusted_base_sha,
+            "isolation_pr_number": candidate.pr_number,
+            "isolation_image_sha256": "sha256:" + "f" * 64,
+            "isolation_workflow_sha256": "d" * 64,
+        }
+        self.assertTrue(policy.category_enabled(candidate, valid))
+        invalid = (
+            ({"isolation_accepted": False}, "nested_docker_isolation_not_proven"),
+            ({"enabled_roles": ["security", "isolation"]}, "isolation_mixed_authority"),
+            ({"operations_accepted": True}, "isolation_mixed_authority"),
+            ({"allowed_run_ids": [candidate.run_id, 123]}, "isolation_run_not_exclusive"),
+            ({"isolation_head_sha": "c" * 40}, "isolation_head_not_pinned"),
+            ({"isolation_base_sha": "c" * 40}, "isolation_pr_ancestry_not_pinned"),
+            ({"isolation_pr_number": 124}, "isolation_pr_ancestry_not_pinned"),
+            ({"isolation_image_sha256": "latest"}, "isolation_image_not_pinned"),
+            ({"isolation_workflow_sha256": None}, "isolation_workflow_not_pinned"),
+            ({"allowed_branches": ["main"]}, "branch_not_authorised"),
+        )
+        for override, refusal in invalid:
+            with self.subTest(override=override), self.assertRaisesRegex(
+                policy.AdmissionHold, refusal
+            ):
+                policy.category_enabled(candidate, {**valid, **override})
+
+    def test_rootless_e2e_rejects_foreign_pr_and_untrusted_actor(self):
+        fixture = run(".github/workflows/automerge-e2e.yml", actor="external")
+        j = job("isolation", "e2e", "production automerge flow")
+        with self.assertRaisesRegex(policy.AdmissionHold, "untrusted_isolation_actor"):
+            policy.classify(fixture, j)
+        fixture["actor"]["login"] = "AyobamiH"
+        for change in ("head_repo", "base_repo", "head_sha", "head_ref", "base_missing"):
+            bad = json.loads(json.dumps(fixture))
+            if change == "head_repo":
+                bad["pull_requests"][0]["head"]["repo"]["id"] = 99
+            elif change == "base_repo":
+                bad["pull_requests"][0]["base"]["repo"]["id"] = 99
+            elif change == "head_sha":
+                bad["pull_requests"][0]["head"]["sha"] = "b" * 40
+            elif change == "head_ref":
+                bad["pull_requests"][0]["head"]["ref"] = "other"
+            elif change == "base_missing":
+                bad["pull_requests"] = []
+            with self.subTest(change=change), self.assertRaisesRegex(
+                policy.AdmissionHold, "isolation_pr_source_unverifiable"
+            ):
+                policy.classify(bad, j)
+        main = run(".github/workflows/automerge-e2e.yml",
+                   event="push", branch="main", actor="AyobamiH")
+        current = policy.classify(main, j)
+        with self.assertRaisesRegex(policy.AdmissionHold, "isolation_non_pr_unaccepted"):
+            policy.category_enabled(current, {
+                "enabled": True, "repo": policy.REPOSITORY,
+                "enabled_roles": ["isolation"], "allowed_run_ids": [current.run_id],
+                "allowed_branches": ["main"], "isolation_accepted": True,
+                "isolation_head_sha": SHA, "isolation_image_sha256": "sha256:"+"f"*64,
+                "isolation_workflow_sha256": "d"*64,
+                "max_jobs_per_cycle": 1,
+            })
+
+    def test_rootless_e2e_pins_actual_pr_merge_and_workflow_bytes(self):
+        import base64
+        import hashlib
+        payload = b"name: reviewed automerge e2e\n"
+        digest = hashlib.sha256(payload).hexdigest()
+        info = run(".github/workflows/automerge-e2e.yml", actor="AyobamiH")
+        info["pull_requests"][0]["base"]["sha"] = "b" * 40
+        c = policy.classify(info, job("isolation", "e2e", "production automerge flow"))
+        state = {"head": SHA, "verified": True,
+                 "base_ref_sha": "b" * 40, "head_ref_sha": SHA,
+                 "parents": ["b" * 40, SHA], "workflow": payload}
+        def response(url):
+            if url.endswith("/pulls/123"):
+                return {"state": "open",
+                        "head": {"sha": state["head"], "ref": "feature",
+                                 "repo": {"full_name": policy.REPOSITORY}},
+                        "base": {"sha": "b" * 40, "ref": "main",
+                                 "repo": {"full_name": policy.REPOSITORY}}}
+            if url.endswith("/git/ref/heads/main"):
+                return {"object": {"sha": state["base_ref_sha"]}}
+            if url.endswith("/git/ref/heads/feature"):
+                return {"object": {"sha": state["head_ref_sha"]}}
+            if url.endswith("/commits/" + SHA):
+                return {"sha": SHA, "commit": {"verification": {"verified": state["verified"]}}}
+            if url.endswith("/git/ref/pull/123/merge"):
+                return {"object": {"sha": "c" * 40}}
+            if url.endswith("/git/commits/" + "c" * 40):
+                return {"parents": [{"sha": p} for p in state["parents"]]}
+            if "/contents/.github/workflows/automerge-e2e.yml?ref=" in url:
+                return {"content": base64.b64encode(state["workflow"]).decode()}
+            raise AssertionError("unapproved GitHub lookup: " + url)
+        source_controls = {"isolation_workflow_sha256": digest,
+                           "isolation_base_ref": "main"}
+        with patch.object(executor, "gh", side_effect=response):
+            self.assertTrue(executor.source_authorised(c, source_controls))
+            with self.assertRaisesRegex(policy.AdmissionHold,
+                                        "isolation_base_ref_not_pinned"):
+                executor.source_authorised(c, {"isolation_workflow_sha256": digest})
+            for key, value, refusal in (
+                ("head", "d" * 40, "isolation_pr_head_or_base_moved"),
+                ("base_ref_sha", "d" * 40, "isolation_base_branch_drift"),
+                ("head_ref_sha", "d" * 40, "isolation_head_branch_drift"),
+                ("verified", False, "isolation_commit_signature_unverified"),
+                ("parents", [SHA, "b" * 40], "isolation_merge_parents_changed"),
+                ("workflow", b"modified workflow\n", "isolation_workflow_source_drift"),
+            ):
+                with self.subTest(key=key):
+                    previous = state[key]
+                    state[key] = value
+                    try:
+                        with self.assertRaisesRegex(policy.AdmissionHold, refusal):
+                            executor.source_authorised(c, source_controls)
+                    finally:
+                        state[key] = previous
+            with self.assertRaisesRegex(policy.AdmissionHold,
+                                        "isolation_workflow_not_pinned"):
+                executor.source_authorised(c, {})
+        with patch.object(executor, "gh", side_effect=RuntimeError("network")):
+            with self.assertRaisesRegex(policy.AdmissionHold,
+                                        "isolation_source_readback_unavailable"):
+                executor.source_authorised(c, source_controls)
+
+    def test_rootless_e2e_uses_only_pinned_image_and_full_duration(self):
+        c = policy.classify(
+            run(".github/workflows/automerge-e2e.yml", actor="AyobamiH"),
+            job("isolation", "e2e", "production automerge flow"))
+        with self.assertRaisesRegex(policy.AdmissionHold, "isolation_image_not_pinned"):
+            executor.approved_job_image(c, {})
+        image = "sha256:" + "e" * 64
+        with patch.object(executor, "run_cli", return_value=image) as call:
+            self.assertEqual(executor.approved_job_image(
+                c, {"isolation_image_sha256": image}), image)
+            self.assertIn(executor.ISOLATION_IMAGE_NAME, call.call_args.args[0])
+        with patch.object(executor, "run_cli", return_value="sha256:"+"f"*64):
+            with self.assertRaisesRegex(policy.AdmissionHold, "isolation_image_drift"):
+                executor.approved_job_image(c, {"isolation_image_sha256": image})
+        self.assertEqual(executor.runner_limits(c), (115*60, "4g"))
+        self.assertEqual(executor.runner_limits(
+            policy.classify(run(), job())), (42*60, "4g"))
+        ops = policy.classify(
+            run(".github/workflows/clawsweeper-dispatch.yml",
+                event="issues", branch="main", actor="external"),
+            job("ops", "dispatch", "dispatch"))
+        self.assertEqual(executor.runner_limits(ops), (42*60, "2g"))
+
     def test_reject_untrusted_label_and_job(self):
         template = run()
         for change in ({"labels": ["self-hosted", "Linux", "X64", "clawsweeper-operations"]},

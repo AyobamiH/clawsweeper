@@ -206,8 +206,34 @@ def classify(run, job):
             # workflow_run are emitted against the trusted default branch even
             # when an external collaborator generated the event payload.
             raise AdmissionHold("untrusted_default_branch_source")
-    if role == "isolation" and run.get("event") != "pull_request" and branch != "main":
-        raise AdmissionHold("unexpected_e2e_branch")
+    if role == "isolation":
+        # This E2E executes PR-controlled code. It is eligible for owner-run
+        # admission only after GitHub identifies the exact same-repository PR
+        # and its immutable base/head pair; classification grants no runner.
+        if actor != "AyobamiH":
+            raise AdmissionHold("untrusted_isolation_actor")
+        if run.get("event") == "pull_request":
+            pulls = run.get("pull_requests")
+            repo_id = run.get("repository", {}).get("id")
+            if (type(repo_id) is not int or type(pulls) is not list
+                    or len(pulls) != 1 or type(pulls[0]) is not dict):
+                raise AdmissionHold("isolation_pr_source_unverifiable")
+            record = pulls[0]
+            head, base = record.get("head"), record.get("base")
+            pr_number = record.get("number")
+            if (type(pr_number) is not int or pr_number < 1
+                    or type(head) is not dict or type(base) is not dict
+                    or type(head.get("repo")) is not dict
+                    or type(base.get("repo")) is not dict
+                    or head["repo"].get("id") != repo_id
+                    or base["repo"].get("id") != repo_id
+                    or head.get("sha") != sha or head.get("ref") != branch
+                    or not SHA.fullmatch(str(base.get("sha", "")))
+                    or not isinstance(base.get("ref"), str) or not base["ref"]):
+                raise AdmissionHold("isolation_pr_source_unverifiable")
+            trusted_base_sha = base["sha"]
+        elif branch != "main":
+            raise AdmissionHold("unexpected_e2e_branch")
     return Candidate(run_id, job_id, attempt, sha, path, run["event"], role, slot,
                      unique[0], name, branch, trusted_base_sha, pr_number)
 
@@ -253,10 +279,32 @@ def category_enabled(candidate, controls):
         if (not isinstance(scoped_runs, list) or not scoped_runs or
                 candidate.run_id not in scoped_runs):
             raise AdmissionHold("run_id_not_authorised")
-    # The current image has no inner isolated Docker daemon. This lane stays
-    # held rather than using the host daemon or reducing E2E coverage.
+    # Never admit a generic CI image as an isolation runner. A rootless
+    # nested-container image, exact PR source and one owner-approved run are
+    # required; absent proof the historical default-deny remains intact.
     if candidate.role == "isolation":
-        raise AdmissionHold("nested_docker_isolation_not_proven")
+        if controls.get("isolation_accepted") is not True:
+            raise AdmissionHold("nested_docker_isolation_not_proven")
+        if (enabled != ["isolation"] or controls.get("operations_accepted") is True):
+            raise AdmissionHold("isolation_mixed_authority")
+        if not isinstance(scoped_runs, list) or scoped_runs != [candidate.run_id]:
+            raise AdmissionHold("isolation_run_not_exclusive")
+        if controls.get("isolation_head_sha") != candidate.sha:
+            raise AdmissionHold("isolation_head_not_pinned")
+        if (not isinstance(controls.get("isolation_image_sha256"), str)
+                or not re.fullmatch(r"sha256:[a-f0-9]{64}", controls["isolation_image_sha256"])):
+            raise AdmissionHold("isolation_image_not_pinned")
+        if (not isinstance(controls.get("isolation_workflow_sha256"), str)
+                or not re.fullmatch(r"[a-f0-9]{64}", controls["isolation_workflow_sha256"])):
+            raise AdmissionHold("isolation_workflow_not_pinned")
+        if candidate.event != "pull_request":
+            # Main push/dispatch parity needs its own accepted rootless event.
+            raise AdmissionHold("isolation_non_pr_unaccepted")
+        if (type(candidate.pr_number) is not int
+                or controls.get("isolation_pr_number") != candidate.pr_number
+                or not SHA.fullmatch(str(candidate.trusted_base_sha or ""))
+                or controls.get("isolation_base_sha") != candidate.trusted_base_sha):
+            raise AdmissionHold("isolation_pr_ancestry_not_pinned")
     if candidate.role == "validation":
         if controls.get("validation_accepted") is not True:
             raise AdmissionHold("validation_not_accepted")

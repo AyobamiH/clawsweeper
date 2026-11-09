@@ -33,10 +33,24 @@ FLEET_OWNER_MARKER = HOME / ".local/share/local-ci/OWNED_BY_LOCAL_CI"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
+# A disposable rootless Podman image; never the generic CI runner or the
+# host's Docker daemon. Its immutable digest must be owner-approved per run.
+ISOLATION_IMAGE_NAME = "clawsweeper-jit-isolated-web:pr109-20261108"
 NETWORK_IMAGE = "sha256:f9e6f27cf17460dfb82250c5ac94f5a829956692c2e47615a870a4ec9312b802"
 LABEL = "io.ayobamih.clawsweeper.selfhosted"
 REPO_SLUG = "repos/" + REPOSITORY
 MAX_SECONDS = 42 * 60
+# The full 14 tiny + 14 OpenClaw-shaped scenarios exceed 70 minutes on the
+# rootless owner fleet. GitHub's workflow permits 120 minutes; terminate
+# by 115 minutes to reserve five minutes for verified cleanup and deregistration.
+# Never extend the privileged/security role deadlines.
+ISOLATION_MAX_SECONDS = 115 * 60
+
+
+def runner_limits(candidate):
+    if candidate.role == "isolation":
+        return ISOLATION_MAX_SECONDS, "4g"
+    return MAX_SECONDS, "4g" if candidate.role == "security" else "2g"
 
 
 def now():
@@ -131,6 +145,62 @@ def load_controls():
 
 
 def source_authorised(candidate, controls):
+    if candidate.role == "isolation":
+        # A PR workflow can execute its synthetic merge revision, not only
+        # the reported head. Both immutable sources must match reviewed bytes.
+        import base64
+        if (candidate.event != "pull_request" or type(candidate.pr_number) is not int
+                or not SHA.fullmatch(str(candidate.trusted_base_sha or ""))):
+            raise AdmissionHold("isolation_pr_merge_unverifiable")
+        expected = controls.get("isolation_workflow_sha256")
+        if not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
+            raise AdmissionHold("isolation_workflow_not_pinned")
+        try:
+            pr = gh(f"{REPO_SLUG}/pulls/{candidate.pr_number}")
+            if (pr.get("state") != "open"
+                    or pr["head"]["sha"] != candidate.sha
+                    or pr["head"]["ref"] != candidate.branch
+                    or pr["head"]["repo"]["full_name"] != REPOSITORY
+                    or pr["base"]["sha"] != candidate.trusted_base_sha
+                    or pr["base"]["repo"]["full_name"] != REPOSITORY):
+                raise AdmissionHold("isolation_pr_head_or_base_moved")
+            base_ref = pr["base"].get("ref")
+            if (not isinstance(base_ref, str)
+                    or not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", base_ref)
+                    or ".." in base_ref or "//" in base_ref
+                    or controls.get("isolation_base_ref") != base_ref):
+                raise AdmissionHold("isolation_base_ref_not_pinned")
+            # GitHub can retain an older PR/event base SHA while refs/pull/N/merge
+            # is regenerated against the *latest* base branch. Do not admit a
+            # runner against that ambiguous history. Reconcile source first.
+            base_now = gh(f"{REPO_SLUG}/git/ref/heads/{base_ref}")
+            if base_now["object"]["sha"] != candidate.trusted_base_sha:
+                raise AdmissionHold("isolation_base_branch_drift")
+            head_now = gh(f"{REPO_SLUG}/git/ref/heads/{candidate.branch}")
+            if head_now["object"]["sha"] != candidate.sha:
+                raise AdmissionHold("isolation_head_branch_drift")
+            commit = gh(f"{REPO_SLUG}/commits/{candidate.sha}")
+            if (commit.get("sha") != candidate.sha
+                    or commit["commit"]["verification"]["verified"] is not True):
+                raise AdmissionHold("isolation_commit_signature_unverified")
+            merge_ref = gh(f"{REPO_SLUG}/git/ref/pull/{candidate.pr_number}/merge")
+            merge_sha = merge_ref["object"]["sha"]
+            if not SHA.fullmatch(str(merge_sha)):
+                raise AdmissionHold("isolation_merge_identity_unverifiable")
+            merge = gh(f"{REPO_SLUG}/git/commits/{merge_sha}")
+            if [p.get("sha") for p in merge.get("parents", [])] != [
+                candidate.trusted_base_sha, candidate.sha
+            ]:
+                raise AdmissionHold("isolation_merge_parents_changed")
+            for ref in (candidate.sha, merge_sha):
+                obj = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={ref}")
+                if hashlib.sha256(base64.b64decode(obj["content"])).hexdigest() != expected:
+                    raise AdmissionHold("isolation_workflow_source_drift")
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError) as exc:
+            if isinstance(exc, AdmissionHold):
+                raise
+            raise AdmissionHold("isolation_source_readback_unavailable") from exc
+        return True
     if candidate.role == "validation":
         # Execute untrusted PR code ONLY with immutable trusted CI instructions.
         # The workflow source and its approved hash are verified independently.
@@ -264,6 +334,15 @@ def source_authorised(candidate, controls):
 
 
 def approved_job_image(candidate, controls):
+    if candidate.role == "isolation":
+        pinned = controls.get("isolation_image_sha256")
+        if not isinstance(pinned, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", pinned):
+            raise AdmissionHold("isolation_image_not_pinned")
+        current = run_cli(["docker", "image", "inspect", ISOLATION_IMAGE_NAME,
+                           "--format", "{{.Id}}"], timeout=15).strip()
+        if current != pinned:
+            raise AdmissionHold("isolation_image_drift")
+        return pinned
     if candidate.role != "security":
         return IMAGE
     pinned = controls.get("security_image_sha256")
@@ -405,7 +484,7 @@ def capacity(candidate, controls):
         raise AdmissionHold("shared_fleet_busy")
     detached_fleet_quiescent()
     available = next(int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:")) // 1024
-    required = 5500 if candidate.role == "security" else 3200
+    required = 5500 if candidate.role in ("security", "isolation") else 3200
     if available < required:
         raise AdmissionHold("memory_reserve")
     if shutil.disk_usage(HOME).free < 20 * 1024**3:
@@ -590,7 +669,7 @@ def runner_job(candidate, controls):
             cmd = ["docker", "run", "--rm", "--interactive", "--init", "--name", worker,
                    "--label", LABEL+"="+name, "--network", "container:"+net,
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "500",
-                   "--memory", "4g" if candidate.role == "security" else "2g", "--cpus", "2", image_id,
+                   "--memory", runner_limits(candidate)[1], "--cpus", "2", image_id,
                    "bash", "-ec", 'IFS= read -r config; exec ./run.sh --jitconfig "$config"']
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logfile, stderr=subprocess.STDOUT, text=True)
             process.stdin.write(encoded + "\n")
@@ -598,7 +677,7 @@ def runner_job(candidate, controls):
             receipt.update(state="runner_started", runner_started_at=now())
             atomic(target / "receipt.json", receipt)
             try:
-                process.wait(timeout=MAX_SECONDS)
+                process.wait(timeout=runner_limits(candidate)[0])
             except subprocess.TimeoutExpired:
                 issues.append("runner_time_limit")
             receipt["runner_exit"] = process.poll()
