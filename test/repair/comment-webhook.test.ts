@@ -1026,8 +1026,23 @@ test("webhook GitHub requests have a deadline through the response body", async 
 
   let mode = "success";
   let calls = 0;
+  let pendingTimeout: AbortController | undefined;
   const server = http.createServer((request, response) => {
     calls++;
+    if (mode !== "success") {
+      // Start the simulated deadline only once the socket reaches the server.
+      // Under CI load a 50 ms deadline can fire before connection establishment,
+      // making the assertion below accidentally measure scheduler contention.
+      assert.ok(pendingTimeout);
+      const controller = pendingTimeout;
+      setTimeout(
+        () =>
+          controller.abort(
+            new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+          ),
+        50,
+      );
+    }
     if (mode === "headers") return;
     response.writeHead(200, { "content-type": "application/json" });
     if (mode === "body") {
@@ -1061,12 +1076,15 @@ test("webhook GitHub requests have a deadline through the response body", async 
   });
   t.mock.method(AbortSignal, "timeout", (ms: number) => {
     assert.equal(ms, 15_000);
-    return previousTimeout(mode === "success" ? 2_000 : 50);
+    if (mode === "success") return previousTimeout(2_000);
+    pendingTimeout = new AbortController();
+    return pendingTimeout.signal;
   });
 
   for (mode of ["success", "headers", "body"]) {
     await t.test(mode, { timeout: 3_000 }, async () => {
       calls = 0;
+      pendingTimeout = undefined;
       const result = handleGitHubWebhook({
         event: "pull_request",
         payload: {
