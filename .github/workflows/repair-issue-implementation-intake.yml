@@ -79,7 +79,7 @@ concurrency:
 
 jobs:
   intake:
-    if: ${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER != '' }}
+    if: ${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER == format('clawsweeper-ci-privileged-{0}-{1}-intake', github.run_id, github.run_attempt) }}
     runs-on: ${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 30
     steps:

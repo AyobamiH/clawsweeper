@@ -52,7 +52,7 @@ class ProvisionedRunnerCleanupContracts(unittest.TestCase):
 
     def test_intake_runner_must_be_owner_selected_not_payload_selected(self):
         section=job_body("repair-issue-implementation-intake.yml","intake")
-        self.assertIn("vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER != ''",section)
+        self.assertIn("vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER == format('clawsweeper-ci-privileged-{0}-{1}-intake', github.run_id, github.run_attempt)",section)
         self.assertIn("clawsweeper-unprovisioned-runner-held",section)
         # Inspect only the runner selector, not unrelated client payload data
         # used to process a user-authorised issue.
