@@ -12,7 +12,8 @@
   "execution_boundaries": {
     "guarded_sensitive_effects": 81,
     "isolated_container_required": 1,
-    "local_label_unverified": 4,
+    "local_label_unverified": 3,
+    "genuine_windows_required": 1,
     "dedicated_codeql_security": 1,
     "external_crabbox_ephemeral": 1
   },
@@ -410,7 +411,7 @@
       "risks": [],
       "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
       "status": "labelled_local_not_operationally_verified",
-      "execution_boundary": "local_label_unverified"
+      "execution_boundary": "genuine_windows_required"
     },
     {
       "workflow": ".github/workflows/clawsweeper-dispatch.yml",

@@ -33,7 +33,7 @@ export function classifyExecutionBoundary(job) {
   // It must never silently enter the generic ClawSweeper JIT fleet.
   if (labels.includes("crabbox")) return "external_crabbox_ephemeral";
   if (job.workflow.endsWith("/codeql.yml")) return "dedicated_codeql_security";
-  if (labels.some((label) => typeof label === "string" && /^windows-/i.test(label)))
+  if (labels.some((label) => typeof label === "string" && /^windows(?:$|-)/i.test(label)))
     return "genuine_windows_required";
   if (job.risks.includes("container_runtime") || job.workflow.endsWith("/automerge-e2e.yml"))
     return "isolated_container_required";
