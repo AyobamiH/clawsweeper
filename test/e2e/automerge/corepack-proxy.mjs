@@ -55,19 +55,36 @@ export function runE2ECorepackProxy(argsToRun, env, sourceRoot) {
   const real = env.CLAWSWEEPER_E2E_REAL_COREPACK;
   if (!real) throw new Error("CLAWSWEEPER_E2E_REAL_COREPACK is required");
   const seeded = seedHermeticE2EPnpm(argsToRun, env, sourceRoot);
-  // Images declaring hermetic E2E cannot silently switch to a registry if
-  // their pinned seed is absent. This is not a production toolchain bypass.
-  if (
-    env.CLAWSWEEPER_E2E_REQUIRE_OFFLINE_COREPACK === "1" &&
-    argsToRun[0] === "prepare" &&
-    String(argsToRun[1] ?? "").startsWith("pnpm@") &&
-    !seeded
-  ) {
-    throw new Error("pinned E2E Corepack seed unavailable");
+  // Hermetic images cannot delegate unsupported package managers or flags:
+  // Corepack may fetch registry bytes before returning even for a failed call.
+  const offlineRequired = env.CLAWSWEEPER_E2E_REQUIRE_OFFLINE_COREPACK === "1";
+  if (offlineRequired) {
+    const targetHome = String(env.COREPACK_HOME ?? "");
+    if (!/^\/tmp\/clawsweeper-target-user-[^/]+\/corepack$/.test(targetHome)) {
+      throw new Error("hermetic E2E Corepack requires disposable target home");
+    }
+    if (argsToRun[0] === "prepare") {
+      if (
+        !seeded ||
+        !(argsToRun.length === 2 || (argsToRun.length === 3 && argsToRun[2] === "--activate"))
+      ) {
+        throw new Error("pinned E2E Corepack seed unavailable");
+      }
+    } else if (argsToRun[0] === "enable") {
+      const enablePnpm =
+        (argsToRun.length === 2 && argsToRun[1] === "pnpm") ||
+        (argsToRun.length === 4 &&
+          argsToRun[1] === "--install-directory" &&
+          argsToRun[2] === path.join(targetHome, "bin") &&
+          argsToRun[3] === "pnpm");
+      if (!enablePnpm) throw new Error("unsupported hermetic E2E Corepack command");
+    } else {
+      throw new Error("unsupported hermetic E2E Corepack command");
+    }
   }
   const result = spawnSync(real, argsToRun, {
     cwd: process.cwd(),
-    env: seeded ? { ...env, COREPACK_ENABLE_NETWORK: "0" } : env,
+    env: offlineRequired || seeded ? { ...env, COREPACK_ENABLE_NETWORK: "0" } : env,
     stdio: "inherit",
   });
   if (result.error) throw result.error;
