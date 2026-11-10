@@ -89,3 +89,56 @@ general ClawSweeper JIT pool. Its dynamic checkout ref and persistent
 `~/.crabbox/actions` state prohibit interpreting its local label as evidence
 of safe generic runner equivalence. A real Crabbox owner-specific lifecycle
 review is required before any redesign or activation.
+
+
+## Exact-source execution evidence reconciliation
+
+`scripts/ci/verify_estate_execution.py` is a read-only evidence reconciler, not
+a runner controller, workflow activator or production authorisation mechanism.
+It inventories the complete manifest from an immutable Git commit and verifies
+its workflow bytes, GitHub signature and source tree before evaluating explicit
+run IDs. It never dispatches a workflow or registers, retries or removes a runner.
+
+Run it from an existing authorised checkout with the exact source revision:
+
+```sh
+python3 -B scripts/ci/verify_estate_execution.py \
+  --checkout "$PWD" \
+  --head-sha "$EXACT_SOURCE_SHA" \
+  --run-id "$EXISTING_RUN_ID" \
+  --receipt-root "$HOME/.local/share/local-ci/clawsweeper-selfhosted/receipts" \
+  --output-dir "$HOME/.local/share/local-ci/evidence/estate-execution-readback"
+```
+
+Each run is read at its exact attempt with complete, bounded pagination. Job
+identity and run attempt are read again after verification. Successful execution
+requires the original essential steps, private JIT receipt, recomputed log digest,
+matching runner identity and fresh absence of that runner and its owned containers.
+Replacement executions require fresh cleanup readbacks for both the replacement
+and the original identity; historical recovery flags are not sufficient.
+Other projects' active runners do not prevent this read-only reconciliation.
+
+The CodeQL adapter delegates to the existing SARIF verifier and counts both
+languages as one job definition. The ordinary full-check adapter additionally
+pins the reviewed CI workflow byte digest; altered checkout or command semantics
+require a new adapter review. The sparse job remains held for PR execution until
+an immutable executed-merge attestation is supported. A legitimately skipped
+sparse job on manual dispatch is not a pass and does not erase the separate
+full-check job's proof.
+
+Sensitive jobs without their specialised effect, credential-isolation, rootless
+scenario or native Windows verifier remain held even when GitHub reports green.
+Verified execution does not establish full workflow dependency/event coverage or
+production-effect acceptance. No report from this initial adapter set grants
+production release authority.
+
+Evidence is private, content-addressed, create-only and fsynced. `latest.json`
+is invalidated before fetching, so an interrupted or failed refresh cannot leave
+an earlier result represented as current. Historical reports remain unchanged.
+Exit status 2 means a useful partial estate report; status 1 means the observation
+is unverified. Neither is full migration acceptance. Tests use controlled fixtures
+to prove verifier behaviour; those fixtures never count as operational evidence.
+
+Do not enable a disabled CI workflow while its protected default-branch source
+still selects GitHub-hosted runners. Routing migration in `develop` is not
+authority to activate the older default-branch workflow or privileged jobs.
