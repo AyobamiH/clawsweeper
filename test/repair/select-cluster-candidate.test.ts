@@ -213,6 +213,12 @@ test("selected candidate is fenced when live state changes after model evaluatio
 
 test("model request uses structured comparative selection without scores", async () => {
   const previousKey = process.env.OPENAI_API_KEY;
+  const previousMetrics = process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+  const previousInternalModel = process.env.CLAWSWEEPER_INTERNAL_MODEL;
+  process.env.CLAWSWEEPER_INTERNAL_MODEL = "gpt-5.6";
+  const metricRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clawsweeper-cluster-metric-"));
+  const metricFile = path.join(metricRoot, "selector.jsonl");
+  process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = metricFile;
   process.env.OPENAI_API_KEY = "test-key";
   const candidate = {
     path: "jobs/openclaw/inbox/gitcrawl-1-a.md",
@@ -229,6 +235,7 @@ test("model request uses structured comparative selection without scores", async
         requestBody = String(init?.body ?? "");
         return new Response(
           JSON.stringify({
+            usage: { input_tokens: 32, output_tokens: 7 },
             output_text: JSON.stringify({
               selected_path: null,
               rationale: "The evidence does not establish useful work.",
@@ -242,11 +249,44 @@ test("model request uses structured comparative selection without scores", async
       },
     });
     assert.equal(decision.selected_path, null);
+    assert.equal(JSON.parse(requestBody).model, "gpt-5.6");
     assert.match(requestBody, /select at most one, or select none/i);
     assert.doesNotMatch(requestBody, /confidence|selection.score|STOP_WORDS|DECISION_LABELS/);
+    const metric = JSON.parse(fs.readFileSync(metricFile, "utf8").trim());
+    assert.equal(metric.taskKind, "cluster_selection");
+    assert.equal(metric.provider, "openai_api");
+    assert.equal(metric.model, "gpt-5.6");
+    assert.equal(metric.outcome, "process_ok");
+    assert.deepEqual([metric.inputTokens, metric.outputTokens], [32, 7]);
+    assert.equal(metric.actualCostUsd, null);
+    assert.doesNotMatch(JSON.stringify(metric), /test-key|Not actionable|cluster_id/);
+    await assert.rejects(
+      () =>
+        selectClusterCandidateWithModel({
+          repo: "openclaw/openclaw",
+          evidence: [candidate],
+          model: "internal",
+          request: async () => new Response("PRIVATE PROVIDER ERROR", { status: 503 }),
+        }),
+      /HTTP 503/,
+    );
+    const records = fs
+      .readFileSync(metricFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records.length, 2);
+    assert.equal(records[1].outcome, "invocation_exception");
+    assert.equal(records[1].inputTokens, null);
+    assert.doesNotMatch(JSON.stringify(records[1]), /PRIVATE PROVIDER ERROR/);
   } finally {
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousKey;
+    if (previousMetrics === undefined) delete process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+    else process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = previousMetrics;
+    if (previousInternalModel === undefined) delete process.env.CLAWSWEEPER_INTERNAL_MODEL;
+    else process.env.CLAWSWEEPER_INTERNAL_MODEL = previousInternalModel;
+    fs.rmSync(metricRoot, { recursive: true, force: true });
   }
 });
 

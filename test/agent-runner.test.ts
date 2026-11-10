@@ -9,6 +9,7 @@ import { useFakeScanner } from "./agent-input-scan-helpers.ts";
 import {
   agentRunner,
   codexAgentArgs,
+  codexModelForTelemetry,
   runAgentCheckoutInspection,
   runAgentProcess,
 } from "../dist/agent-runner.js";
@@ -20,6 +21,103 @@ test("agent runner defaults to Codex and fails closed on unknown values", () => 
   assert.throws(
     () => agentRunner({ CLAWSWEEPER_RUNNER: "claude" }),
     /Invalid CLAWSWEEPER_RUNNER.*codex.*openclaw/,
+  );
+});
+
+test("invalid runner fails without attributing an invocation to Codex", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-invalid-runner-metric-"));
+  const file = join(root, "metric.jsonl");
+  const previous = process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+  process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = file;
+  try {
+    assert.throws(
+      () =>
+        runAgentProcess({
+          label: "invalid-runner",
+          prompt: "no provider should run",
+          model: "internal",
+          scanSource: { kind: "prompt" },
+          cwd: root,
+          env: { ...process.env, CLAWSWEEPER_RUNNER: "unsupported" },
+          timeoutMs: 1000,
+        }),
+      /Invalid CLAWSWEEPER_RUNNER/,
+    );
+    const metric = JSON.parse(readFileSync(file, "utf8").trim());
+    assert.equal(metric.provider, "unknown");
+    assert.equal(metric.model, "unknown");
+    assert.equal(metric.outcome, "invocation_exception");
+  } finally {
+    if (previous === undefined) delete process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+    else process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("model telemetry reports only one unambiguous executed Codex model", () => {
+  const options = {
+    label: "model-probe",
+    scanSource: { kind: "prompt" } as const,
+    prompt: "read-only",
+    model: "internal",
+    cwd: "/tmp",
+    env: {},
+    timeoutMs: 1000,
+  };
+  assert.equal(codexModelForTelemetry(options), "unknown");
+  assert.equal(codexModelForTelemetry({ ...options, model: "gpt-public" }), "gpt-public");
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      model: "gpt-public",
+      codexExtraArgs: ["--model", "gpt-override"],
+    }),
+    "gpt-override",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      codexExtraArgs: ["--model", "a", "--model", "b"],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      codexExtraArgs: ["-c", 'model="some-model"'],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      model: "gpt-public",
+      codexExtraArgs: ["-c", 'model="some-model"'],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      model: "gpt-public",
+      codexExtraArgs: ['--config=model="other-model"'],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      model: "gpt-public",
+      codexExtraArgs: ["-c", '  model = "spaced-model"'],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    codexModelForTelemetry({
+      ...options,
+      codexExtraArgs: ["--model", "--json"],
+    }),
+    "unknown",
   );
 });
 
@@ -110,6 +208,9 @@ test("runAgentProcess delegates the default path to Codex with unchanged argv an
   const diagnosticPromptPath = join(root, "diagnostic.prompt.md");
   const schemaPath = join(root, "schema.json");
   const prompt = "prompt over stdin\r\n🦞 exact bytes\n";
+  const metricFile = join(root, "agent-inference.jsonl");
+  const originalMetricsPath = process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+  process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = metricFile;
   const schema = '{"type":"object","description":"exact schema bytes"}\n';
   writeFileSync(schemaPath, schema);
   writeFileSync(diagnosticPromptPath, "stale prompt", { mode: 0o644 });
@@ -127,6 +228,10 @@ assert.equal(inputs.find(({name}) => name === 'schema').bytes.toString(), ${JSON
 const fs = require("node:fs");
 fs.writeFileSync(process.env.AGENT_RUNNER_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
 fs.writeFileSync(process.env.AGENT_RUNNER_PROMPT_PATH, fs.readFileSync(0, "utf8"));
+if (process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE) {
+  process.stderr.write("unexpected private telemetry path in model subprocess");
+  process.exitCode = 22;
+}
 process.stdout.write("ok");
 `,
   );
@@ -134,6 +239,7 @@ process.stdout.write("ok");
   try {
     const result = runAgentProcess({
       label: "default-codex",
+      inferenceTaskKind: "review",
       scanSource: { kind: "prompt" },
       prompt,
       diagnosticPromptPath,
@@ -164,7 +270,17 @@ process.stdout.write("ok");
     assert.equal(readFileSync(diagnosticPromptPath, "utf8"), prompt);
     assert.equal(statSync(diagnosticPromptPath).mode & 0o777, 0o600);
     assert.equal(readFileSync(schemaPath, "utf8"), schema);
+    const metric = JSON.parse(readFileSync(metricFile, "utf8").trim());
+    assert.equal(metric.taskKind, "review");
+    assert.equal(metric.provider, "codex");
+    assert.equal(metric.model, "unknown");
+    assert.equal(metric.outcome, "process_ok");
+    assert.equal(metric.completionVerified, false);
+    assert.equal(metric.inputTokens, null);
+    assert.doesNotMatch(JSON.stringify(metric), /prompt over stdin|exact schema bytes/);
   } finally {
+    if (originalMetricsPath === undefined) delete process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+    else process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE = originalMetricsPath;
     rmSync(root, { recursive: true, force: true });
   }
 });

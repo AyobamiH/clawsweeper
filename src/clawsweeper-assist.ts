@@ -264,6 +264,7 @@ export function createAssistWorkflow({
     ensureDir(emptyGitHubConfigDir);
     const result = runAgentProcess({
       scanSource: { kind: "prompt" },
+      inferenceTaskKind: "assist",
       label: `assist-${options.item.number}`,
       prompt,
       model: options.model,
