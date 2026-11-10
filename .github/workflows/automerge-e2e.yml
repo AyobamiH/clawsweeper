@@ -89,6 +89,19 @@ jobs:
           --output test-results/automerge
           --base-image "$AUTOMERGE_E2E_BASE_IMAGE"
 
+      - name: Seal complete E2E evidence in isolated owner vault
+        # A provider artifact upload alone cannot establish local runner acceptance.
+        # This fails closed unless the security-scoped JIT mounted /e2e-evidence.
+        if: always()
+        run: |
+          set -euo pipefail
+          test -d /e2e-evidence
+          test -w /e2e-evidence
+          node scripts/e2e/seal-automerge-evidence.mjs \
+            --input test-results/automerge \
+            --vault /e2e-evidence \
+            --expected-head "${{ github.event.pull_request.head.sha || github.sha }}"
+
       - name: Upload automerge proof
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

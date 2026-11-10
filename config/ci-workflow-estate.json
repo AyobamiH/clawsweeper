@@ -24,7 +24,7 @@
     },
     {
       "path": ".github/workflows/automerge-e2e.yml",
-      "sha256": "90bc4f94b96c13d8d78291177a4cf5e4cf0de290632a622aacca83d7a81758a6",
+      "sha256": "378dd52a07e70e790ba9f1652ee1de1e3aa285f4beb4d7c11de620f4e629194a",
       "events": ["pull_request", "push", "workflow_dispatch"]
     },
     {
@@ -318,7 +318,7 @@
       ],
       "events": ["pull_request", "push", "workflow_dispatch"],
       "risks": ["container_runtime"],
-      "source_sha256": "90bc4f94b96c13d8d78291177a4cf5e4cf0de290632a622aacca83d7a81758a6",
+      "source_sha256": "378dd52a07e70e790ba9f1652ee1de1e3aa285f4beb4d7c11de620f4e629194a",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "isolated_container_required"
     },

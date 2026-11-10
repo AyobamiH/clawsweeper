@@ -22,6 +22,7 @@ import sys
 import time
 
 from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, SHA, WORKFLOWS, category_enabled, classify, is_release_preview
+from e2e_evidence_vault import EvidenceHold, create_vault, mount_args, verify_vault
 
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
@@ -606,6 +607,32 @@ def prepare_network(name, owner):
     raise RuntimeError("network_firewall_not_ready")
 
 
+def expected_isolation_checkout(candidate, controls):
+    """Resolve an E2E job's checkout from live GitHub, not the runner receipt.
+
+    PRs execute a synthetic merge with exact [base, head] parents. Main push
+    and workflow_dispatch events execute the exact owner-pinned default head.
+    Unknown events and mutable branch tips never acquire evidence authority.
+    """
+    if candidate.event == "pull_request":
+        if not isinstance(candidate.pr_number, int) or not isinstance(
+                candidate.trusted_base_sha, str):
+            raise EvidenceHold("e2e_pr_identity_missing")
+        merge_ref = gh(f"{REPO_SLUG}/git/ref/pull/{candidate.pr_number}/merge")
+        merge_sha = merge_ref["object"]["sha"]
+        merge_commit = gh(f"{REPO_SLUG}/git/commits/{merge_sha}")
+        parents = [x.get("sha") for x in merge_commit.get("parents", [])]
+        if parents != [candidate.trusted_base_sha, candidate.sha]:
+            raise EvidenceHold("e2e_merge_ancestry_changed")
+        return merge_sha
+    if candidate.event not in ("push", "workflow_dispatch") or candidate.branch != "main":
+        raise EvidenceHold("e2e_unapproved_event_or_branch")
+    main = gh(f"{REPO_SLUG}/git/ref/heads/main")["object"]["sha"]
+    if main != candidate.sha or main != controls.get("trusted_main_sha"):
+        raise EvidenceHold("e2e_default_head_not_pinned")
+    return main
+
+
 def runner_job(candidate, controls):
     key = f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}"
     private_dir(RECEIPTS)
@@ -615,6 +642,9 @@ def runner_job(candidate, controls):
         # must reconcile old JIT and GitHub job state before any re-admission.
         raise AdmissionHold("existing_or_uncertain_runner_intent")
     private_dir(target)
+    # No shared evidence directory or Docker socket is mounted. Only a fresh,
+    # run-scoped leaf beneath this private receipt may be writable by the JIT.
+    vault = create_vault(target) if candidate.role == "isolation" else None
     name = f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}"
     worker = name + "-worker"
     net = name + "-net"
@@ -669,7 +699,8 @@ def runner_job(candidate, controls):
             cmd = ["docker", "run", "--rm", "--interactive", "--init", "--name", worker,
                    "--label", LABEL+"="+name, "--network", "container:"+net,
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "500",
-                   "--memory", runner_limits(candidate)[1], "--cpus", "2", image_id,
+                   "--memory", runner_limits(candidate)[1], "--cpus", "2",
+                   *(mount_args(vault) if vault is not None else []), image_id,
                    "bash", "-ec", 'IFS= read -r config; exec ./run.sh --jitconfig "$config"']
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logfile, stderr=subprocess.STDOUT, text=True)
             process.stdin.write(encoded + "\n")
@@ -697,6 +728,19 @@ def runner_job(candidate, controls):
             issues.append("github_job_not_successful")
         if process.poll() != 0:
             issues.append("runner_exit_not_zero")
+        if candidate.role == "isolation":
+            # A green GitHub job is not proof: validate all 28 sealed scenarios
+            # from the owner-private mount AFTER the runner has exited. The
+            # synthetic-merge SHA and exact ancestry come from fresh GitHub
+            # reads, not from the untrusted runner's receipt or environment.
+            try:
+                checkout = expected_isolation_checkout(candidate, controls)
+                receipt["e2e_proof"] = verify_vault(
+                    vault, run_id=candidate.run_id, attempt=candidate.run_attempt,
+                    source_head=candidate.sha, checkout_sha=checkout)
+            except Exception:
+                # Never echo attacker-controlled file paths or receipt bytes.
+                issues.append("isolation_evidence_not_independently_verified")
         # A successful job still requires subsequent independently verified
         # cleanup; unexpected process interruption is durably held.
         job_success_verified = not issues
