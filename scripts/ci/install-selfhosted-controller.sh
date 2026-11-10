@@ -7,7 +7,7 @@ root="$HOME/.local/share/local-ci/clawsweeper-selfhosted"
 units="$HOME/.config/systemd/user"
 mkdir -p "$root" "$units"
 chmod 0700 "$root"
-for name in self_hosted_executor.py self_hosted_policy.py reconcile_selfhosted_receipt.py; do
+for name in self_hosted_executor.py self_hosted_policy.py verify_codeql_release.py reconcile_selfhosted_receipt.py; do
   install -m 0600 "$repository/scripts/ci/$name" "$root/$name.new"
   mv -- "$root/$name.new" "$root/$name"
 done
