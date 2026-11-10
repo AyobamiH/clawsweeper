@@ -2080,9 +2080,10 @@ test("issue implementation workflow lets job intent choose dispatch capacity", (
     /inference_policy:\n\s+description: "Inference policy for dispatched repair work"\n\s+required: false\n\s+default: auto/,
   );
   assert.doesNotMatch(workflow, /^\s+intake_runner:/m);
+  assert.doesNotMatch(workflow, /github\.event\.client_payload\.intake_runner/);
   assert.match(
     workflow,
-    /runs-on: \$\{\{ github\.event\.client_payload\.intake_runner \|\| vars\.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER \|\| 'ubuntu-latest' \}\}/,
+    /runs-on: \$\{\{ vars\.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER \|\| 'clawsweeper-unprovisioned-runner-held' \}\}/,
   );
   assert.match(
     workflow,

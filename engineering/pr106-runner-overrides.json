@@ -1,0 +1,59 @@
+{
+  "entries": {
+    ".github/workflows/release-offline-replay.yml#replay": {
+      "pr106_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-offline-replay"
+      ],
+      "pr106_source_sha256": "e0483a0dec0b8bec890923d50afe09185c24aae80330a12d674d3d7f82316875"
+    },
+    ".github/workflows/repair-cluster-worker.yml#cleanup": {
+      "pr106_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-cleanup"
+      ],
+      "pr106_source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6"
+    },
+    ".github/workflows/repair-cluster-worker.yml#cluster": {
+      "pr106_runner": "${{ needs.provision.outputs.plan || 'clawsweeper-disposable-plan-not-provisioned' }}",
+      "pr106_source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6"
+    },
+    ".github/workflows/repair-cluster-worker.yml#execute": {
+      "pr106_runner": "${{ needs.provision.outputs.execute || 'clawsweeper-disposable-execute-not-provisioned' }}",
+      "pr106_source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6"
+    },
+    ".github/workflows/repair-cluster-worker.yml#provision": {
+      "pr106_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-provision"
+      ],
+      "pr106_source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6"
+    },
+    ".github/workflows/repair-cluster-worker.yml#receipt": {
+      "pr106_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-repair-receipt"
+      ],
+      "pr106_source_sha256": "618186d27e4c123e425ffe4a7075ad684682a89649ee2bfe1302207ff65b61b6"
+    },
+    ".github/workflows/workers-ai-fallback-acceptance.yml#release-source-review": {
+      "pr106_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "clawsweeper-ci-ops-${{ github.run_id }}-release-review"
+      ],
+      "pr106_source_sha256": "a6f44f55ebaa5c74a4f39eeb8980810850a2f340524b15bff5cbd401dd5d6f47"
+    }
+  },
+  "parent_commit": "28addfb841f9605e634721d7d360d024ff91c636",
+  "schema": "clawsweeper.pr106-runner-overrides.v1"
+}

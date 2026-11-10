@@ -1,0 +1,19 @@
+# ClawSweeper webhook and public-comment idempotency correction (candidate only)
+
+The reviewed 28addfb8 P2 flaws permit repeated wake-ups from authenticated replay and duplicate public GitHub comments after incomplete pagination or concurrent writers. The 5cffbbce P1 corrections are integrated in this isolated source; they have **not** been deployed.
+
+## Webhook wake-up
+
+`ci-webhook-deliveries.py` adds a create-only, transactionally durable SQLite delivery ledger. Only valid signed GitHub events may reserve a normalized delivery UUID. A reservation is recorded before `systemctl start`. Successful wake-ups are durably marked accepted, and duplicate deliveries return 200 without another wake. An unknown subprocess or SQLite outcome retains a pending reservation and refuses all replay; the existing five-minute fleet poll is the independent recovery mechanism. Confirmed accepted claims expire after 30 days; uncertain claims do not expire automatically. An exhausted 20,000-entry ledger fails closed rather than silently deleting pending effects.
+
+The server requires an owner-only delivery ledger directory and `.sqlite3` mode 0600. The systemd unit must grant `ReadWritePaths` *only* to the dedicated directory, with `ProtectHome=read-only`, `ProtectSystem=strict`, loopback binding, and HMAC verification retained. Real deployment must first create the directory and install the new ledger module beside the receiver under its expected name. **The live installed server is unchanged.**
+
+## Public acknowledgement and queued command status
+
+`clawsweeper-dispatch.yml` now checks every bounded comment page before attempting either POST. The code refuses publishing on incomplete pagination or a GitHub API error. It then requires a create-only owner-scope claim from `scripts/ci/comment-effect-claim.mjs`: a deterministic `refs/notes/clawsweeper-comment-claims/<SHA-256>` ref pointing to the exact default-branch commit. The existing owner App token already requests `contents:write` for this repository. Only the contender that creates and independently reads back the claim may POST a public acknowledgement. Racing or uncertain claims never retry the non-idempotent comment POST. The command router still dispatches normally if the optional status comment cannot safely be created; no new broad privileged permission is requested.
+
+Claim refs intentionally are *not* branches or tags, to avoid triggering normal `push` workflows. They are durable audit records, not reusable auth tokens. Do not automatically delete an uncertain claim after a timeout or source change. A manual reconciliation process may check the exact GitHub comment marker before any exceptional repair; never presume that an absent comment is proof the preceding POST did not occur. The long-lived claim namespace needs bounded owner monitoring/retention design; it is not a general-purpose unbounded queue.
+
+**Live acceptance remains open:** The GitHub REST create/read of `refs/notes/` for this repository, permissions available to the existing App token, complete real comment inventory under pagination, duplicate delivery, and abort/restart scenarios have not been exercised against production. Do not merge or activate this workflow solely from mocked tests. Keep local CI, operational controls and existing receipts unchanged.
+
+GitHub's REST [Create a reference](https://docs.github.com/en/rest/git/refs#create-a-reference) specifies an owner App token with `contents:write` and a `refs/.../...` path. The [matching-refs endpoint](https://docs.github.com/en/rest/git/refs#list-matching-references) explicitly includes `notes` in its supported inventory. This source uses exact matching-refs readback for `refs/notes` rather than assuming the branch/tag-only `Get a reference` endpoint works for notes. The actual GitHub App permission grant and real notes create/read behaviour still require a disposable provider acceptance test before deployment.

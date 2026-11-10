@@ -558,10 +558,30 @@ export function runAutomergeE2E({
     const fixReport = JSON.parse(
       fs.readFileSync(path.join(transferDir, "fix-execution-report.json"), "utf8"),
     );
+    // Keep action-specific failures in owner-only fixture artefacts so a
+    // post-publication comment cannot obscure an earlier failed repair.
+    writeJson(path.join(artifacts, "fix-execution-action-summary.json"), {
+      status: fixReport.status ?? null,
+      reason: fixReport.reason ?? null,
+      actions: (fixReport.actions ?? []).map((action) => ({
+        action: action.action ?? null,
+        status: action.status ?? null,
+        reason: action.reason ?? null,
+      })),
+    });
     assert.ok(state.pr.mergedAt, "the exact-head verdict must route to the final merge");
-    assert.equal(fixReport.actions.at(-1)?.status, "pushed");
-    assert.equal(repairPostFlight.actions.at(-1)?.status, "blocked");
-    assert.equal(repairPostFlight.actions.at(-1)?.reason, "job does not allow merge");
+    // Publication may append comment actions. Bind assertions to action identity.
+    const repairActions = fixReport.actions.filter(
+      (action) => action.action === "repair_contributor_branch",
+    );
+    assert.equal(repairActions.length, 1, "exactly one contributor repair outcome is required");
+    assert.equal(repairActions[0].status, "pushed");
+    const finalisationActions = repairPostFlight.actions.filter(
+      (action) => action.action === "finalize_fix_pr",
+    );
+    assert.equal(finalisationActions.length, 1, "exactly one fix finalisation is required");
+    assert.equal(finalisationActions[0].status, "blocked");
+    assert.equal(finalisationActions[0].reason, "job does not allow merge");
     const mergedCommand = routerReport.commands.find((command) =>
       command.actions.some((action) => action.action === "merge"),
     );

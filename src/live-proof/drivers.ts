@@ -1589,7 +1589,9 @@ function closeTerminalCapture(
         const output = normalizeTerminalOutput(
           capture.replaceAll(window.files.command, "<private command>"),
         );
-        storeTerminalSnapshot(window, output);
+        // The final sealed capture can contain a marker emitted after the last
+        // pane poll. It must count towards the command's output expectations.
+        observeTerminalSnapshot(window, output);
       }
       return;
     }

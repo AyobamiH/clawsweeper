@@ -20,7 +20,7 @@ env:
   CLAWSWEEPER_APP_CLIENT_ID: ${{ vars.CLAWSWEEPER_APP_CLIENT_ID || 'Iv23li7FTsSTorJDMkdQ' }}
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-deploy"]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -44,7 +44,7 @@ jobs:
           npx wrangler deploy
   provision:
     name: Provision ephemeral Cloudflare repair compute
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-provision"]
     timeout-minutes: 10
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
@@ -74,8 +74,9 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
     needs: deploy
   plan-proof:
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan != '' }}
     needs: provision
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'ubuntu-latest' }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 8
     steps:
       - name: Require fresh compute provisioning for this attempt
@@ -100,8 +101,9 @@ jobs:
           path: ${{ runner.temp }}/compute-proof
           if-no-files-found: error
   execute-proof:
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute != '' }}
     needs: provision
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'ubuntu-latest' }}
+    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 8
     steps:
       - name: Require fresh compute provisioning for this attempt
@@ -133,7 +135,7 @@ jobs:
       - plan-proof
       - execute-proof
     if: ${{ always() && needs.deploy.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup"]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -163,7 +165,7 @@ jobs:
       - plan-proof
       - execute-proof
       - cleanup
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-review"]
     timeout-minutes: 20
     env:
       CLAWSWEEPER_QUOTA_ENABLED: "1"

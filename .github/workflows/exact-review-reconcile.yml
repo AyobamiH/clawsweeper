@@ -41,7 +41,7 @@ jobs:
           startsWith(github.event.workflow_run.display_title, 'Review ClawSweeper items')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-reconcile"]
     timeout-minutes: 5
     permissions:
       actions: read
@@ -103,7 +103,7 @@ jobs:
   sweep:
     name: Sweep terminal exact-review runs
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-sweep"]
     timeout-minutes: 10
     permissions:
       actions: read

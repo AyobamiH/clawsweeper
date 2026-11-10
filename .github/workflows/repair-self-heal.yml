@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   self-heal:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-self-heal"]
     timeout-minutes: 20
     steps:
       - name: Create GitHub App token

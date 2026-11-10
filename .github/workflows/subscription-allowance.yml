@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   refresh:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-refresh"]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7

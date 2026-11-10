@@ -16,7 +16,7 @@ concurrency:
 jobs:
   backfill:
     if: ${{ vars.CLAWSWEEPER_AUTO_IMPLEMENT_ISSUES == '1' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-backfill"]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

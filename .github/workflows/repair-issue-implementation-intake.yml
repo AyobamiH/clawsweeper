@@ -79,7 +79,8 @@ concurrency:
 
 jobs:
   intake:
-    runs-on: ${{ github.event.client_payload.intake_runner || vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'ubuntu-latest' }}
+    if: ${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER != '' }}
+    runs-on: ${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

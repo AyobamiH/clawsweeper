@@ -14,7 +14,13 @@ permissions:
 
 jobs:
   dispatch-private-auto-fallback:
-    runs-on: ubuntu-latest
+    runs-on:
+      [
+        self-hosted,
+        Linux,
+        X64,
+        "clawsweeper-ci-privileged-${{ github.run_id }}-dispatch-private-auto-fallback",
+      ]
     steps:
       - name: Dispatch private exact review through normal repository event
         env:

@@ -39,8 +39,44 @@ function normalizeWhitespace(value: string | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
-test("documented target dispatcher template matches the live workflow", () => {
-  assert.equal(documentedWorkflow, liveWorkflow);
+test("external target dispatcher and owner-operated CI preserve identical dispatch behaviour", () => {
+  // The external copyable template has no access to the owner's locally
+  // installed JIT runner or Git-ref claim script. Every actual dispatch,
+  // event trigger and credential boundary stays identical. Only the owner
+  // runner and optional acknowledgement implementations may differ.
+  const documented = parse(documentedWorkflow);
+  const local = parse(liveWorkflow);
+  assert.deepEqual(local.on, documented.on);
+  assert.deepEqual(local.concurrency, documented.concurrency);
+  assert.deepEqual(local.permissions, documented.permissions);
+  assert.equal(documented.jobs.dispatch["runs-on"], "ubuntu-latest");
+  assert.deepEqual(local.jobs.dispatch["runs-on"], [
+    "self-hosted",
+    "Linux",
+    "X64",
+    "clawsweeper-ci-ops-${{ github.run_id }}-dispatch",
+  ]);
+  assert.doesNotMatch(liveWorkflow, /runs-on: ubuntu-(latest|24\.04)/);
+  const localSteps = dispatchSteps(liveWorkflow).filter(
+    (step) => step.name !== "Checkout trusted workflow source for durable comment claims",
+  );
+  const documentedSteps = dispatchSteps(documentedWorkflow);
+  assert.deepEqual(
+    localSteps.map((step) => step.name),
+    documentedSteps.map((step) => step.name),
+  );
+  const acknowledgementNames = new Set([
+    "Acknowledge received pull request",
+    "Acknowledge and dispatch ClawSweeper comment",
+  ]);
+  for (let i = 0; i < localSteps.length; i++) {
+    if (!acknowledgementNames.has(localSteps[i].name ?? "")) {
+      assert.deepEqual(localSteps[i], documentedSteps[i]);
+      continue;
+    }
+    assert.equal(localSteps[i].if, documentedSteps[i].if);
+    assert.equal(localSteps[i]["continue-on-error"], documentedSteps[i]["continue-on-error"]);
+  }
 });
 
 test("target dispatcher acknowledges non-draft PR receipts before review dispatch", () => {
@@ -83,9 +119,17 @@ test("target dispatcher acknowledges non-draft PR receipts before review dispatc
     assert.equal(acknowledgement.env?.ACK_TOKEN, "${{ steps.pr_ack_token.outputs.token }}");
 
     const run = acknowledgement.run ?? "";
-    assert.match(run, /issues\/\$ITEM_NUMBER\/comments\?per_page=100/);
-    assert.match(run, /--arg marker_prefix "clawsweeper-pr-ack:"/);
-    assert.match(run, /--arg marker_suffix " item=\$ITEM_NUMBER -->"/);
+    if (source === liveWorkflow) {
+      assert.match(run, /comment-effect-claim\.mjs scan/);
+      assert.match(run, /comment-effect-claim\.mjs claim/);
+      assert.match(run, /Acknowledgement inventory unverifiable; refusing POST/);
+      assert.doesNotMatch(run, /issues\/\$ITEM_NUMBER\/comments\?per_page=100/);
+      assert.equal(acknowledgement.env?.CLAIM_TOKEN, "${{ steps.token.outputs.token }}");
+    } else {
+      assert.match(run, /issues\/\$ITEM_NUMBER\/comments\?per_page=100/);
+      assert.match(run, /--arg marker_prefix "clawsweeper-pr-ack:"/);
+      assert.match(run, /--arg marker_suffix " item=\$ITEM_NUMBER -->"/);
+    }
     assert.match(run, /"<!-- clawsweeper-pr-ack:\$SOURCE_ACTION item=\$ITEM_NUMBER -->"/);
     assert.match(
       run,

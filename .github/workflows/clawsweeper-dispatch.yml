@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   dispatch:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-dispatch"]
     if: ${{ !(endsWith(github.actor, '[bot]') && (github.event.action == 'labeled' || github.event.action == 'unlabeled')) }}
     env:
       HAS_CLAWSWEEPER_APP_PRIVATE_KEY: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY != '' }}
@@ -89,6 +89,20 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-issues: write
 
+      - name: Checkout trusted workflow source for durable comment claims
+        if: >-
+          ${{
+            env.HAS_CLAWSWEEPER_APP_PRIVATE_KEY == 'true' &&
+            (
+              github.event_name == 'pull_request_target' ||
+              (github.event_name == 'issue_comment' && steps.comment_filter.outputs.is_command == 'true')
+            )
+          }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
       - name: Acknowledge received pull request
         if: >-
           ${{
@@ -102,6 +116,7 @@ jobs:
         continue-on-error: true
         env:
           ACK_TOKEN: ${{ steps.pr_ack_token.outputs.token }}
+          CLAIM_TOKEN: ${{ steps.token.outputs.token }}
           TARGET_REPO: ${{ github.repository }}
           ITEM_NUMBER: ${{ github.event.pull_request.number }}
           SOURCE_ACTION: ${{ github.event.action }}
@@ -111,28 +126,53 @@ jobs:
             echo "::notice::Skipping ClawSweeper pull request acknowledgement because no target credential is configured."
             exit 0
           fi
-          has_ack_marker() {
-            jq -e \
-              --arg marker_prefix "clawsweeper-pr-ack:" \
-              --arg marker_suffix " item=$ITEM_NUMBER -->" \
-              'any(.[]; (.body // "") as $body | ($body | contains($marker_prefix)) and ($body | contains($marker_suffix)))' \
-              <<< "$1" >/dev/null
-          }
-          comments="$(GH_TOKEN="$ACK_TOKEN" gh api \
-            "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100")"
-          if has_ack_marker "$comments"; then
-            echo "ClawSweeper pull request acknowledgement already exists."
+          if [ -z "$CLAIM_TOKEN" ]; then
+            echo "::notice::Skipping acknowledgement without owner-scoped create-only claim authority."
             exit 0
           fi
-          # opened and ready_for_review can fire seconds apart for the same
-          # pull request, and both runs can list comments before either
-          # acknowledgement is visible. Wait, then recheck right before
-          # posting; a superseding run cancels this one while it sleeps.
-          sleep 15
-          comments="$(GH_TOKEN="$ACK_TOKEN" gh api \
-            "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments?per_page=100")"
-          if has_ack_marker "$comments"; then
+          scan_existing() {
+            local result
+            result="$(GH_TOKEN="$ACK_TOKEN" node scripts/ci/comment-effect-claim.mjs scan \
+              "$TARGET_REPO" "$ITEM_NUMBER" pr_ack "$ITEM_NUMBER")" || return 2
+            case "$result" in
+              present) return 0 ;;
+              absent) return 1 ;;
+              *) return 2 ;;
+            esac
+          }
+          # A marker may be on page 2 or later. Incomplete pagination must
+          # never be treated as absence or permit a second public comment.
+          if scan_existing; then
             echo "ClawSweeper pull request acknowledgement already exists."
+            exit 0
+          else
+            result=$?
+            if [ "$result" -ne 1 ]; then
+              echo "::warning::Acknowledgement inventory unverifiable; refusing POST."
+              exit 0
+            fi
+          fi
+          sleep 15
+          if scan_existing; then
+            echo "ClawSweeper pull request acknowledgement already exists."
+            exit 0
+          else
+            result=$?
+            if [ "$result" -ne 1 ]; then
+              echo "::warning::Acknowledgement inventory unverifiable; refusing POST."
+              exit 0
+            fi
+          fi
+          # Git's create-only ref supplies an atomic, durable owner claim.
+          # Lost responses, races, old claims and ambiguous readback all
+          # refuse another comment POST. A failed claim never blocks dispatch.
+          claim="$(GH_TOKEN="$CLAIM_TOKEN" node scripts/ci/comment-effect-claim.mjs claim \
+            "$TARGET_REPO" "$ITEM_NUMBER" "$ITEM_NUMBER" pr_ack "$GITHUB_SHA")" || {
+            echo "::warning::Could not prove unique acknowledgement ownership; refusing POST."
+            exit 0
+          }
+          if [ "$claim" != claimed ]; then
+            echo "ClawSweeper acknowledgement already claimed or held."
             exit 0
           fi
           ack_body="$(printf '%s\n' \
@@ -220,6 +260,7 @@ jobs:
           }}
         env:
           DISPATCH_TOKEN: ${{ steps.token.outputs.token }}
+          CLAIM_TOKEN: ${{ steps.token.outputs.token }}
           TARGET_TOKEN: ${{ steps.target_token.outputs.token }}
           TARGET_REPO: ${{ github.repository }}
           ITEM_NUMBER: ${{ github.event.issue.number }}
@@ -254,18 +295,27 @@ jobs:
                   "ClawSweeper picked this up." \
                   "" \
                   "Command router queued. I will update this comment with the next step.")"
-                status_payload="$(jq -nc --arg body "$status_body" '{body:$body}')"
-                status_err="$(mktemp)"
-                if status_response="$(GH_TOKEN="$TARGET_TOKEN" gh api \
-                  "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments" \
-                  --method POST \
-                  --input - <<< "$status_payload" 2>"$status_err")"; then
-                  status_comment_id="$(jq -r '.id // empty' <<< "$status_response")"
+                # Legacy queued comments must be found on every bounded
+                # page; the Git ref claim separately prevents two concurrent
+                # handlers from performing a second non-idempotent POST.
+                scan="$(GH_TOKEN="$TARGET_TOKEN" node scripts/ci/comment-effect-claim.mjs scan \
+                  "$TARGET_REPO" "$ITEM_NUMBER" command_status "$COMMENT_ID")" || scan=unavailable
+                if [ "$scan" = absent ] && [ -n "$CLAIM_TOKEN" ]; then
+                  claim="$(GH_TOKEN="$CLAIM_TOKEN" node scripts/ci/comment-effect-claim.mjs claim \
+                    "$TARGET_REPO" "$ITEM_NUMBER" "$COMMENT_ID" command_status "$GITHUB_SHA")" || claim=unavailable
+                  if [ "$claim" = claimed ]; then
+                    status_payload="$(jq -nc --arg body "$status_body" '{body:$body}')"
+                    if status_response="$(GH_TOKEN="$TARGET_TOKEN" gh api \
+                      "repos/$TARGET_REPO/issues/$ITEM_NUMBER/comments" \
+                      --method POST --input - <<< "$status_payload" 2>/dev/null)"; then
+                      status_comment_id="$(jq -r '.id // empty' <<< "$status_response")"
+                    else
+                      echo "::warning::Queued-status POST uncertain; durable claim retained; dispatch continues."
+                    fi
+                  fi
                 else
-                  cat "$status_err" >&2
-                  echo "::warning::Could not create ClawSweeper queued status comment; dispatching command router without one."
+                  echo "::notice::Queued status already present, unverified or claim unavailable; no duplicate POST."
                 fi
-                rm -f "$status_err"
                 ;;
             esac
           fi

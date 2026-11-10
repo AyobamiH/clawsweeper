@@ -342,7 +342,11 @@ test("assist workflow isolates Codex generation from the fresh write-token publi
   const tokenIndex = publish.indexOf("Create narrow GitHub App write token");
   const mutateIndex = publish.indexOf("Revalidate and publish assist comment");
   assert.ok(validateIndex >= 0 && validateIndex < tokenIndex && tokenIndex < mutateIndex);
-  assert.match(publish, /runs-on: ubuntu-latest/);
+  assert.match(
+    publish,
+    /runs-on: \[self-hosted, Linux, X64, "clawsweeper-ci-privileged-\$\{\{ github\.run_id \}\}-publish"\]/,
+  );
+  assert.doesNotMatch(publish, /runs-on: ubuntu-latest/);
   assert.match(publish, /ref: \$\{\{ github\.sha \}\}/);
   assert.match(publish, /Verify exact workflow source/);
   assert.ok(

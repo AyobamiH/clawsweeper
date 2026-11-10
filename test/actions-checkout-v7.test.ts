@@ -49,10 +49,10 @@ test("every checkout uses v7 without disabling its fork-PR guard", () => {
   assert.doesNotMatch(sources, /allow-unsafe-pr-checkout:\s*true/);
 });
 
-test("trusted-event workflows explicitly checkout the default branch", () => {
+test("trusted-event workflows checkout only the approved source reference", () => {
   const expectedRefs: Record<string, string> = {
     ".github/workflows/dashboard-ci.yml": "${{ github.event.repository.default_branch }}",
-    ".github/workflows/github-activity.yml": "${{ github.event.repository.default_branch }}",
+    ".github/workflows/github-activity.yml": "${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}",
     // workflow_run events stay pinned to trusted default-branch code; the
     // manual publication lane runs its own write-gated dispatch ref.
     ".github/workflows/repair-publish-results.yml":
