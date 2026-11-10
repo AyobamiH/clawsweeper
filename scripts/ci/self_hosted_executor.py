@@ -30,6 +30,9 @@ LOCK = ROOT / "executor.lock"
 FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
 FLEET_CONTROL_LOCK = HOME / ".local/share/local-ci/control.lock"
 FLEET_OWNER_MARKER = HOME / ".local/share/local-ci/OWNED_BY_LOCAL_CI"
+# Existing canonical test-owner lock: runner JIT and full-source CI must
+# share this inode until all owner launchers use one durable admission API.
+CANONICAL_TEST_LOCK = HOME / ".local/share/local-ci/evidence/clawsweeper-closeout-20261107/review-p1-exact-full-20261107.lock"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
@@ -344,13 +347,44 @@ def detached_fleet_quiescent():
 def shared_fleet_admission_lock():
     """Use the existing, private fleet inode across admission AND execution.
 
-    The shared local fleet owns control.lock and uses its exact inode. Creating
-    or accepting a replacement lock, hard link, symlink or public directory
-    could leave two concurrent owners thinking they have exclusive admission.
+    The shared local fleet owns control.lock and uses its exact inode. The
+    canonical owner full-source suite currently holds a separate private lock;
+    acquire that existing inode first, then control.lock, and retain BOTH
+    through runner cleanup. Neither lock may be created or replaced here.
     """
     parent = FLEET_CONTROL_LOCK.parent
     fd = None
+    canonical_fd = None
     try:
+        canonical_parent = CANONICAL_TEST_LOCK.parent
+        if (canonical_parent.is_symlink() or not canonical_parent.is_dir()
+                or canonical_parent.stat().st_uid != os.getuid()
+                or canonical_parent.stat().st_mode & 0o077):
+            raise AdmissionHold("canonical_test_lock_owner_unverified")
+        if CANONICAL_TEST_LOCK.is_symlink() or not CANONICAL_TEST_LOCK.is_file():
+            raise AdmissionHold("canonical_test_lock_unavailable")
+        canonical_fd = os.open(CANONICAL_TEST_LOCK, os.O_RDWR | os.O_NOFOLLOW |
+                               getattr(os, "O_CLOEXEC", 0))
+        canonical_meta = os.fstat(canonical_fd)
+        canonical_latest = CANONICAL_TEST_LOCK.stat()
+        if (canonical_meta.st_dev, canonical_meta.st_ino) != (
+                canonical_latest.st_dev, canonical_latest.st_ino):
+            raise AdmissionHold("canonical_test_lock_replaced")
+        if (not stat.S_ISREG(canonical_meta.st_mode)
+                or canonical_meta.st_uid != os.getuid()
+                or canonical_meta.st_mode & 0o077
+                or canonical_meta.st_nlink != 1):
+            raise AdmissionHold("canonical_test_lock_unsafe")
+        try:
+            fcntl.flock(canonical_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AdmissionHold("canonical_test_lock_busy") from exc
+        except OSError as exc:
+            raise AdmissionHold("canonical_test_lock_unavailable") from exc
+        canonical_after = CANONICAL_TEST_LOCK.stat()
+        if (canonical_meta.st_dev, canonical_meta.st_ino) != (
+                canonical_after.st_dev, canonical_after.st_ino):
+            raise AdmissionHold("canonical_test_lock_replaced")
         if (parent.is_symlink() or not parent.is_dir()
                 or parent.stat().st_uid != os.getuid()
                 or parent.stat().st_mode & 0o077
@@ -390,6 +424,8 @@ def shared_fleet_admission_lock():
     finally:
         if fd is not None:
             os.close(fd)
+        if canonical_fd is not None:
+            os.close(canonical_fd)
 
 
 def capacity(candidate, controls):
