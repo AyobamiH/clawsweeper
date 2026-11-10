@@ -178,5 +178,125 @@ class Tests(unittest.TestCase):
                 self.verified(data, receipts=Path(root))
 
 
+    def test_one_time_replacement_requires_original_cleanup_proof_and_receipt(self):
+        data = fixture()
+        jobs = data[f"{verifier.API}/actions/runs/{RUN_ID}/jobs?per_page=100"]["jobs"]
+        target = jobs[1]
+        baseline = target["runner_name"]
+        target["runner_name"] = baseline + "-replacement-1"
+        with self.assertRaisesRegex(verifier.EvidenceRefused, "replacement_receipt_required"):
+            self.verified(data)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def save(path, record):
+                path.write_text(json.dumps(record, sort_keys=True))
+                path.chmod(0o600)
+
+            for job in jobs:
+                base = root / f"run-{RUN_ID}-job-{job['id']}-attempt-1"
+                base.mkdir(mode=0o700)
+                image = "sha256:" + "f" * 64
+                if job is target:
+                    prior = {
+                        "schema": "clawsweeper.selfhosted-jit.v1",
+                        "run_id": RUN_ID, "job_id": job["id"], "attempt": 1,
+                        "head_sha": HEAD, "workflow": verifier.WORKFLOW,
+                        "event": "workflow_dispatch", "role": "security",
+                        "label": f"clawsweeper-ci-security-{RUN_ID}-javascript-typescript",
+                        "runner_name": baseline, "state": "runner_started",
+                        "runner_id": 264, "image_sha256": image,
+                    }
+                    save(base / "receipt.json", prior)
+                    digest = verifier.sha256_file(base / "receipt.json")
+                    proof = {
+                        "schema": "clawsweeper.jit-interrupted-recovery.v1",
+                        "decision": "cleanup_verified_no_replay",
+                        "original_receipt_sha256": digest,
+                        "original_state": prior["state"], "runner_name": baseline,
+                        "head_sha": HEAD, "run_id": RUN_ID, "job_id": job["id"],
+                        "attempt": 1, "runner_absent": True,
+                        "owned_containers_absent": True,
+                        "new_registration_attempted": False,
+                        "release_acceptance": False,
+                        "github_job": {"id": job["id"], "run_id": RUN_ID,
+                                       "status": "queued", "conclusion": None},
+                    }
+                    save(base / "interrupted-recovery-proof.json", proof)
+                    save(base / "interrupted-recovery-intent.json", {
+                        "schema": "clawsweeper.jit-interrupted-intent.v1",
+                        "original_receipt_sha256": digest,
+                        "runner_name": baseline, "head_sha": HEAD,
+                        "run_id": RUN_ID, "job_id": job["id"], "attempt": 1,
+                        "replay_registration": False,
+                    })
+                    folder = root / (base.name + "-replacement-1")
+                    folder.mkdir(mode=0o700)
+                else:
+                    folder = base
+                content = b"Immutable CodeQL JIT worker trace"
+                (folder / "runner.log").write_bytes(content)
+                (folder / "runner.log").chmod(0o600)
+                receipt = {
+                    "schema": "clawsweeper.selfhosted-jit.v1",
+                    "run_id": RUN_ID, "job_id": job["id"], "attempt": 1,
+                    "head_sha": HEAD, "runner_name": job["runner_name"],
+                    "state": "passed", "issues": [], "runner_exit": 0,
+                    "github_job": {"conclusion": "success", "runner_name": job["runner_name"]},
+                    "log_bytes": len(content), "log_sha256": hashlib.sha256(content).hexdigest(),
+                    "role": "security", "workflow": verifier.WORKFLOW,
+                    "label": f"clawsweeper-ci-security-{RUN_ID}-" + (
+                        "javascript-typescript" if job is target else "actions"),
+                    "runner_id": 108 if job is target else 107,
+                    "image_sha256": image,
+                }
+                if job is target:
+                    receipt.update({
+                        "replacement_for": baseline,
+                        "original_receipt_sha256": digest,
+                        "replacement_proof_sha256": verifier.sha256_file(
+                            base / "interrupted-recovery-proof.json"),
+                    })
+                save(folder / "receipt.json", receipt)
+            result = self.verified(data, receipts=root)
+            self.assertEqual(result["jobs"]["javascript-typescript"]["runner"],
+                             baseline + "-replacement-1")
+            self.assertIn("replacement", result["jobs"]["javascript-typescript"])
+
+            prior = root / f"run-{RUN_ID}-job-{target['id']}-attempt-1"
+            proof_path = prior / "interrupted-recovery-proof.json"
+            replacement_path = root / (prior.name + "-replacement-1") / "receipt.json"
+            saved_proof = proof_path.read_bytes()
+            saved_replacement = replacement_path.read_bytes()
+
+            proof = json.loads(saved_proof)
+            proof["runner_absent"] = False
+            save(proof_path, proof)
+            with self.assertRaisesRegex(verifier.EvidenceRefused,
+                                        "replacement_cleanup_proof_invalid"):
+                self.verified(data, receipts=root)
+            proof_path.write_bytes(saved_proof)
+
+            altered = json.loads(saved_replacement)
+            altered["original_receipt_sha256"] = "0" * 64
+            save(replacement_path, altered)
+            with self.assertRaisesRegex(verifier.EvidenceRefused,
+                                        "replacement_receipt_provenance_invalid"):
+                self.verified(data, receipts=root)
+            replacement_path.write_bytes(saved_replacement)
+
+            proof_path.unlink()
+            with self.assertRaisesRegex(verifier.EvidenceRefused,
+                                        "replacement_original_evidence_missing"):
+                self.verified(data, receipts=root)
+
+            bad = copy.deepcopy(data)
+            bad[f"{verifier.API}/actions/runs/{RUN_ID}/jobs?per_page=100"]["jobs"][1][
+                "runner_name"] = baseline + "-replacement-2"
+            with self.assertRaisesRegex(verifier.EvidenceRefused,
+                                        "runner_identity_mismatch"):
+                self.verified(bad, receipts=root)
+
+
 if __name__ == "__main__":
     unittest.main()

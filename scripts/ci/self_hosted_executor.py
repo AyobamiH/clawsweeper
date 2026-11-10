@@ -527,19 +527,95 @@ def prepare_network(name, owner):
     raise RuntimeError("network_firewall_not_ready")
 
 
-def runner_job(candidate, controls):
+def select_runner_intent(candidate):
+    """One distinct CodeQL replacement only after immutable, provider-proven cleanup.
+
+    Old JIT registration is never replayed. This read-only selector runs under
+    the executor's exclusive admission lock and fails closed on any mismatch.
+    """
     key = f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}"
-    private_dir(RECEIPTS)
-    target = RECEIPTS / key
-    if target.exists():
-        # Once a POST might have succeeded, never blindly repeat it. Operator
-        # must reconcile old JIT and GitHub job state before any re-admission.
-        raise AdmissionHold("existing_or_uncertain_runner_intent")
-    private_dir(target)
     name = f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}"
+    old = RECEIPTS / key
+    if old.is_symlink():
+        raise AdmissionHold("unsafe_prior_intent")
+    if not old.exists():
+        return old, name, None
+    if (candidate.role != "security"
+            or candidate.workflow != ".github/workflows/codeql.yml"
+            or not old.is_dir() or old.stat().st_uid != os.getuid()
+            or old.stat().st_mode & 0o077):
+        raise AdmissionHold("replacement_role_or_source_not_approved")
+    paths = (old / "receipt.json", old / "interrupted-recovery-proof.json",
+             old / "interrupted-recovery-intent.json")
+    if any(not f.is_file() or f.is_symlink() or f.stat().st_uid != os.getuid()
+           or f.stat().st_mode & 0o077 for f in paths):
+        raise AdmissionHold("existing_or_uncertain_runner_intent")
+    raw, proof_raw, intent_raw = [f.read_bytes() for f in paths]
+    prior, proof, intent = (json.loads(raw), json.loads(proof_raw), json.loads(intent_raw))
+    digest = hashlib.sha256(raw).hexdigest()
+    expected = {"run_id": candidate.run_id, "job_id": candidate.job_id,
+                "attempt": candidate.run_attempt}
+    source = {"head_sha": candidate.sha, "workflow": candidate.workflow,
+              "event": candidate.event, "role": candidate.role,
+              "label": candidate.label, "runner_name": name}
+    original_id = prior.get("runner_id")
+    if (any(prior.get(k) != v for k, v in {**expected, **source}.items())
+            or prior.get("schema") != "clawsweeper.selfhosted-jit.v1"
+            or prior.get("state") not in ("registered", "runner_started")
+            or prior.get("finished_at") is not None
+            or not isinstance(original_id, int) or isinstance(original_id, bool)
+            or original_id <= 0
+            or proof.get("schema") != "clawsweeper.jit-interrupted-recovery.v1"
+            or proof.get("decision") != "cleanup_verified_no_replay"
+            or any(proof.get(k) != v for k, v in
+                   {**expected, "head_sha": candidate.sha, "runner_name": name,
+                    "original_receipt_sha256": digest,
+                    "original_state": prior["state"],
+                    "runner_absent": True, "owned_containers_absent": True,
+                    "new_registration_attempted": False,
+                    "release_acceptance": False}.items())
+            or proof.get("github_job", {}).get("status") != "queued"
+            or proof.get("github_job", {}).get("conclusion") is not None
+            or intent.get("schema") != "clawsweeper.jit-interrupted-intent.v1"
+            or any(intent.get(k) != v for k, v in
+                   {**expected, "head_sha": candidate.sha, "runner_name": name,
+                    "original_receipt_sha256": digest,
+                    "replay_registration": False}.items())):
+        raise AdmissionHold("recovered_runner_binding_mismatch")
+    for child in (name + "-worker", name + "-net"):
+        if inspect_owned(child, name) is not None:
+            raise AdmissionHold("recovered_runner_container_present")
+    runner_absent_verified(original_id, name)
+    run = gh(f"{REPO_SLUG}/actions/runs/{candidate.run_id}")
+    job = gh(f"{REPO_SLUG}/actions/jobs/{candidate.job_id}")
+    if (any(run.get(k) != v for k, v in
+            {"id": candidate.run_id, "run_attempt": candidate.run_attempt,
+             "head_sha": candidate.sha, "path": candidate.workflow}.items())
+            or run.get("repository", {}).get("full_name") != REPOSITORY
+            or job.get("id") != candidate.job_id
+            or job.get("run_id") != candidate.run_id
+            or job.get("status") != "queued" or job.get("conclusion") is not None
+            or job.get("runner_name") not in (None, "")):
+        raise AdmissionHold("recovered_github_job_changed")
+    replacement = RECEIPTS / (key + "-replacement-1")
+    if replacement.exists() or replacement.is_symlink():
+        raise AdmissionHold("existing_or_uncertain_replacement_intent")
+    return replacement, name + "-replacement-1", {
+        "replacement_for": name, "original_receipt_sha256": digest,
+        "replacement_proof_sha256": hashlib.sha256(proof_raw).hexdigest(),
+        "original_image_sha256": prior.get("image_sha256"),
+    }
+
+
+def runner_job(candidate, controls):
+    private_dir(RECEIPTS)
+    target, name, lineage = select_runner_intent(candidate)
     worker = name + "-worker"
     net = name + "-net"
     image_id = approved_job_image(candidate, controls)
+    if lineage is not None and lineage["original_image_sha256"] != image_id:
+        raise AdmissionHold("recovered_runner_image_drift")
+    private_dir(target)
     receipt = {
         "schema": "clawsweeper.selfhosted-jit.v1", "run_id": candidate.run_id,
         "job_id": candidate.job_id, "attempt": candidate.run_attempt,
@@ -547,6 +623,8 @@ def runner_job(candidate, controls):
         "role": candidate.role, "label": candidate.label, "runner_name": name,
         "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
     }
+    if lineage is not None:
+        receipt.update({k: v for k, v in lineage.items() if k != "original_image_sha256"})
     atomic(target / "receipt.json", receipt)
     # Registration is non-idempotent. Enter cleanup protection BEFORE the POST.
     # Persist an uncertain intent first; a crash leaves recovery an exact identity

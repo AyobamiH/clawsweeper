@@ -42,6 +42,86 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def verify_replacement_lineage(root, run_id, job_id, attempt, head_sha,
+                               baseline_runner, expected_label, receipt):
+    """Validate a one-time replacement without trusting a matching name alone."""
+    root = Path(root)
+    prefix = f"run-{run_id}-job-{job_id}-attempt-{attempt}"
+    original_dir = root / prefix
+    proof_dir = original_dir
+    paths = (original_dir / "receipt.json",
+             proof_dir / "interrupted-recovery-proof.json",
+             proof_dir / "interrupted-recovery-intent.json")
+    require(not root.is_symlink() and original_dir.is_dir()
+            and not original_dir.is_symlink()
+            and original_dir.stat().st_uid == os.getuid()
+            and not (original_dir.stat().st_mode & 0o077),
+            "replacement_original_directory_unsafe")
+    require(all(path.is_file() and not path.is_symlink()
+                and path.stat().st_uid == os.getuid()
+                and not (path.stat().st_mode & 0o077) for path in paths),
+            "replacement_original_evidence_missing")
+    original_raw, proof_raw, intent_raw = [p.read_bytes() for p in paths]
+    original, proof, intent = [json.loads(raw) for raw in
+                               (original_raw, proof_raw, intent_raw)]
+    digest = hashlib.sha256(original_raw).hexdigest()
+    require(original.get("schema") == "clawsweeper.selfhosted-jit.v1"
+            and original.get("runner_name") == baseline_runner
+            and original.get("state") in ("registered", "runner_started")
+            and original.get("finished_at") is None
+            and original.get("run_id") == run_id
+            and original.get("job_id") == job_id
+            and original.get("attempt") == attempt
+            and original.get("head_sha") == head_sha
+            and original.get("workflow") == WORKFLOW
+            and original.get("role") == "security"
+            and original.get("label") == expected_label
+            and type(original.get("runner_id")) is int
+            and original["runner_id"] > 0,
+            "replacement_original_identity_invalid")
+    require(proof.get("schema") == "clawsweeper.jit-interrupted-recovery.v1"
+            and proof.get("decision") == "cleanup_verified_no_replay"
+            and proof.get("original_receipt_sha256") == digest
+            and proof.get("original_state") == original["state"]
+            and proof.get("runner_name") == baseline_runner
+            and proof.get("head_sha") == head_sha
+            and proof.get("run_id") == run_id
+            and proof.get("job_id") == job_id
+            and proof.get("attempt") == attempt
+            and proof.get("runner_absent") is True
+            and proof.get("owned_containers_absent") is True
+            and proof.get("new_registration_attempted") is False
+            and proof.get("release_acceptance") is False
+            and (proof.get("github_job") or {}).get("id") == job_id
+            and (proof.get("github_job") or {}).get("run_id") == run_id
+            and (proof.get("github_job") or {}).get("status") == "queued"
+            and (proof.get("github_job") or {}).get("conclusion") is None,
+            "replacement_cleanup_proof_invalid")
+    require(intent.get("schema") == "clawsweeper.jit-interrupted-intent.v1"
+            and intent.get("original_receipt_sha256") == digest
+            and intent.get("runner_name") == baseline_runner
+            and intent.get("run_id") == run_id
+            and intent.get("job_id") == job_id
+            and intent.get("attempt") == attempt
+            and intent.get("head_sha") == head_sha
+            and intent.get("replay_registration") is False,
+            "replacement_original_intent_invalid")
+    require(receipt.get("replacement_for") == baseline_runner
+            and receipt.get("original_receipt_sha256") == digest
+            and receipt.get("replacement_proof_sha256") ==
+                hashlib.sha256(proof_raw).hexdigest()
+            and receipt.get("image_sha256") == original.get("image_sha256")
+            and receipt.get("role") == "security"
+            and receipt.get("workflow") == WORKFLOW
+            and receipt.get("label") == expected_label
+            and type(receipt.get("runner_id")) is int
+            and receipt["runner_id"] > 0
+            and receipt["runner_id"] != original["runner_id"],
+            "replacement_receipt_provenance_invalid")
+    return {"original_receipt_sha256": digest,
+            "recovery_proof_sha256": hashlib.sha256(proof_raw).hexdigest()}
+
+
 def gh_get(path):
     p = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=45)
     require(p.returncode == 0, "github_readback_unavailable")
@@ -126,28 +206,46 @@ def verify_release(get, run_id, head_sha, pr_number=None, receipts=None, alert_i
                 job.get("status") == "completed" and job.get("conclusion") == "success",
                 "language_job_not_passed")
         expected_runner = f"csw-ci-{run_id}-{job_id}-{attempt}"
-        require(job.get("runner_name") == expected_runner, "runner_identity_mismatch")
+        reported_runner = job.get("runner_name")
+        replacement = reported_runner == expected_runner + "-replacement-1"
+        require(reported_runner == expected_runner or replacement,
+                "runner_identity_mismatch")
+        require(not replacement or receipts is not None,
+                "replacement_receipt_required")
         require(job.get("started_at") and job.get("completed_at") and
                 job["started_at"] <= job["completed_at"], "job_timing_unverifiable")
         expected_label = f"clawsweeper-ci-security-{run_id}-{language}"
         require(expected_label in job.get("labels", []), "jit_label_mismatch")
-        entry = {"id": job_id, "runner": expected_runner,
+        entry = {"id": job_id, "runner": reported_runner,
                  "started_at": job["started_at"], "completed_at": job["completed_at"]}
         if receipts is not None:
-            folder = Path(receipts) / f"run-{run_id}-job-{job_id}-attempt-{attempt}"
+            base_name = f"run-{run_id}-job-{job_id}-attempt-{attempt}"
+            folder = Path(receipts) / (base_name + ("-replacement-1" if replacement else ""))
             rpath, lpath = folder / "receipt.json", folder / "runner.log"
+            require(folder.is_dir() and not folder.is_symlink()
+                    and (not replacement or (folder.stat().st_uid == os.getuid()
+                                             and not (folder.stat().st_mode & 0o077))),
+                    "replacement_receipt_directory_unsafe" if replacement else "runner_receipt_missing")
             require(rpath.is_file() and lpath.is_file() and
-                    not rpath.is_symlink() and not lpath.is_symlink(),
+                    not rpath.is_symlink() and not lpath.is_symlink()
+                    and (not replacement or (rpath.stat().st_uid == os.getuid()
+                        and not (rpath.stat().st_mode & 0o077)
+                        and lpath.stat().st_uid == os.getuid()
+                        and not (lpath.stat().st_mode & 0o077))),
                     "runner_receipt_missing")
             receipt = json.loads(rpath.read_text())
+            if replacement:
+                entry["replacement"] = verify_replacement_lineage(
+                    receipts, run_id, job_id, attempt, head_sha, expected_runner,
+                    expected_label, receipt)
             require(receipt.get("schema") == "clawsweeper.selfhosted-jit.v1" and
                     receipt.get("run_id") == run_id and receipt.get("job_id") == job_id and
                     receipt.get("attempt") == attempt and receipt.get("head_sha") == head_sha and
-                    receipt.get("runner_name") == expected_runner and
+                    receipt.get("runner_name") == reported_runner and
                     receipt.get("state") == "passed" and receipt.get("issues") == [] and
                     receipt.get("runner_exit") == 0 and
                     (receipt.get("github_job") or {}).get("conclusion") == "success" and
-                    (receipt.get("github_job") or {}).get("runner_name") == expected_runner and
+                    (receipt.get("github_job") or {}).get("runner_name") == reported_runner and
                     receipt.get("log_bytes") == lpath.stat().st_size and
                     receipt.get("log_sha256") == sha256_file(lpath), "runner_receipt_invalid")
             entry["receipt_sha256"] = sha256_file(rpath)
