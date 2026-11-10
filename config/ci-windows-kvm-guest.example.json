@@ -1,0 +1,18 @@
+{
+  "schema": "clawsweeper.windows-kvm-guest.v1",
+  "enabled": false,
+  "repository": "AyobamiH/clawsweeper",
+  "license": "not_attested",
+  "qemu_binary": "/usr/bin/qemu-system-x86_64",
+  "qemu_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "qemu_img_binary": "/usr/bin/qemu-img",
+  "qemu_img_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "image_path": "/home/johnh/.local/share/local-ci/windows-guests/images/windows-qcow2",
+  "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "firmware_code": "/home/johnh/.local/share/local-ci/windows-guests/images/uefi-code",
+  "firmware_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "firmware_vars": "/home/johnh/.local/share/local-ci/windows-guests/images/uefi-vars",
+  "firmware_vars_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "egress": "offline_only",
+  "guest_attestation": "not_yet_proven"
+}

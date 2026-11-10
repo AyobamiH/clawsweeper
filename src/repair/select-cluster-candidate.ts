@@ -6,6 +6,10 @@ import { execFileSync } from "node:child_process";
 import type { JsonValue, LooseRecord } from "./json-types.js";
 import { parseArgs, parseJob, repoRoot } from "./lib.js";
 import { internalCodexModel, PUBLIC_CODEX_MODEL } from "../codex-env.js";
+import {
+  recordInferenceDecisionMetric,
+  type InferenceDecisionObservation,
+} from "../inference-decision-metrics.js";
 
 type LiveItem = {
   number: number;
@@ -243,48 +247,81 @@ export async function selectClusterCandidateWithModel(options: {
   model: string;
   request?: typeof fetch;
 }): Promise<ClusterSelectionDecision> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required for cluster candidate selection");
-  const schema = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot(), "schema", "repair", "cluster-selection.schema.json"),
-      "utf8",
-    ),
-  ) as LooseRecord;
-  delete schema.$schema;
-  const response = await (options.request ?? fetch)("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: internalCodexModel(options.model),
-      reasoning: { effort: "high" },
-      input: [
-        { role: "system", content: CLUSTER_SELECTION_SYSTEM_PROMPT },
-        { role: "user", content: renderClusterSelectionPrompt(options.repo, options.evidence) },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "cluster_selection",
-          strict: true,
-          schema,
-        },
+  const startedAt = Date.now();
+  // Bind telemetry to exactly the provider model used in the request.
+  const effectiveModel = internalCodexModel(options.model);
+  let outcome: InferenceDecisionObservation["outcome"] = "invocation_exception";
+  let observedUsage: InferenceDecisionObservation["providerUsage"];
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OPENAI_API_KEY is required for cluster candidate selection");
+    const schema = JSON.parse(
+      fs.readFileSync(
+        path.join(repoRoot(), "schema", "repair", "cluster-selection.schema.json"),
+        "utf8",
+      ),
+    ) as LooseRecord;
+    delete schema.$schema;
+    const response = await (options.request ?? fetch)("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
       },
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `cluster selector model failed: HTTP ${response.status} ${await response.text()}`,
+      body: JSON.stringify({
+        model: effectiveModel,
+        reasoning: { effort: "high" },
+        input: [
+          { role: "system", content: CLUSTER_SELECTION_SYSTEM_PROMPT },
+          { role: "user", content: renderClusterSelectionPrompt(options.repo, options.evidence) },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "cluster_selection",
+            strict: true,
+            schema,
+          },
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `cluster selector model failed: HTTP ${response.status} ${await response.text()}`,
+      );
+    }
+    const data = (await response.json()) as LooseRecord;
+    const providerUsage = isRecord(data.usage) ? data.usage : undefined;
+    if (providerUsage) {
+      observedUsage = {
+        ...(typeof providerUsage.input_tokens === "number"
+          ? { inputTokens: providerUsage.input_tokens }
+          : {}),
+        ...(typeof providerUsage.output_tokens === "number"
+          ? { outputTokens: providerUsage.output_tokens }
+          : {}),
+      };
+    }
+    const decision = validateClusterSelectionDecision(
+      JSON.parse(outputText(data) || "{}"),
+      options.evidence.map((candidate) => candidate.path),
     );
+    outcome = "process_ok";
+    return decision;
+  } finally {
+    if (process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE) {
+      recordInferenceDecisionMetric({
+        taskKind: "cluster_selection",
+        provider: "openai_api",
+        model: effectiveModel,
+        sourceKind: "unknown",
+        sourceRevision: process.env.CLAWSWEEPER_SOURCE_SHA || process.env.GITHUB_SHA,
+        elapsedMs: Date.now() - startedAt,
+        outcome,
+        ...(observedUsage ? { providerUsage: observedUsage } : {}),
+      });
+    }
   }
-  const data = (await response.json()) as LooseRecord;
-  return validateClusterSelectionDecision(
-    JSON.parse(outputText(data) || "{}"),
-    options.evidence.map((candidate) => candidate.path),
-  );
 }
 
 function outputText(data: LooseRecord): string {

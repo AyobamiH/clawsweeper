@@ -74,7 +74,7 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
     needs: deploy
   plan-proof:
-    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan != '' }}
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan != '' && startsWith(needs.provision.outputs.plan, 'csw-') && endsWith(needs.provision.outputs.plan, '-plan') }}
     needs: provision
     runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 8
@@ -101,7 +101,7 @@ jobs:
           path: ${{ runner.temp }}/compute-proof
           if-no-files-found: error
   execute-proof:
-    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute != '' }}
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute != '' && startsWith(needs.provision.outputs.execute, 'csw-') && endsWith(needs.provision.outputs.execute, '-execute') }}
     needs: provision
     runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 8
@@ -159,6 +159,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
+      - name: Refuse stale or absent Cloudflare proof runners without hosted fallback
+        if: ${{ always() && needs.provision.result == 'success' && (needs.plan-proof.result == 'skipped' || needs.execute-proof.result == 'skipped') }}
+        run: |
+          echo "Cloudflare proof did not run on both fresh attempt-bound runners; rerun the entire workflow." >&2
+          exit 1
   review:
     name: Fresh subscription-authenticated infrastructure review
     needs:

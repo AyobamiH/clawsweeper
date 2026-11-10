@@ -22,7 +22,7 @@ from self_hosted_executor import (
 )
 from self_hosted_policy import EVENTS, JOB_LABEL, WORKFLOWS
 
-KEY = re.compile(r"run-([1-9][0-9]*)-job-([1-9][0-9]*)-attempt-([1-9][0-9]*)\Z")
+KEY = re.compile(r"run-([1-9][0-9]*)-job-([1-9][0-9]*)-attempt-([1-9][0-9]*)(-replacement-1)?\Z")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 STATES = frozenset(("registration_uncertain", "registered", "runner_started"))
 
@@ -40,8 +40,9 @@ def verify_identity(directory: Path) -> tuple[dict, str]:
         raise RuntimeError("unsafe_or_missing_original_receipt")
     original = source.read_bytes()
     receipt = json.loads(original)
-    run_id, job_id, attempt = map(int, match.groups())
-    name = f"csw-ci-{run_id}-{job_id}-{attempt}"
+    run_id, job_id, attempt = map(int, match.groups()[:3])
+    basename = f"csw-ci-{run_id}-{job_id}-{attempt}"
+    name = basename + (match.group(4) or "")
     label = receipt.get("label")
     claimed = JOB_LABEL.fullmatch(label) if isinstance(label, str) else None
     if (not claimed or int(claimed.group(2)) != run_id
@@ -58,6 +59,14 @@ def verify_identity(directory: Path) -> tuple[dict, str]:
             or receipt.get("state") not in STATES
             or receipt.get("finished_at") is not None):
         raise RuntimeError("interrupted_receipt_identity_mismatch")
+    if match.group(4):
+        prior = directory.parent / f"run-{run_id}-job-{job_id}-attempt-{attempt}"
+        proof = prior / "interrupted-recovery-proof.json"
+        if (prior.is_symlink() or not prior.is_dir() or proof.is_symlink()
+                or not proof.is_file() or receipt.get("replacement_for") != basename
+                or receipt.get("replacement_proof_sha256") !=
+                    hashlib.sha256(proof.read_bytes()).hexdigest()):
+            raise RuntimeError("replacement_provenance_mismatch")
     runner_id = receipt.get("runner_id")
     if runner_id is not None and (not isinstance(runner_id, int)
                                   or isinstance(runner_id, bool) or runner_id <= 0):

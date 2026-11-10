@@ -59,6 +59,11 @@
   ],
   "noncanonical": [
     {
+      "path": "engineering/inference-measurement-first.md",
+      "lifecycle": "proposed",
+      "banner": "Development-only opt-in measurement guidance; this does not authorise inference routing, provider spending, CI admission, or production activation."
+    },
+    {
       "path": "queue-service-split-runbook.md",
       "lifecycle": "proposed",
       "banner": "This is an unapproved proposal, not current operator guidance."
@@ -97,6 +102,16 @@
       "path": "CI-EXECUTION-POLICY.md",
       "lifecycle": "proposed",
       "banner": "CircleCI fallback is not active until provider, free-budget, exact-SHA and recovery acceptance are verified."
+    },
+    {
+      "path": "ci/windows-native-guest-provisioning.md",
+      "lifecycle": "proposed",
+      "banner": "This is an unaccepted Windows guest isolation preflight, not operational Windows CI."
+    },
+    {
+      "path": "ci/windows-kvm-guest-provisioning.md",
+      "lifecycle": "proposed",
+      "banner": "This is an offline-only KVM Windows guest overlay preparation candidate, not a runner or protected release."
     }
   ]
 }

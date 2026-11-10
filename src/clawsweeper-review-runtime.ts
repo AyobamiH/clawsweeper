@@ -1036,6 +1036,7 @@ ${extra}
     const result = runAgentProcess({
       scanSource,
       diagnosticPromptPath: promptPath,
+      inferenceTaskKind: "review",
       label: `review-${options.item.number}-attempt-1`,
       prompt,
       model: options.model,

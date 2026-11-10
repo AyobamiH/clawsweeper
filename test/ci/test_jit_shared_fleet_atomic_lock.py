@@ -24,10 +24,16 @@ class AtomicFleetLeaseTests(unittest.TestCase):
         self.marker.write_text('local-ci-v1\n')
         self.lock=self.home/'control.lock'
         self.lock.touch(mode=0o600)
+        self.canonical_home=self.home/'canonical-source-suite'
+        self.canonical_home.mkdir(mode=0o700)
+        self.canonical=self.canonical_home/'full-source.lock'
+        self.canonical.touch(mode=0o600)
         marker=patch.object(e,'FLEET_OWNER_MARKER',self.marker)
         key=patch.object(e,'FLEET_CONTROL_LOCK',self.lock)
-        marker.start(); key.start()
+        canonical=patch.object(e,'CANONICAL_TEST_LOCK',self.canonical)
+        marker.start(); key.start(); canonical.start()
         self.addCleanup(marker.stop); self.addCleanup(key.stop)
+        self.addCleanup(canonical.stop)
     def test_idle_owner_lock_is_acquired_and_released(self):
         with e.shared_fleet_admission_lock():
             fd=os.open(self.lock,os.O_RDWR)
@@ -48,6 +54,62 @@ class AtomicFleetLeaseTests(unittest.TestCase):
             p.stdin.write('\n');p.stdin.flush();p.communicate(timeout=5)
         self.assertEqual(p.returncode,0)
         with e.shared_fleet_admission_lock():pass
+    def test_canonical_source_suite_lock_blocks_jit_even_with_free_fleet(self):
+        program="""import fcntl,os,sys;fd=os.open(sys.argv[1],os.O_RDWR);fcntl.flock(fd,fcntl.LOCK_EX);print('READY',flush=True);sys.stdin.readline()"""
+        p=subprocess.Popen([sys.executable,'-u','-c',program,str(self.canonical)],
+                           stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        try:
+            self.assertEqual(p.stdout.readline().strip(),'READY')
+            with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_busy'):
+                with e.shared_fleet_admission_lock():pass
+        finally:
+            p.stdin.write('\n');p.stdin.flush();p.communicate(timeout=5)
+        with e.shared_fleet_admission_lock():pass
+
+    def test_jit_holds_both_fleet_and_canonical_inodes_until_cleanup(self):
+        with e.shared_fleet_admission_lock():
+            for path in (self.lock,self.canonical):
+                with self.subTest(path=path):
+                    fd=os.open(path,os.O_RDWR)
+                    try:
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    finally:os.close(fd)
+        with e.shared_fleet_admission_lock():pass
+
+    def test_canonical_absent_symlink_hardlink_and_public_mode_fail_closed(self):
+        self.canonical.unlink()
+        with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_unavailable'):
+            with e.shared_fleet_admission_lock():pass
+        self.assertFalse(self.canonical.exists())
+        outside=self.home/'outside'; outside.write_text('preserve')
+        self.canonical.symlink_to(outside)
+        with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_unavailable'):
+            with e.shared_fleet_admission_lock():pass
+        self.canonical.unlink();self.canonical.touch(mode=0o600)
+        os.link(self.canonical,self.home/'canonical-hardlink')
+        with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_unsafe'):
+            with e.shared_fleet_admission_lock():pass
+        (self.home/'canonical-hardlink').unlink()
+        self.canonical.chmod(0o666)
+        with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_unsafe'):
+            with e.shared_fleet_admission_lock():pass
+        self.assertEqual(outside.read_text(),'preserve')
+
+    def test_canonical_lock_replaced_mid_admission_is_rejected(self):
+        original_open=os.open
+        replacement=self.home/'new-canonical'
+        replacement.touch(mode=0o600)
+        def open_and_replace(path,flags,*args):
+            fd=original_open(path,flags,*args)
+            if os.fspath(path)==os.fspath(self.canonical):
+                os.replace(replacement,self.canonical)
+            return fd
+        with patch.object(e.os,'open',side_effect=open_and_replace):
+            with self.assertRaisesRegex(AdmissionHold,'canonical_test_lock_replaced'):
+                with e.shared_fleet_admission_lock():pass
+
     def test_missing_or_changed_ownership_marker_fails_closed(self):
         for content in ('wrong\n',''):
             with self.subTest(content=content):

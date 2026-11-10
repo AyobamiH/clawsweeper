@@ -68,7 +68,7 @@ jobs:
       runner: ${{ steps.launch.outputs.runner }}
       attempt: ${{ steps.launch.outputs.attempt }}
   validate:
-    if: ${{ needs.launch.result == 'success' && needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner != '' }}
+    if: ${{ needs.launch.result == 'success' && needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner != '' && startsWith(needs.launch.outputs.runner, 'csw-') && endsWith(needs.launch.outputs.runner, '-execute') }}
     needs: launch
     runs-on: ${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'clawsweeper-unprovisioned-runner-held' }}
     timeout-minutes: 20
@@ -187,3 +187,8 @@ jobs:
             [ -z "$runner_id" ] || gh api --method DELETE "repos/AyobamiH/clawsweeper/actions/runners/$runner_id" || cleanup_failed=1
           done < "$RUNNER_TEMP/fixture-runner-ids"
           exit "$cleanup_failed"
+      - name: Refuse stale or absent fixture validation without hosted fallback
+        if: ${{ always() && needs.launch.result == 'success' && needs.validate.result == 'skipped' }}
+        run: |
+          echo "Fixture validation was skipped: the attempt-bound runner was unavailable. Rerun the entire workflow." >&2
+          exit 1

@@ -12,7 +12,8 @@
   "execution_boundaries": {
     "guarded_sensitive_effects": 81,
     "isolated_container_required": 1,
-    "local_label_unverified": 4,
+    "local_label_unverified": 3,
+    "genuine_windows_required": 1,
     "dedicated_codeql_security": 1,
     "external_crabbox_ephemeral": 1
   },
@@ -44,12 +45,12 @@
     },
     {
       "path": ".github/workflows/cloudflare-operator-fixtures.yml",
-      "sha256": "f41ab7c5cb1a9b68804786b2d8ac18056c2d1e084c89ad04ec42e432f69e9a6e",
+      "sha256": "da938f6e3183aaee134dc6f4f6d41c10325f17424c3b7ad53a179c6579bbba83",
       "events": ["workflow_dispatch"]
     },
     {
       "path": ".github/workflows/cloudflare-repair-provision.yml",
-      "sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "events": ["push", "workflow_dispatch"]
     },
     {
@@ -177,7 +178,7 @@
     },
     {
       "path": ".github/workflows/repair-issue-implementation-intake.yml",
-      "sha256": "4eff6f79cbe45d2d89f2e5b73f09503439409f49af9f0951df3e76f84afdd956",
+      "sha256": "c9137d12fd1c21fa4a29cb492481650ce73c5485d73993f25e057354fd618b4d",
       "events": ["repository_dispatch", "workflow_dispatch"]
     },
     {
@@ -410,7 +411,7 @@
       "risks": [],
       "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
       "status": "labelled_local_not_operationally_verified",
-      "execution_boundary": "local_label_unverified"
+      "execution_boundary": "genuine_windows_required"
     },
     {
       "workflow": ".github/workflows/clawsweeper-dispatch.yml",
@@ -449,7 +450,7 @@
         "possible_write_effect",
         "sensitive_upstream_dependency"
       ],
-      "source_sha256": "f41ab7c5cb1a9b68804786b2d8ac18056c2d1e084c89ad04ec42e432f69e9a6e",
+      "source_sha256": "da938f6e3183aaee134dc6f4f6d41c10325f17424c3b7ad53a179c6579bbba83",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -467,7 +468,7 @@
       ],
       "events": ["workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service", "possible_write_effect"],
-      "source_sha256": "f41ab7c5cb1a9b68804786b2d8ac18056c2d1e084c89ad04ec42e432f69e9a6e",
+      "source_sha256": "da938f6e3183aaee134dc6f4f6d41c10325f17424c3b7ad53a179c6579bbba83",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -480,7 +481,7 @@
       "runs_on": "${{ needs.launch.outputs.attempt == format('{0}', github.run_attempt) && needs.launch.outputs.runner || 'clawsweeper-unprovisioned-runner-held' }}",
       "events": ["workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "f41ab7c5cb1a9b68804786b2d8ac18056c2d1e084c89ad04ec42e432f69e9a6e",
+      "source_sha256": "da938f6e3183aaee134dc6f4f6d41c10325f17424c3b7ad53a179c6579bbba83",
       "status": "unmigrated_or_requires_proof",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -498,7 +499,7 @@
       ],
       "events": ["push", "workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -516,7 +517,7 @@
       ],
       "events": ["push", "workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -529,7 +530,7 @@
       "runs_on": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.execute || 'clawsweeper-unprovisioned-runner-held' }}",
       "events": ["push", "workflow_dispatch"],
       "risks": ["cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "unmigrated_or_requires_proof",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -542,7 +543,7 @@
       "runs_on": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'clawsweeper-unprovisioned-runner-held' }}",
       "events": ["push", "workflow_dispatch"],
       "risks": ["cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "unmigrated_or_requires_proof",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -560,7 +561,7 @@
       ],
       "events": ["push", "workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -578,7 +579,7 @@
       ],
       "events": ["push", "workflow_dispatch"],
       "risks": ["secret_reference", "cloud_service", "sensitive_upstream_dependency"],
-      "source_sha256": "623123a4af796694a8198c61b712ba72f4cbcb85c13d7a75c7ee59b134503afc",
+      "source_sha256": "d66894decf9d35c0e4eae0bf0a5846a7cbaf614c956ce91fd034f1e313522ca3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -1313,7 +1314,7 @@
       "runs_on": "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}",
       "events": ["repository_dispatch", "workflow_dispatch"],
       "risks": ["secret_reference", "write_permission", "cloud_service"],
-      "source_sha256": "4eff6f79cbe45d2d89f2e5b73f09503439409f49af9f0951df3e76f84afdd956",
+      "source_sha256": "c9137d12fd1c21fa4a29cb492481650ce73c5485d73993f25e057354fd618b4d",
       "status": "unmigrated_or_requires_proof",
       "execution_boundary": "guarded_sensitive_effects"
     },

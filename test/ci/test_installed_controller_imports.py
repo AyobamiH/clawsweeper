@@ -77,6 +77,7 @@ class InstalledControllerImports(unittest.TestCase):
                 "import e2e_evidence_vault as e;"
                 "assert callable(r.reconcile);"
                 "assert callable(v.verify_release);"
+                "assert callable(v.verify_replacement_lineage);"
                 "assert callable(e.verify_vault)"
             )
             env = os.environ.copy()

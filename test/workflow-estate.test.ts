@@ -202,6 +202,26 @@ test("sensitive, native Windows and dynamic jobs never become generic read-only 
     classifyExecutionBoundary(fixture({ runs_on: "windows-2025", risks: ["write_permission"] })),
     "genuine_windows_required",
   );
+  // The real native Windows job uses GitHub's exact 'Windows' runner label,
+  // not a hosted windows-* image. Never classify it as generic local CI.
+  assert.equal(
+    classifyExecutionBoundary(
+      fixture({ kind: "local_label", runs_on: ["self-hosted", "Windows", "X64"] }),
+    ),
+    "genuine_windows_required",
+  );
+  assert.equal(
+    classifyExecutionBoundary(
+      fixture({ kind: "local_label", runs_on: ["self-hosted", "Linux", "X64"] }),
+    ),
+    "local_label_unverified",
+  );
+  const windowsJob = inspectEstate(root).jobs.find(
+    (job) => job.workflow.endsWith("/ci.yml") && job.id === "windows-codex-launch",
+  );
+  assert.ok(windowsJob, "the native Windows launcher must remain in the audit");
+  assert.equal(windowsJob.execution_boundary, "genuine_windows_required");
+  assert.ok(windowsJob.runs_on.includes("Windows"));
   assert.equal(
     classifyExecutionBoundary(fixture({ risks: ["sensitive_upstream_dependency"] })),
     "guarded_sensitive_effects",

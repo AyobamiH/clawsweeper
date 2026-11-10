@@ -32,6 +32,9 @@ LOCK = ROOT / "executor.lock"
 FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
 FLEET_CONTROL_LOCK = HOME / ".local/share/local-ci/control.lock"
 FLEET_OWNER_MARKER = HOME / ".local/share/local-ci/OWNED_BY_LOCAL_CI"
+# Existing canonical test-owner lock: runner JIT and full-source CI must
+# share this inode until all owner launchers use one durable admission API.
+CANONICAL_TEST_LOCK = HOME / ".local/share/local-ci/evidence/clawsweeper-closeout-20261107/review-p1-exact-full-20261107.lock"
 RECEIPTS = ROOT / "receipts"
 IMAGE = "sha256:c1f057b23404d71586056d3333e333099c3301e84cc2583c592907a8b56597d3"
 SECURITY_IMAGE_NAME = "clawsweeper-codeql-runner:node24-codeql-2.27.4"
@@ -453,13 +456,44 @@ def detached_fleet_quiescent():
 def shared_fleet_admission_lock():
     """Use the existing, private fleet inode across admission AND execution.
 
-    The shared local fleet owns control.lock and uses its exact inode. Creating
-    or accepting a replacement lock, hard link, symlink or public directory
-    could leave two concurrent owners thinking they have exclusive admission.
+    The shared local fleet owns control.lock and uses its exact inode. The
+    canonical owner full-source suite currently holds a separate private lock;
+    acquire that existing inode first, then control.lock, and retain BOTH
+    through runner cleanup. Neither lock may be created or replaced here.
     """
     parent = FLEET_CONTROL_LOCK.parent
     fd = None
+    canonical_fd = None
     try:
+        canonical_parent = CANONICAL_TEST_LOCK.parent
+        if (canonical_parent.is_symlink() or not canonical_parent.is_dir()
+                or canonical_parent.stat().st_uid != os.getuid()
+                or canonical_parent.stat().st_mode & 0o077):
+            raise AdmissionHold("canonical_test_lock_owner_unverified")
+        if CANONICAL_TEST_LOCK.is_symlink() or not CANONICAL_TEST_LOCK.is_file():
+            raise AdmissionHold("canonical_test_lock_unavailable")
+        canonical_fd = os.open(CANONICAL_TEST_LOCK, os.O_RDWR | os.O_NOFOLLOW |
+                               getattr(os, "O_CLOEXEC", 0))
+        canonical_meta = os.fstat(canonical_fd)
+        canonical_latest = CANONICAL_TEST_LOCK.stat()
+        if (canonical_meta.st_dev, canonical_meta.st_ino) != (
+                canonical_latest.st_dev, canonical_latest.st_ino):
+            raise AdmissionHold("canonical_test_lock_replaced")
+        if (not stat.S_ISREG(canonical_meta.st_mode)
+                or canonical_meta.st_uid != os.getuid()
+                or canonical_meta.st_mode & 0o077
+                or canonical_meta.st_nlink != 1):
+            raise AdmissionHold("canonical_test_lock_unsafe")
+        try:
+            fcntl.flock(canonical_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AdmissionHold("canonical_test_lock_busy") from exc
+        except OSError as exc:
+            raise AdmissionHold("canonical_test_lock_unavailable") from exc
+        canonical_after = CANONICAL_TEST_LOCK.stat()
+        if (canonical_meta.st_dev, canonical_meta.st_ino) != (
+                canonical_after.st_dev, canonical_after.st_ino):
+            raise AdmissionHold("canonical_test_lock_replaced")
         if (parent.is_symlink() or not parent.is_dir()
                 or parent.stat().st_uid != os.getuid()
                 or parent.stat().st_mode & 0o077
@@ -499,6 +533,8 @@ def shared_fleet_admission_lock():
     finally:
         if fd is not None:
             os.close(fd)
+        if canonical_fd is not None:
+            os.close(canonical_fd)
 
 
 def capacity(candidate, controls):
@@ -662,22 +698,97 @@ def expected_isolation_checkout(candidate, controls):
     return main
 
 
-def runner_job(candidate, controls):
+def select_runner_intent(candidate):
+    """One distinct CodeQL replacement only after immutable, provider-proven cleanup.
+
+    Old JIT registration is never replayed. This read-only selector runs under
+    the executor's exclusive admission lock and fails closed on any mismatch.
+    """
     key = f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}"
-    private_dir(RECEIPTS)
-    target = RECEIPTS / key
-    if target.exists():
-        # Once a POST might have succeeded, never blindly repeat it. Operator
-        # must reconcile old JIT and GitHub job state before any re-admission.
-        raise AdmissionHold("existing_or_uncertain_runner_intent")
-    private_dir(target)
-    # No shared evidence directory or Docker socket is mounted. Only a fresh,
-    # run-scoped leaf beneath this private receipt may be writable by the JIT.
-    vault = create_vault(target) if candidate.role == "isolation" else None
     name = f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}"
+    old = RECEIPTS / key
+    if old.is_symlink():
+        raise AdmissionHold("unsafe_prior_intent")
+    if not old.exists():
+        return old, name, None
+    if (candidate.role != "security"
+            or candidate.workflow != ".github/workflows/codeql.yml"
+            or not old.is_dir() or old.stat().st_uid != os.getuid()
+            or old.stat().st_mode & 0o077):
+        raise AdmissionHold("replacement_role_or_source_not_approved")
+    paths = (old / "receipt.json", old / "interrupted-recovery-proof.json",
+             old / "interrupted-recovery-intent.json")
+    if any(not f.is_file() or f.is_symlink() or f.stat().st_uid != os.getuid()
+           or f.stat().st_mode & 0o077 for f in paths):
+        raise AdmissionHold("existing_or_uncertain_runner_intent")
+    raw, proof_raw, intent_raw = [f.read_bytes() for f in paths]
+    prior, proof, intent = (json.loads(raw), json.loads(proof_raw), json.loads(intent_raw))
+    digest = hashlib.sha256(raw).hexdigest()
+    expected = {"run_id": candidate.run_id, "job_id": candidate.job_id,
+                "attempt": candidate.run_attempt}
+    source = {"head_sha": candidate.sha, "workflow": candidate.workflow,
+              "event": candidate.event, "role": candidate.role,
+              "label": candidate.label, "runner_name": name}
+    original_id = prior.get("runner_id")
+    if (any(prior.get(k) != v for k, v in {**expected, **source}.items())
+            or prior.get("schema") != "clawsweeper.selfhosted-jit.v1"
+            or prior.get("state") not in ("registered", "runner_started")
+            or prior.get("finished_at") is not None
+            or not isinstance(original_id, int) or isinstance(original_id, bool)
+            or original_id <= 0
+            or proof.get("schema") != "clawsweeper.jit-interrupted-recovery.v1"
+            or proof.get("decision") != "cleanup_verified_no_replay"
+            or any(proof.get(k) != v for k, v in
+                   {**expected, "head_sha": candidate.sha, "runner_name": name,
+                    "original_receipt_sha256": digest,
+                    "original_state": prior["state"],
+                    "runner_absent": True, "owned_containers_absent": True,
+                    "new_registration_attempted": False,
+                    "release_acceptance": False}.items())
+            or proof.get("github_job", {}).get("status") != "queued"
+            or proof.get("github_job", {}).get("conclusion") is not None
+            or intent.get("schema") != "clawsweeper.jit-interrupted-intent.v1"
+            or any(intent.get(k) != v for k, v in
+                   {**expected, "head_sha": candidate.sha, "runner_name": name,
+                    "original_receipt_sha256": digest,
+                    "replay_registration": False}.items())):
+        raise AdmissionHold("recovered_runner_binding_mismatch")
+    for child in (name + "-worker", name + "-net"):
+        if inspect_owned(child, name) is not None:
+            raise AdmissionHold("recovered_runner_container_present")
+    runner_absent_verified(original_id, name)
+    run = gh(f"{REPO_SLUG}/actions/runs/{candidate.run_id}")
+    job = gh(f"{REPO_SLUG}/actions/jobs/{candidate.job_id}")
+    if (any(run.get(k) != v for k, v in
+            {"id": candidate.run_id, "run_attempt": candidate.run_attempt,
+             "head_sha": candidate.sha, "path": candidate.workflow}.items())
+            or run.get("repository", {}).get("full_name") != REPOSITORY
+            or job.get("id") != candidate.job_id
+            or job.get("run_id") != candidate.run_id
+            or job.get("status") != "queued" or job.get("conclusion") is not None
+            or job.get("runner_name") not in (None, "")):
+        raise AdmissionHold("recovered_github_job_changed")
+    replacement = RECEIPTS / (key + "-replacement-1")
+    if replacement.exists() or replacement.is_symlink():
+        raise AdmissionHold("existing_or_uncertain_replacement_intent")
+    return replacement, name + "-replacement-1", {
+        "replacement_for": name, "original_receipt_sha256": digest,
+        "replacement_proof_sha256": hashlib.sha256(proof_raw).hexdigest(),
+        "original_image_sha256": prior.get("image_sha256"),
+    }
+
+
+def runner_job(candidate, controls):
+    private_dir(RECEIPTS)
+    target, name, lineage = select_runner_intent(candidate)
     worker = name + "-worker"
     net = name + "-net"
     image_id = approved_job_image(candidate, controls)
+    if lineage is not None and lineage["original_image_sha256"] != image_id:
+        raise AdmissionHold("recovered_runner_image_drift")
+    private_dir(target)
+    # Only isolation receives a fresh leaf; recovery/security never share a vault.
+    vault = create_vault(target) if candidate.role == "isolation" else None
     receipt = {
         "schema": "clawsweeper.selfhosted-jit.v1", "run_id": candidate.run_id,
         "job_id": candidate.job_id, "attempt": candidate.run_attempt,
@@ -685,6 +796,8 @@ def runner_job(candidate, controls):
         "role": candidate.role, "label": candidate.label, "runner_name": name,
         "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
     }
+    if lineage is not None:
+        receipt.update({k: v for k, v in lineage.items() if k != "original_image_sha256"})
     atomic(target / "receipt.json", receipt)
     # Registration is non-idempotent. Enter cleanup protection BEFORE the POST.
     # Persist an uncertain intent first; a crash leaves recovery an exact identity

@@ -378,6 +378,7 @@ function spawnCodexSyncWithHeartbeat(
     const appServer = codexAppServerProcessOptionsFromEnv(label);
     return runAgentProcess({
       scanSource: options.scanSource,
+      inferenceTaskKind: "repair",
       label,
       prompt: options.input,
       model,
