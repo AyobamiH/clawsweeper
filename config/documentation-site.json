@@ -59,6 +59,11 @@
   ],
   "noncanonical": [
     {
+      "path": "engineering/inference-measurement-first.md",
+      "lifecycle": "proposed",
+      "banner": "Development-only opt-in measurement guidance; this does not authorise inference routing, provider spending, CI admission, or production activation."
+    },
+    {
       "path": "queue-service-split-runbook.md",
       "lifecycle": "proposed",
       "banner": "This is an unapproved proposal, not current operator guidance."
