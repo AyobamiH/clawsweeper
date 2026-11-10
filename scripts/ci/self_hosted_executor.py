@@ -6,6 +6,7 @@ owner-only 0600 controls file. No GH-hosted runner, personal host mounts, host
 Docker socket or model inference is exposed to executable workflow code.
 """
 import argparse
+import binascii
 from contextlib import contextmanager
 import datetime as dt
 import fcntl
@@ -21,7 +22,7 @@ import subprocess
 import sys
 import time
 
-from self_hosted_policy import AdmissionHold, REPOSITORY, REVIEW_EVENTS, SHA, WORKFLOWS, category_enabled, classify, is_release_preview
+from self_hosted_policy import AdmissionHold, ISOLATION_HARNESS_FILES, REPOSITORY, REVIEW_EVENTS, SHA, WORKFLOWS, category_enabled, classify, is_release_preview
 from e2e_evidence_vault import EvidenceHold, create_vault, mount_args, verify_vault
 
 HOME = Path.home()
@@ -156,6 +157,13 @@ def source_authorised(candidate, controls):
         expected = controls.get("isolation_workflow_sha256")
         if not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
             raise AdmissionHold("isolation_workflow_not_pinned")
+        harness = controls.get("isolation_harness_sha256")
+        if (not isinstance(harness, dict)
+                or set(harness) != set(ISOLATION_HARNESS_FILES)
+                or any(not isinstance(harness[name], str)
+                       or not re.fullmatch(r"[a-f0-9]{64}", harness[name])
+                       for name in ISOLATION_HARNESS_FILES)):
+            raise AdmissionHold("isolation_harness_not_pinned")
         try:
             pr = gh(f"{REPO_SLUG}/pulls/{candidate.pr_number}")
             if (pr.get("state") != "open"
@@ -197,6 +205,27 @@ def source_authorised(candidate, controls):
                 obj = gh(f"{REPO_SLUG}/contents/{candidate.workflow}?ref={ref}")
                 if hashlib.sha256(base64.b64decode(obj["content"])).hexdigest() != expected:
                     raise AdmissionHold("isolation_workflow_source_drift")
+                # Workflow-only pinning is insufficient: the same PR can leave
+                # the YAML unchanged while replacing the test runner or seal
+                # implementation with fabricated 28/28 outputs. Pin the actual
+                # executed harness at the head AND synthetic merge revision.
+                for path in ISOLATION_HARNESS_FILES:
+                    file = gh(f"{REPO_SLUG}/contents/{path}?ref={ref}")
+                    if (not isinstance(file, dict)
+                            or file.get("type") != "file"
+                            or file.get("encoding") != "base64"
+                            or not isinstance(file.get("content"), str)):
+                        raise AdmissionHold("isolation_harness_source_unverifiable")
+                    try:
+                        # GitHub REST content fields are base64 folded with
+                        # LF separators. Accept only that standard folding,
+                        # never arbitrary whitespace or invalid encoded bytes.
+                        blob = base64.b64decode(
+                            file["content"].replace("\n", ""), validate=True)
+                    except (ValueError, binascii.Error) as exc:
+                        raise AdmissionHold("isolation_harness_source_unverifiable") from exc
+                    if hashlib.sha256(blob).hexdigest() != harness[path]:
+                        raise AdmissionHold("isolation_harness_source_drift")
         except (AttributeError, KeyError, ValueError, TypeError, RuntimeError) as exc:
             if isinstance(exc, AdmissionHold):
                 raise

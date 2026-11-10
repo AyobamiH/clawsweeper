@@ -304,6 +304,8 @@ class PolicyTests(unittest.TestCase):
             "isolation_pr_number": candidate.pr_number,
             "isolation_image_sha256": "sha256:" + "f" * 64,
             "isolation_workflow_sha256": "d" * 64,
+            "isolation_harness_sha256": {
+                name: "f" * 64 for name in policy.ISOLATION_HARNESS_FILES},
         }
         self.assertTrue(policy.category_enabled(candidate, valid))
         invalid = (
@@ -316,6 +318,8 @@ class PolicyTests(unittest.TestCase):
             ({"isolation_pr_number": 124}, "isolation_pr_ancestry_not_pinned"),
             ({"isolation_image_sha256": "latest"}, "isolation_image_not_pinned"),
             ({"isolation_workflow_sha256": None}, "isolation_workflow_not_pinned"),
+            ({"isolation_harness_sha256": None}, "isolation_harness_not_pinned"),
+            ({"isolation_harness_sha256": {}}, "isolation_harness_not_pinned"),
             ({"allowed_branches": ["main"]}, "branch_not_authorised"),
         )
         for override, refusal in invalid:
@@ -356,6 +360,8 @@ class PolicyTests(unittest.TestCase):
                 "allowed_branches": ["main"], "isolation_accepted": True,
                 "isolation_head_sha": SHA, "isolation_image_sha256": "sha256:"+"f"*64,
                 "isolation_workflow_sha256": "d"*64,
+                "isolation_harness_sha256": {
+                    name: "f"*64 for name in policy.ISOLATION_HARNESS_FILES},
                 "max_jobs_per_cycle": 1,
             })
 
@@ -367,9 +373,13 @@ class PolicyTests(unittest.TestCase):
         info = run(".github/workflows/automerge-e2e.yml", actor="AyobamiH")
         info["pull_requests"][0]["base"]["sha"] = "b" * 40
         c = policy.classify(info, job("isolation", "e2e", "production automerge flow"))
+        harness_paths = policy.ISOLATION_HARNESS_FILES
+        harness = {name: ("reviewed:" + name + "\n").encode()
+                   for name in harness_paths}
         state = {"head": SHA, "verified": True,
                  "base_ref_sha": "b" * 40, "head_ref_sha": SHA,
-                 "parents": ["b" * 40, SHA], "workflow": payload}
+                 "parents": ["b" * 40, SHA], "workflow": payload,
+                 "harness": harness.copy(), "merge_harness": {}}
         def response(url):
             if url.endswith("/pulls/123"):
                 return {"state": "open",
@@ -389,14 +399,29 @@ class PolicyTests(unittest.TestCase):
                 return {"parents": [{"sha": p} for p in state["parents"]]}
             if "/contents/.github/workflows/automerge-e2e.yml?ref=" in url:
                 return {"content": base64.b64encode(state["workflow"]).decode()}
+            for name in harness_paths:
+                if "/contents/" + name + "?ref=" in url:
+                    blob = (state["merge_harness"].get(name, state["harness"][name])
+                            if url.endswith("?ref=" + "c" * 40)
+                            else state["harness"][name])
+                    return {"content": base64.b64encode(blob).decode() + "\n",
+                            "type": "file", "encoding": "base64"}
             raise AssertionError("unapproved GitHub lookup: " + url)
-        source_controls = {"isolation_workflow_sha256": digest,
-                           "isolation_base_ref": "main"}
+        source_controls = {
+            "isolation_workflow_sha256": digest,
+            "isolation_base_ref": "main",
+            "isolation_harness_sha256": {
+                name: hashlib.sha256(blob).hexdigest()
+                for name, blob in harness.items()},
+        }
         with patch.object(executor, "gh", side_effect=response):
             self.assertTrue(executor.source_authorised(c, source_controls))
             with self.assertRaisesRegex(policy.AdmissionHold,
                                         "isolation_base_ref_not_pinned"):
-                executor.source_authorised(c, {"isolation_workflow_sha256": digest})
+                executor.source_authorised(c, {
+                    "isolation_workflow_sha256": digest,
+                    "isolation_harness_sha256": source_controls["isolation_harness_sha256"],
+                })
             for key, value, refusal in (
                 ("head", "d" * 40, "isolation_pr_head_or_base_moved"),
                 ("base_ref_sha", "d" * 40, "isolation_base_branch_drift"),
@@ -414,8 +439,32 @@ class PolicyTests(unittest.TestCase):
                     finally:
                         state[key] = previous
             with self.assertRaisesRegex(policy.AdmissionHold,
+                                        "isolation_harness_not_pinned"):
+                executor.source_authorised(
+                    c, {key: value for key, value in source_controls.items()
+                        if key != "isolation_harness_sha256"})
+            for name in harness_paths:
+                with self.subTest(file=name):
+                    previous = state["harness"][name]
+                    state["harness"][name] = b"attacker-controlled substitute\n"
+                    try:
+                        with self.assertRaisesRegex(
+                                policy.AdmissionHold, "isolation_harness_source_drift"):
+                            executor.source_authorised(c, source_controls)
+                    finally:
+                        state["harness"][name] = previous
+            with self.assertRaisesRegex(policy.AdmissionHold,
                                         "isolation_workflow_not_pinned"):
                 executor.source_authorised(c, {})
+            for name in harness_paths:
+                with self.subTest(merge_only=name):
+                    state["merge_harness"][name] = b"tampered on synthetic merge\n"
+                    try:
+                        with self.assertRaisesRegex(
+                                policy.AdmissionHold, "isolation_harness_source_drift"):
+                            executor.source_authorised(c, source_controls)
+                    finally:
+                        del state["merge_harness"][name]
         with patch.object(executor, "gh", side_effect=RuntimeError("network")):
             with self.assertRaisesRegex(policy.AdmissionHold,
                                         "isolation_source_readback_unavailable"):

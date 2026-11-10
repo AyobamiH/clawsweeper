@@ -11,6 +11,29 @@ REPOSITORY = "AyobamiH/clawsweeper"
 JOB_LABEL = re.compile(r"^clawsweeper-ci-(security|ops|isolation|validation)-([1-9][0-9]*)-([a-z0-9-]+)$")
 SHA = re.compile(r"^[a-f0-9]{40}$")
 REVIEW_EVENTS = frozenset(("pull_request_review", "pull_request_review_comment"))
+# Every executable step that can fabricate or seal a green E2E trace must
+# match independently reviewed bytes, not merely a reviewed workflow YAML.
+# A changed PR source requires new exact-source owner authorisation.
+ISOLATION_HARNESS_FILES = (
+    "package.json",
+    "pnpm-lock.yaml",
+    "scripts/e2e/automerge-container.mjs",
+    "scripts/e2e/automerge.mjs",
+    "scripts/e2e/seal-automerge-evidence.mjs",
+    "test/agent-input-scan-helpers.ts",
+    "test/e2e/automerge/Dockerfile",
+    "test/e2e/automerge/Dockerfile.base",
+    "test/e2e/automerge/corepack-proxy.mjs",
+    "test/e2e/automerge/fake-codex.mjs",
+    "test/e2e/automerge/fake-gh.mjs",
+    "test/e2e/automerge/fixtures/deferred-verdict-pending-replacement.json",
+    "test/e2e/automerge/git-proxy.mjs",
+    "test/e2e/automerge/github-quota-fault.mjs",
+    "test/e2e/automerge/index-stat-mutator.mjs",
+    "test/e2e/automerge/run.mjs",
+    "test/e2e/automerge/target-fixtures.mjs",
+    "test/e2e/automerge/workflow-scheduler.mjs",
+)
 WORKFLOWS = {
     ("validation", "check"): (".github/workflows/ci.yml", "pnpm check"),
     ("validation", "sparse"): (".github/workflows/ci.yml", "sparse repair build smoke"),
@@ -297,6 +320,13 @@ def category_enabled(candidate, controls):
         if (not isinstance(controls.get("isolation_workflow_sha256"), str)
                 or not re.fullmatch(r"[a-f0-9]{64}", controls["isolation_workflow_sha256"])):
             raise AdmissionHold("isolation_workflow_not_pinned")
+        harness = controls.get("isolation_harness_sha256")
+        if (not isinstance(harness, dict)
+                or set(harness) != set(ISOLATION_HARNESS_FILES)
+                or any(not isinstance(harness[name], str)
+                       or not re.fullmatch(r"[a-f0-9]{64}", harness[name])
+                       for name in ISOLATION_HARNESS_FILES)):
+            raise AdmissionHold("isolation_harness_not_pinned")
         if candidate.event != "pull_request":
             # Main push/dispatch parity needs its own accepted rootless event.
             raise AdmissionHold("isolation_non_pr_unaccepted")
