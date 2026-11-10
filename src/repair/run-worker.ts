@@ -268,6 +268,7 @@ function spawnAgentWithHeartbeat({
       runAgentProcess({
         scanSource: { kind: "prompt" },
         diagnosticPromptPath: promptPath,
+        inferenceTaskKind: "repair",
         label: String(label),
         prompt: String(prompt),
         model: String(requestedModel),

@@ -10,6 +10,10 @@ import {
 } from "./codex-process.js";
 import { runOpenclawProcess } from "./openclaw-process.js";
 import { AgentInputScanError, scanAgentInput, type AgentScanSource } from "./agent-input-scan.js";
+import {
+  recordInferenceDecisionMetric,
+  type InferenceTaskKind,
+} from "./inference-decision-metrics.js";
 
 const DEFAULT_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS = 120_000;
 const MAX_OPENCLAW_CHECKOUT_INSPECTION_TIMEOUT_MS = 180_000;
@@ -19,6 +23,7 @@ export type AgentRunner = "codex" | "openclaw";
 export interface RunAgentProcessOptions {
   label: string;
   prompt: string;
+  inferenceTaskKind?: InferenceTaskKind;
   // Generated diagnostic copy only; never an original input or requested export.
   diagnosticPromptPath?: string;
   scanSource: AgentScanSource;
@@ -42,6 +47,51 @@ export function agentRunner(env: NodeJS.ProcessEnv = process.env): AgentRunner {
 }
 
 export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessResult {
+  // Enabled explicitly by the parent process, not by model-controlled input.
+  // This records an invocation, never a verified task or billing receipt.
+  if (!process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE) {
+    return runAgentProcessUnmetered(options);
+  }
+  const startedAt = Date.now();
+  const selectedRunner = options.env.CLAWSWEEPER_RUNNER?.trim() || "codex";
+  const provider =
+    selectedRunner === "openclaw" ? "openclaw" : selectedRunner === "codex" ? "codex" : "unknown";
+  const observation = {
+    taskKind: options.inferenceTaskKind ?? "unspecified",
+    provider,
+    model:
+      provider === "openclaw"
+        ? (options.env.CLAWSWEEPER_OPENCLAW_MODEL ?? "unknown")
+        : provider === "codex"
+          ? codexModelForTelemetry(options)
+          : "unknown",
+    sourceKind: options.scanSource.kind,
+    sourceRevision: process.env.CLAWSWEEPER_SOURCE_SHA || process.env.GITHUB_SHA,
+  } as const;
+  // The recorder is in the parent process. The model subprocess never needs
+  // the private evidence destination, even when callers forward process.env.
+  const childEnv = { ...options.env };
+  delete childEnv.CLAWSWEEPER_INFERENCE_METRICS_FILE;
+  const childOptions = { ...options, env: childEnv };
+  try {
+    const result = runAgentProcessUnmetered(childOptions);
+    recordInferenceDecisionMetric({
+      ...observation,
+      elapsedMs: Date.now() - startedAt,
+      outcome: result.status === 0 && !result.error ? "process_ok" : "process_failed",
+    });
+    return result;
+  } catch (error) {
+    recordInferenceDecisionMetric({
+      ...observation,
+      elapsedMs: Date.now() - startedAt,
+      outcome: "invocation_exception",
+    });
+    throw error;
+  }
+}
+
+function runAgentProcessUnmetered(options: RunAgentProcessOptions): CodexProcessResult {
   if (options.diagnosticPromptPath) rmSync(options.diagnosticPromptPath, { force: true });
   const runner = agentRunner(options.env);
   if (runner === "openclaw") openclawModel(options.env);
@@ -437,6 +487,32 @@ function copyError(error: Error, message: string): Error {
   const code = "code" in error ? (error as NodeJS.ErrnoException).code : undefined;
   if (typeof code === "string") (copy as NodeJS.ErrnoException).code = code;
   return copy;
+}
+
+// Only claim a Codex model when one unambiguous explicit --model argument
+// reaches the subprocess. The "internal" alias and Codex config/defaults
+// are not independently observable here, so return unknown instead.
+export function codexModelForTelemetry(options: RunAgentProcessOptions): string {
+  const args = codexAgentArgs(options);
+  const explicitModels: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if ((arg === "-c" || arg === "--config") && /^\s*model\s*=/.test(args[i + 1] ?? "")) {
+      return "unknown";
+    }
+    if (arg?.startsWith("--config=") && /^\s*model\s*=/.test(arg.slice("--config=".length))) {
+      return "unknown";
+    }
+    if (arg === "--model") {
+      explicitModels.push(args[i + 1] ?? "");
+      i += 1;
+    } else if (arg?.startsWith("--model=")) {
+      explicitModels.push(arg.slice("--model=".length));
+    }
+  }
+  if (explicitModels.length !== 1) return "unknown";
+  const model = explicitModels[0] ?? "";
+  return /^[A-Za-z0-9@/_.-]{1,96}$/.test(model) && !model.startsWith("-") ? model : "unknown";
 }
 
 export function codexAgentArgs(options: RunAgentProcessOptions): string[] {
