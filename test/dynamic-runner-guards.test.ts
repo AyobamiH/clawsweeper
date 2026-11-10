@@ -79,10 +79,12 @@ test("issue implementation intake remains owner configured, fail-closed and not 
     intake.if,
     "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER == format('clawsweeper-ci-privileged-{0}-{1}-intake', github.run_id, github.run_attempt) }}",
   );
-  assert.equal(
-    intake["runs-on"],
+  assert.deepEqual(intake["runs-on"], [
+    "self-hosted",
+    "Linux",
+    "X64",
     "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}",
-  );
-  assert.equal(intake["runs-on"].includes("client_payload"), false);
-  assert.equal(intake["runs-on"].includes("ubuntu-latest"), false);
+  ]);
+  assert.equal(JSON.stringify(intake["runs-on"]).includes("client_payload"), false);
+  assert.equal(JSON.stringify(intake["runs-on"]).includes("ubuntu-latest"), false);
 });

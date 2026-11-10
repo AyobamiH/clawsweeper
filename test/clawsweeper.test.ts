@@ -2083,7 +2083,7 @@ test("issue implementation workflow lets job intent choose dispatch capacity", (
   assert.doesNotMatch(workflow, /github\.event\.client_payload\.intake_runner/);
   assert.match(
     workflow,
-    /runs-on: \$\{\{ vars\.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER \|\| 'clawsweeper-unprovisioned-runner-held' \}\}/,
+    /runs-on:\s*\[\s*self-hosted,\s*Linux,\s*X64,\s*"\$\{\{ vars\.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER \|\| 'clawsweeper-unprovisioned-runner-held' \}\}",?\s*\]/,
   );
   assert.match(
     workflow,

@@ -189,6 +189,11 @@ def classify(manifest, run, job):
             raise Hold("unsupported_codeql_language")
         # Preserve existing approved run-bound CodeQL labels, not a new alias.
         label = "clawsweeper-ci-security-" + str(run_id) + "-" + language
+    elif (workflow == ".github/workflows/repair-issue-implementation-intake.yml"
+          and entry["id"] == "intake"):
+        # The owner-configured workflow guard pins BOTH the run and attempt.
+        # Keep every other job's established label contract unchanged.
+        label = f"clawsweeper-ci-privileged-{run_id}-{attempt}-intake"
     else:
         label = "clawsweeper-ci-" + cls + "-" + str(run_id) + "-" + entry["id"]
     labels = job.get("labels")

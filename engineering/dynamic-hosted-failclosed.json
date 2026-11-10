@@ -23,11 +23,16 @@
       "safe_runner": "${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs.plan || 'clawsweeper-unprovisioned-runner-held' }}"
     },
     ".github/workflows/repair-issue-implementation-intake.yml#intake": {
-      "current_source_sha256": "c9137d12fd1c21fa4a29cb492481650ce73c5485d73993f25e057354fd618b4d",
+      "current_source_sha256": "698a6b72fd6700151c2009a3afb9579453f79d5a986322efda10014af205ea67",
       "original_runner": "${{ github.event.client_payload.intake_runner || vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'ubuntu-latest' }}",
       "original_source_sha256": "3c2991c174ac4a3f70a2b1fb1b588b1e5ec960a664b6f40ec8f7a4033e0a32dc",
-      "rationale": "unregistered_sentinel_when_dynamic_runner_missing",
-      "safe_runner": "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}"
+      "rationale": "owner_run_attempt_label_with_explicit_linux_platform_and_unregistered_sentinel",
+      "safe_runner": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}"
+      ]
     }
   },
   "schema": "clawsweeper.dynamic-hosted-failclosed.v1"

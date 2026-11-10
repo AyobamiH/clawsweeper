@@ -5,8 +5,8 @@
     "jobs": 88,
     "github_hosted": 0,
     "dynamic_hosted_fallback": 0,
-    "local_label": 79,
-    "dynamic_or_other": 9,
+    "local_label": 80,
+    "dynamic_or_other": 8,
     "reusable": 0
   },
   "execution_boundaries": {
@@ -178,7 +178,7 @@
     },
     {
       "path": ".github/workflows/repair-issue-implementation-intake.yml",
-      "sha256": "c9137d12fd1c21fa4a29cb492481650ce73c5485d73993f25e057354fd618b4d",
+      "sha256": "698a6b72fd6700151c2009a3afb9579453f79d5a986322efda10014af205ea67",
       "events": ["repository_dispatch", "workflow_dispatch"]
     },
     {
@@ -1310,12 +1310,17 @@
       "id": "intake",
       "needs": [],
       "display_name": "intake",
-      "kind": "dynamic_or_other",
-      "runs_on": "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}",
+      "kind": "local_label",
+      "runs_on": [
+        "self-hosted",
+        "Linux",
+        "X64",
+        "${{ vars.CLAWSWEEPER_ISSUE_IMPLEMENTATION_INTAKE_RUNNER || 'clawsweeper-unprovisioned-runner-held' }}"
+      ],
       "events": ["repository_dispatch", "workflow_dispatch"],
       "risks": ["secret_reference", "write_permission", "cloud_service"],
-      "source_sha256": "c9137d12fd1c21fa4a29cb492481650ce73c5485d73993f25e057354fd618b4d",
-      "status": "unmigrated_or_requires_proof",
+      "source_sha256": "698a6b72fd6700151c2009a3afb9579453f79d5a986322efda10014af205ea67",
+      "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
     {

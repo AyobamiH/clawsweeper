@@ -24,7 +24,7 @@ class MigrationParity(unittest.TestCase):
         self.assertEqual(MIGRATION["jobs_moved"], 67)
         self.assertTrue(MIGRATION["applied"])
         self.assertEqual(MANIFEST["summary"]["github_hosted"], 0)
-        self.assertEqual(MANIFEST["summary"]["local_label"], 79)
+        self.assertEqual(MANIFEST["summary"]["local_label"], 80)
         self.assertEqual(MANIFEST["summary"]["github_hosted"], 0)
         self.assertEqual(sum(x.get("prior_approved_p1_lane") is True for x in MIGRATION["jobs"]), 2)
         self.assertEqual(MANIFEST["summary"]["jobs"], 88)
@@ -93,10 +93,10 @@ class MigrationParity(unittest.TestCase):
 
     def test_unreviewed_dynamic_routes_are_not_falsely_claimed_local(self):
         self.assertEqual(MANIFEST["summary"]["dynamic_hosted_fallback"], 0)
-        self.assertEqual(MANIFEST["summary"]["dynamic_or_other"], 9)
+        self.assertEqual(MANIFEST["summary"]["dynamic_or_other"], 8)
         undecided = [j["workflow"] + "#" + j["id"] for j in MANIFEST["jobs"]
                      if j["kind"] in ("dynamic_hosted_fallback", "dynamic_or_other")]
-        self.assertEqual(len(undecided), 9)
+        self.assertEqual(len(undecided), 8)
         self.assertIn(".github/workflows/repair-cluster-worker.yml#execute", undecided)
         # Missing dynamically provisioned runners must not start paid GitHub
         # execution. Every original hosted fallback is now fail-closed.
@@ -107,8 +107,14 @@ class MigrationParity(unittest.TestCase):
         current = {j["workflow"] + "#" + j["id"]: j for j in MANIFEST["jobs"]}
         for key in original_fallbacks:
             selector = current[key]["runs_on"]
-            self.assertIn("clawsweeper-unprovisioned-runner-held", selector)
-            self.assertNotIn("ubuntu-latest", selector)
-            self.assertEqual(current[key]["kind"], "dynamic_or_other")
+            self.assertIn("clawsweeper-unprovisioned-runner-held", json.dumps(selector))
+            self.assertNotIn("ubuntu-latest", json.dumps(selector))
+            if key == ".github/workflows/repair-issue-implementation-intake.yml#intake":
+                self.assertEqual(current[key]["kind"], "local_label")
+                self.assertEqual(selector[:3], ["self-hosted", "Linux", "X64"])
+                self.assertNotIn(key, undecided)
+                self.assertEqual(current[key]["status"], "labelled_local_not_operationally_verified")
+            else:
+                self.assertEqual(current[key]["kind"], "dynamic_or_other")
         intake = current[".github/workflows/repair-issue-implementation-intake.yml#intake"]
         self.assertNotIn("github.event.client_payload.intake_runner", intake["runs_on"])
