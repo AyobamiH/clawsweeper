@@ -77,6 +77,29 @@ class PolicyTests(unittest.TestCase):
             "enabled_roles": ["ops"], "operations_accepted": True, "trusted_main_sha": SHA,
             "allowed_branches": ["main"], "max_jobs_per_cycle": 1}))
 
+    def test_privileged_pr_target_requires_trusted_base_not_incoming_branch(self):
+        # Recovered from the 6 Nov operational-admission worktree. An
+        # external PR's head branch is NOT authority for the privileged job.
+        c = policy.classify(
+            run(".github/workflows/clawsweeper-dispatch.yml",
+                "pull_request_target", branch="outside-contributor", actor="external"),
+            job("ops", "dispatch", "dispatch"),
+        )
+        self.assertEqual(c.branch, "outside-contributor")
+        self.assertEqual(c.trusted_base_sha, SHA)
+        controls = {
+            "enabled": True, "repo": policy.REPOSITORY,
+            "enabled_roles": ["ops"], "operations_accepted": True,
+            "allowed_branches": ["main"], "max_jobs_per_cycle": 1,
+        }
+        with self.assertRaisesRegex(policy.AdmissionHold, "trusted_base_not_pinned"):
+            policy.category_enabled(c, controls)
+        self.assertTrue(policy.category_enabled(
+            c, {**controls, "trusted_main_sha": SHA}))
+        with self.assertRaisesRegex(policy.AdmissionHold, "operations_not_proven"):
+            policy.category_enabled(
+                c, {**controls, "trusted_main_sha": SHA, "operations_accepted": False})
+
     def test_all_existing_operations_events_survive_default_branch_routing(self):
         event_cases = {
             "dispatch": (".github/workflows/clawsweeper-dispatch.yml", "dispatch",
