@@ -28,6 +28,7 @@ from e2e_evidence_vault import EvidenceHold, create_vault, mount_args, verify_va
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
 CONTROLS = ROOT / "controls.json"
+OWNER_CODEQL_LOCK = ROOT / "owner-codeql-acceptance.lock"
 LOCK = ROOT / "executor.lock"
 FLEET_DB = HOME / ".local/share/local-ci/fleet.sqlite3"
 FLEET_CONTROL_LOCK = HOME / ".local/share/local-ci/control.lock"
@@ -942,6 +943,170 @@ def runner_job(candidate, controls):
             "state": receipt["state"], "issues": issues, "receipt": str(target / "receipt.json")}
 
 
+def existing_security_held_receipt(candidate):
+    """Fence a terminal security receipt, including a failed replacement.
+
+    This is detection, never replacement registration. A tampered receipt or
+    private receipt-root ownership is a hold, not an absence observation.
+    """
+    if candidate.role != "security":
+        return None
+    if RECEIPTS.is_symlink():
+        raise AdmissionHold("unsafe_prior_receipt_root")
+    if RECEIPTS.exists() and (not RECEIPTS.is_dir()
+                              or RECEIPTS.stat().st_uid != os.getuid()
+                              or stat.S_IMODE(RECEIPTS.stat().st_mode) != 0o700):
+        raise AdmissionHold("unsafe_prior_receipt_root")
+    base = f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}"
+    observed = []
+    for suffix in ("", "-replacement-1"):
+        directory = RECEIPTS / (base + suffix)
+        if directory.is_symlink():
+            raise AdmissionHold("unsafe_prior_intent")
+        if not directory.exists():
+            continue
+        if (not directory.is_dir() or directory.stat().st_uid != os.getuid()
+                or stat.S_IMODE(directory.stat().st_mode) != 0o700):
+            raise AdmissionHold("unsafe_prior_receipt_directory")
+        receipt = directory / "receipt.json"
+        if receipt.is_symlink() or not receipt.is_file():
+            raise AdmissionHold("unsafe_prior_receipt")
+        info = receipt.stat()
+        if (info.st_uid != os.getuid() or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600):
+            raise AdmissionHold("unsafe_prior_receipt")
+        try:
+            original = json.loads(receipt.read_bytes())
+        except (ValueError, UnicodeError) as exc:
+            raise AdmissionHold("unverifiable_prior_receipt") from exc
+        if original.get("state") != "held":
+            continue
+        binding = {
+            "schema": "clawsweeper.selfhosted-jit.v1",
+            "run_id": candidate.run_id,
+            "job_id": candidate.job_id,
+            "attempt": candidate.run_attempt,
+            "head_sha": candidate.sha,
+            "workflow": candidate.workflow,
+            "event": candidate.event,
+            "role": candidate.role,
+            "label": candidate.label,
+            "runner_name": f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}" + suffix,
+        }
+        if (any(original.get(k) != v for k, v in binding.items())
+                or not original.get("finished_at")
+                or not isinstance(original.get("issues"), list)
+                or not original["issues"]):
+            raise AdmissionHold("held_receipt_source_or_terminal_drift")
+        observed.append(receipt)
+    if len(observed) > 1:
+        raise AdmissionHold("multiple_held_security_intents")
+    return observed[0] if observed else None
+
+
+def disarm_security_after_held(candidate, controls, receipt_path):
+    """Close ONLY the failed run's owner security scope; never replay a JIT POST.
+
+    Caller already holds the exclusive JIT executor lock. An independent owner
+    lock serialises control-file approvals. The original held receipt is never
+    overwritten, and an interrupted controls write leaves a durable intent.
+    """
+    if candidate.role != "security" or not isinstance(controls, dict):
+        raise AdmissionHold("held_scope_role_not_supported")
+    if (controls.get("enabled") is not True
+            or controls.get("enabled_roles") != ["security"]
+            or controls.get("allowed_run_ids") != [candidate.run_id]
+            or controls.get("allowed_branches") != [candidate.branch]
+            or controls.get("operations_accepted") is not False
+            or controls.get("max_jobs_per_cycle") != 1):
+        raise AdmissionHold("held_scope_not_exclusively_owned")
+    directory = Path(receipt_path).parent
+    base = f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}"
+    if (directory not in (RECEIPTS / base, RECEIPTS / (base + "-replacement-1"))
+            or directory.is_symlink() or not directory.is_dir()
+            or directory.stat().st_uid != os.getuid()
+            or stat.S_IMODE(directory.stat().st_mode) != 0o700):
+        raise AdmissionHold("held_scope_receipt_directory_invalid")
+    receipt_path = directory / "receipt.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise AdmissionHold("held_scope_receipt_invalid")
+    info = receipt_path.stat()
+    if (info.st_uid != os.getuid() or info.st_nlink != 1
+            or stat.S_IMODE(info.st_mode) != 0o600):
+        raise AdmissionHold("held_scope_receipt_invalid")
+    original_raw = receipt_path.read_bytes()
+    try:
+        receipt = json.loads(original_raw)
+    except (ValueError, UnicodeError) as exc:
+        raise AdmissionHold("held_scope_receipt_invalid") from exc
+    expected = {
+        "schema": "clawsweeper.selfhosted-jit.v1",
+        "run_id": candidate.run_id, "job_id": candidate.job_id,
+        "attempt": candidate.run_attempt, "head_sha": candidate.sha,
+        "workflow": candidate.workflow, "role": "security",
+        "label": candidate.label, "event": candidate.event,
+        "runner_name": f"csw-ci-{candidate.run_id}-{candidate.job_id}-{candidate.run_attempt}"
+                       + ("-replacement-1" if directory.name.endswith("-replacement-1") else ""),
+    }
+    if (any(receipt.get(k) != v for k, v in expected.items())
+            or receipt.get("state") != "held" or not receipt.get("finished_at")
+            or not isinstance(receipt.get("issues"), list) or not receipt["issues"]):
+        raise AdmissionHold("held_scope_receipt_binding_invalid")
+    intent = directory / "held-scope-disarm-intent.json"
+    result_file = directory / "held-scope-disarm-result.json"
+    if (intent.exists() or intent.is_symlink()
+            or result_file.exists() or result_file.is_symlink()):
+        raise AdmissionHold("held_scope_disarm_intent_already_exists")
+    if OWNER_CODEQL_LOCK.is_symlink():
+        raise AdmissionHold("unsafe_security_owner_lock")
+    fd = os.open(OWNER_CODEQL_LOCK, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        owner = os.fstat(fd)
+        if (not stat.S_ISREG(owner.st_mode) or owner.st_uid != os.getuid()
+                or owner.st_nlink != 1 or stat.S_IMODE(owner.st_mode) != 0o600):
+            raise AdmissionHold("unsafe_security_owner_lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AdmissionHold("security_owner_controls_busy") from exc
+        if (owner.st_dev, owner.st_ino) != (
+                OWNER_CODEQL_LOCK.stat().st_dev, OWNER_CODEQL_LOCK.stat().st_ino):
+            raise AdmissionHold("security_owner_lock_replaced")
+        if CONTROLS.is_symlink() or not CONTROLS.is_file():
+            raise AdmissionHold("unsafe_security_controls")
+        state = CONTROLS.stat()
+        if (state.st_uid != os.getuid() or state.st_nlink != 1
+                or stat.S_IMODE(state.st_mode) != 0o600):
+            raise AdmissionHold("unsafe_security_controls")
+        before = CONTROLS.read_bytes()
+        if json.loads(before) != controls:
+            raise AdmissionHold("security_controls_changed_since_admission")
+        disabled = dict(controls, enabled=False, enabled_roles=[],
+                        allowed_run_ids=[], allowed_branches=[])
+        after = json.dumps(disabled, sort_keys=True, indent=2).encode() + b"\n"
+        record = {
+            "schema": "clawsweeper.held-security-scope-disarm.v1",
+            "at": now(), "run_id": candidate.run_id, "job_id": candidate.job_id,
+            "attempt": candidate.run_attempt, "head_sha": candidate.sha,
+            "original_receipt_sha256": hashlib.sha256(original_raw).hexdigest(),
+            "before_sha256": hashlib.sha256(before).hexdigest(),
+            "after_sha256": hashlib.sha256(after).hexdigest(),
+            "registration_replayed": False, "production_accepted": False,
+        }
+        atomic(intent, record)
+        if CONTROLS.read_bytes() != before:
+            raise AdmissionHold("security_controls_changed_during_disarm")
+        atomic(CONTROLS, disabled)
+        if CONTROLS.read_bytes() != after:
+            raise AdmissionHold("security_scope_disarm_unverified")
+        atomic(result_file, dict(record, state="security_scope_disarmed"))
+        return {"state": "security_scope_disarmed", "run_id": candidate.run_id,
+                "job_id": candidate.job_id, "registration_replayed": False,
+                "controls_sha256": record["after_sha256"]}
+    finally:
+        os.close(fd)
+
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -977,12 +1142,38 @@ def main():
             try:
                 category_enabled(c, controls)
                 source_authorised(c, controls)
+                if c.role == "security":
+                    # An immutable held receipt is an incident, never a signal
+                    # to try the same non-idempotent registration again.
+                    try:
+                        previous = existing_security_held_receipt(c)
+                    except AdmissionHold:
+                        print(json.dumps({"run_id": c.run_id, "job_id": c.job_id,
+                                          "held": "security_prior_receipt_requires_reconciliation"}))
+                        return
+                    if previous is not None:
+                        try:
+                            result = disarm_security_after_held(c, controls, previous)
+                        except (AdmissionHold, RuntimeError):
+                            print(json.dumps({"run_id": c.run_id, "job_id": c.job_id,
+                                              "held": "security_scope_restore_requires_reconciliation"}))
+                            return
+                        print(json.dumps(result))
+                        return
                 # The detached fleet uses this same durable host lock to
                 # reserve/dispatch work. Hold it through cleanup so neither
                 # owner can admit a concurrent external effect.
                 with shared_fleet_admission_lock():
                     capacity(c, controls)
                     result = runner_job(c, controls)
+                    if c.role == "security" and result.get("state") == "held":
+                        try:
+                            result["scope_recovery"] = disarm_security_after_held(
+                                c, controls, result["receipt"])
+                        except (AdmissionHold, RuntimeError):
+                            print(json.dumps({"run_id": c.run_id, "job_id": c.job_id,
+                                              "held": "security_scope_restore_requires_reconciliation"}))
+                            return
                 print(json.dumps(result))
                 return
             except AdmissionHold as exc:

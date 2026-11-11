@@ -179,7 +179,7 @@ class AtomicFleetLeaseTests(unittest.TestCase):
         with (patch.object(e,'ROOT',self.home/'private'),
               patch.object(e,'LOCK',self.home/'jit.lock'),
               patch.object(e,'load_controls',return_value={'enabled':True}),
-              patch.object(e,'discover',return_value=[SimpleNamespace()]),
+              patch.object(e,'discover',return_value=[SimpleNamespace(role='validation')]),
               patch.object(e,'category_enabled'),patch.object(e,'source_authorised'),
               patch.object(e,'capacity',side_effect=check),
               patch.object(e,'runner_job',side_effect=fake_runner),
