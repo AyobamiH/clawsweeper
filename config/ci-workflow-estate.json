@@ -55,7 +55,7 @@
     },
     {
       "path": ".github/workflows/codeql.yml",
-      "sha256": "9c2b7d2b3775d9587e3c01341573babf5bb9f759a2adbc5992b2e428e29e4b3b",
+      "sha256": "4d209f7754d4923e24cd863177b619caffb7cdf6fd353a553ec8152fc048ec76",
       "events": ["pull_request", "push", "schedule", "workflow_dispatch"]
     },
     {
@@ -597,7 +597,7 @@
       ],
       "events": ["pull_request", "push", "schedule", "workflow_dispatch"],
       "risks": ["write_permission"],
-      "source_sha256": "9c2b7d2b3775d9587e3c01341573babf5bb9f759a2adbc5992b2e428e29e4b3b",
+      "source_sha256": "4d209f7754d4923e24cd863177b619caffb7cdf6fd353a553ec8152fc048ec76",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "dedicated_codeql_security"
     },

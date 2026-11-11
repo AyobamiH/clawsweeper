@@ -52,6 +52,10 @@ const DISPLAY_READY_TIMEOUT_SECONDS = 30;
 const RECORDER_READY_TIMEOUT_SECONDS = 15;
 const RECORDER_FINALIZE_TIMEOUT_SECONDS = 20;
 const TERMINAL_COMMAND_START_TIMEOUT_SECONDS = 10;
+// tmux pipe EOF and its capture helper's final fsync can lag behind command
+// completion on a saturated CI runner. Bound that drain independently without
+// relaxing command start, pane identity, exit status or exact output checks.
+const TERMINAL_CAPTURE_DRAIN_TIMEOUT_SECONDS = 30;
 const TERMINAL_EXPECT_OUTPUT_TIMEOUT_SECONDS = 30;
 const TERMINAL_READY_STABILITY_SECONDS = 3;
 const STEP_SETTLE_MILLISECONDS = 700;
@@ -1577,7 +1581,7 @@ function closeTerminalCapture(
     requireSuccess("tmux", removeArgs, runner("tmux", removeArgs, { cwd: checkout }));
   }
   window.captureOpen = false;
-  for (let elapsed = 0; elapsed <= TERMINAL_COMMAND_START_TIMEOUT_SECONDS * 10; elapsed += 1) {
+  for (let elapsed = 0; elapsed <= TERMINAL_CAPTURE_DRAIN_TIMEOUT_SECONDS * 10; elapsed += 1) {
     const completionText = readBoundedTerminalFile(window.files.captureDone, 64);
     if (completionText !== undefined) {
       const completion = completionText.trim();
@@ -1595,12 +1599,12 @@ function closeTerminalCapture(
       }
       return;
     }
-    if (elapsed < TERMINAL_COMMAND_START_TIMEOUT_SECONDS * 10) {
+    if (elapsed < TERMINAL_CAPTURE_DRAIN_TIMEOUT_SECONDS * 10) {
       requireSuccess("sleep", ["0.1"], runner("sleep", ["0.1"]));
     }
   }
   throw new Error(
-    `terminal capture helper did not finish after tmux pipe EOF within ${TERMINAL_COMMAND_START_TIMEOUT_SECONDS} seconds`,
+    `terminal capture helper did not finish after tmux pipe EOF within ${TERMINAL_CAPTURE_DRAIN_TIMEOUT_SECONDS} seconds`,
   );
 }
 

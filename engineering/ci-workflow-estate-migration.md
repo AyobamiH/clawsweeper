@@ -89,3 +89,83 @@ general ClawSweeper JIT pool. Its dynamic checkout ref and persistent
 `~/.crabbox/actions` state prohibit interpreting its local label as evidence
 of safe generic runner equivalence. A real Crabbox owner-specific lifecycle
 review is required before any redesign or activation.
+
+
+## Exact-source execution evidence reconciliation
+
+`scripts/ci/verify_estate_execution.py` is a read-only evidence reconciler, not
+a runner controller, workflow activator or production authorisation mechanism.
+It inventories the complete manifest from an immutable Git commit and verifies
+its workflow bytes, GitHub signature and source tree before evaluating explicit
+run IDs. It never dispatches a workflow or registers, retries or removes a runner.
+
+Run it from an existing authorised checkout with the exact source revision:
+
+```sh
+python3 -B scripts/ci/verify_estate_execution.py \
+  --checkout "$PWD" \
+  --head-sha "$EXACT_SOURCE_SHA" \
+  --run-id "$EXISTING_RUN_ID" \
+  --receipt-root "$HOME/.local/share/local-ci/clawsweeper-selfhosted/receipts" \
+  --output-dir "$HOME/.local/share/local-ci/evidence/estate-execution-readback"
+```
+
+Each run is read at its exact attempt with complete, bounded pagination. Job
+identity and run attempt are read again after verification. Successful execution
+requires the original essential steps, private JIT receipt, recomputed log digest,
+matching runner identity and fresh absence of that runner and its owned containers.
+Replacement executions require fresh cleanup readbacks for both the replacement
+and the original identity; historical recovery flags are not sufficient.
+Other projects' active runners do not prevent this read-only reconciliation.
+
+The CodeQL adapter delegates to the existing SARIF verifier and counts both
+languages as one job definition. The earlier source/timestamp-only SARIF attribution
+could accept uploads from another run. The scoped CodeQL workflow now records the
+actual github/codeql-action/analyze sarif-id output in its authenticated GitHub
+job log, bound to run ID, attempt and language. The read-only verifier retrieves
+that exact job log, independently matches the SARIF ID against the Code Scanning
+analysis and completed-upload endpoints, and rejects absent, duplicate or
+conflicting claims. Earlier CodeQL runs lacking the new upload attestation are
+not evidence for this revised claim and cannot transfer to later commits. The ordinary full-check adapter additionally
+pins the reviewed CI workflow byte digest; altered checkout or command semantics
+require a new adapter review. The sparse job remains held for PR execution until
+an immutable executed-merge attestation is supported. A legitimately skipped
+sparse job on manual dispatch is not a pass and does not erase the separate
+full-check job's proof.
+
+Sensitive jobs without their specialised effect, credential-isolation, rootless
+scenario or native Windows verifier remain held even when GitHub reports green.
+Verified execution does not establish full workflow dependency/event coverage or
+production-effect acceptance. No report from this initial adapter set grants
+production release authority.
+
+CodeQL upload attestations also require an independently reviewed workflow
+byte digest: a changed workflow cannot grant itself trust by regenerating its
+manifest. The executing verifier, its first-party policy, SARIF dependencies, and the
+immutable container-ownership label in the exact executor source,
+and the workflow enumerator must match the selected committed revision before
+and after observation. The policy and SARIF verifier are compiled directly
+from those source bytes (never from cached Python bytecode) before use; their
+loaded-source fingerprints must also match the selected commit. A cache forged
+with valid Python timestamp metadata cannot silently replace executed policy.
+The real enumerator reconciles job membership against
+YAML, so deleting a manifest leaf cannot understate outstanding work. This
+requires running the verifier from the selected revision, not borrowing a newer
+uncommitted verifier and labelling its result as proof of an older source.
+
+GitHub JSON and immutable Git readbacks are streamed through the same bounded
+process-output contract; oversized responses are refused before allocation.
+Job logs are streamed with bounded bytes and time. Overflow and timeout stop
+the owned process group, including descendants after their leader exits; archive
+expansion is bounded separately. No raw provider output becomes a failure reason.
+
+Evidence is private, content-addressed, create-only and fsynced. `latest.json`
+is invalidated before fetching, so an interrupted or failed refresh cannot leave
+an earlier result represented as current. Historical reports remain unchanged.
+Exit status 2 means a useful partial estate report; status 1 means the observation
+is unverified. Neither is full migration acceptance. Tests use controlled fixtures
+to prove verifier behaviour; those fixtures never count as operational evidence.
+
+Do not enable a disabled CI workflow while its protected default-branch source
+still selects GitHub-hosted runners. Routing migration in `develop` is not
+authority to activate the older default-branch workflow or privileged jobs.

@@ -918,6 +918,87 @@ test("terminal seals rolling capture before rendering a still-running timeout", 
   assert.ok(target < pipeClose);
 });
 
+test("terminal capture tolerates a delayed clean EOF without accepting stale output", () => {
+  // A busy runner may take longer than a cold startup to deliver tmux pipe EOF.
+  // Use the actual capture-file boundary and deterministic fixture polls.
+  const calls: string[] = [];
+  const fixture = terminalLifecycleRunner(calls, {
+    terminalCaptures: ["NEW_COMMAND_OUTPUT\n"],
+  });
+  let capture: ReturnType<typeof terminalCaptureInvocation>;
+  let closed = false;
+  let polls = 0;
+  const runner: MediaProofCommandRunner = (tool, args, options) => {
+    if (tool === "tmux" && args[0] === "pipe-pane" && args.includes("-O")) {
+      capture = terminalCaptureInvocation(args);
+    }
+    if (tool === "tmux" && args[0] === "pipe-pane" && !args.includes("-O")) {
+      closed = true;
+      calls.push("capture-pipe-closed");
+      return { status: 0 };
+    }
+    if (closed && tool === "sleep" && args[0] === "0.1") {
+      polls += 1;
+      if (polls === 125) {
+        assert.ok(capture);
+        writeFileSync(capture.capture, "NEW_COMMAND_OUTPUT\n");
+        writeFileSync(capture.captureDone, "eof\n");
+      }
+    }
+    return fixture(tool, args, options);
+  };
+  const result = driveTerminal({
+    plan: {
+      ...recommendedPlan("terminal"),
+      entry: "printf 'NEW_COMMAND_OUTPUT\\n'",
+      steps: [{ action: "expect_output", text: "NEW_COMMAND_OUTPUT" }],
+    },
+    checkout: "/tmp/checkout",
+    rawVideoPath: "/tmp/live-proof.raw.webm",
+    maxRecordingSeconds: 90,
+    recordMedia: false,
+    runner,
+  });
+  assert.equal(result.status, "completed", result.output);
+  assert.ok(polls >= 125, "capture must be sealed by the delayed helper");
+  assert.equal(result.steps[0]?.satisfied, true);
+  assert.match(result.output, /NEW_COMMAND_OUTPUT/);
+});
+
+test("terminal capture refuses missing EOF even after the bounded drain", () => {
+  const calls: string[] = [];
+  const fixture = terminalLifecycleRunner(calls, {
+    terminalCaptures: ["READABLE_BUT_UNSEALED\n"],
+  });
+  let closed = false;
+  let polls = 0;
+  const runner: MediaProofCommandRunner = (tool, args, options) => {
+    if (tool === "tmux" && args[0] === "pipe-pane" && !args.includes("-O")) {
+      closed = true;
+      calls.push("capture-pipe-closed");
+      return { status: 0 };
+    }
+    if (closed && tool === "sleep" && args[0] === "0.1") polls += 1;
+    return fixture(tool, args, options);
+  };
+  const result = driveTerminal({
+    plan: {
+      ...recommendedPlan("terminal"),
+      entry: "printf 'READABLE_BUT_UNSEALED\\n'",
+      steps: [{ action: "expect_output", text: "READABLE_BUT_UNSEALED" }],
+    },
+    checkout: "/tmp/checkout",
+    rawVideoPath: "/tmp/live-proof.raw.webm",
+    maxRecordingSeconds: 90,
+    recordMedia: false,
+    runner,
+  });
+  assert.equal(result.status, "failed");
+  assert.match(result.output, /terminal capture helper did not finish after tmux pipe EOF/);
+  assert.equal(result.steps[0]?.satisfied, false);
+  assert.ok(polls >= 100, "missing EOF must remain a bounded failure");
+});
+
 test("terminal rejects a capture stream that does not seal with clean EOF", () => {
   const result = driveTerminal({
     plan: {
