@@ -6,6 +6,7 @@ claims. This tool can verify CodeQL and direct-head ordinary validation. Every
 other class remains held until its specialised effect/isolation verifier exists.
 """
 import argparse
+import ast
 import base64
 import datetime as dt
 import fcntl
@@ -17,9 +18,42 @@ import re
 import stat
 import subprocess
 import sys
+import io
+import zipfile
+import selectors
+import signal
+import time
 
-import estate_policy
-import verify_codeql_release
+import types
+
+
+def _source_compiled_dependency(name):
+    """Execute literal source bytes, never a potentially stale valid .pyc.
+
+    Runtime source proof later binds these exact compiled bytes to HEAD. Use
+    unique module names for dataclass lookup without replacing shared imports.
+    """
+    path = Path(__file__).resolve().parent / (name + ".py")
+    payload = path.read_bytes()
+    if not payload or len(payload) > 8 * 1024 * 1024:
+        raise RuntimeError("verified_dependency_unavailable")
+    module_name = "_clawsweeper_verified_" + name
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
+    module.__package__ = ""
+    module.__source_sha256__ = hashlib.sha256(payload).hexdigest()
+    compiled = compile(payload, str(path), "exec", dont_inherit=True)
+    sys.modules[module_name] = module
+    try:
+        exec(compiled, module.__dict__)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+estate_policy = _source_compiled_dependency("estate_policy")
+verify_codeql_release = _source_compiled_dependency("verify_codeql_release")
 
 REPO = "AyobamiH/clawsweeper"
 API = "repos/" + REPO
@@ -32,6 +66,10 @@ CODEQL = ".github/workflows/codeql.yml#analyze"
 # This adapter examined checkout/ref and command semantics for these exact bytes.
 # A changed workflow requires explicit adapter review, not just matching names.
 VALIDATION_WORKFLOW_SHA256 = "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526"
+# Independently reviewed CodeQL step semantics, NOT a manifest-self-approval.
+CODEQL_WORKFLOW_SHA256 = "4d209f7754d4923e24cd863177b619caffb7cdf6fd353a553ec8152fc048ec76"
+# Exact run-owned container label from the immutable executor source contract.
+CONTAINER_LABEL = "io.ayobamih.clawsweeper.selfhosted"
 VALIDATION = {
     ".github/workflows/ci.yml#check": ("check", "pnpm check", (
         "Set up job", "Run actions/checkout@v7", "Validate workflow semantics",
@@ -41,7 +79,8 @@ VALIDATION = {
         "Build each sparse repair checkout")),
 }
 CODEQL_STEPS = ("Set up job", "Run actions/checkout@v7",
-                "Run github/codeql-action/init@v4", "Run github/codeql-action/analyze@v4")
+                "Run github/codeql-action/init@v4", "Run github/codeql-action/analyze@v4",
+                "Attest CodeQL upload identity")
 MISSING = {
     "ordinary": "exact_job_receipt_steps_and_cleanup_required",
     "codeql": "both_languages_sarif_receipts_and_cleanup_required",
@@ -89,33 +128,222 @@ def github_get(path):
         rf"pulls/{integer}",
         rf"code-scanning/analyses\?per_page=100&page={integer}",
         r"code-scanning/alerts/3",
+        rf"code-scanning/analyses/{integer}",
+        r"code-scanning/sarifs/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     )
     require(isinstance(path, str) and len(path) <= 500 and ".." not in path
             and any(re.fullmatch(prefix + p, path) for p in patterns),
             "github_endpoint_not_allowed")
     try:
-        result = subprocess.run(
+        raw = _bounded_stdout(
             ["gh", "api", "--hostname", "github.com", "--method", "GET", path],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, check=False)
-        require(result.returncode == 0 and len(result.stdout) <= MAX_JSON,
-                "github_readback_unavailable")
-        value = json.loads(result.stdout)
+            max_bytes=MAX_JSON, timeout_seconds=30)
+        value = json.loads(raw)
         require(isinstance(value, (dict, list)), "github_response_invalid")
         return value
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+    except (Refused, OSError, subprocess.SubprocessError, ValueError) as exc:
         raise Refused("github_readback_unavailable") from exc
+
+
+
+def _bounded_stdout(argv, *, max_bytes, timeout_seconds):
+    """Read bounded process output before allocation. Terminate on uncertainty."""
+    require(isinstance(argv, (list, tuple)) and argv and max_bytes > 0
+            and timeout_seconds > 0, "invalid_bounded_read")
+    process = None
+    selector = None
+    completed = False
+    try:
+        process = subprocess.Popen(
+            list(argv), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True)
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        chunks = bytearray()
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, "provider_stdout_timeout")
+            ready = selector.select(min(remaining, 1.0))
+            if not ready:
+                continue
+            data = os.read(process.stdout.fileno(), min(65536, max_bytes - len(chunks) + 1))
+            if not data:
+                break
+            require(len(data) + len(chunks) <= max_bytes, "provider_stdout_limit")
+            chunks.extend(data)
+        require(process.wait(timeout=max(0.01, deadline - time.monotonic())) == 0,
+                "provider_stdout_exit_nonzero")
+        completed = True
+        return bytes(chunks)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Refused("provider_stdout_unavailable") from exc
+    finally:
+        if process is not None:
+            # The leader may have exited while a descendant still holds the
+            # output pipe. A timeout/overflow must stop the owned session, not
+            # merely test whether its leader happens to be alive.
+            if not completed or process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            if process.stdout is not None:
+                process.stdout.close()
+        if selector is not None:
+            selector.close()
+
+
+def github_job_log(job_id):
+    """Read the exact job log; never buffer an unbounded response or emit it."""
+    require(positive(job_id), "invalid_job_log_identity")
+    raw = _bounded_stdout(
+        ["gh", "api", "--hostname", "github.com", "--method", "GET",
+         f"{API}/actions/jobs/{job_id}/logs"],
+        max_bytes=MAX_JSON, timeout_seconds=45)
+    require(raw, "github_job_log_unavailable")
+    if raw.startswith(b"PK\x03\x04"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                names = archive.infolist()
+                require(0 < len(names) <= 20 and
+                        all(not item.is_dir() and 0 < item.file_size <= MAX_JSON
+                            for item in names) and
+                        sum(item.file_size for item in names) <= MAX_JSON,
+                        "github_job_log_oversized_or_ambiguous")
+                chunks = []
+                for item in names:
+                    body = archive.open(item).read(item.file_size + 1)
+                    require(len(body) == item.file_size, "github_job_log_zip_invalid")
+                    chunks.append(body)
+                raw = b"\n".join(chunks)
+        except Refused:
+            raise
+        except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
+            raise Refused("github_job_log_unavailable") from exc
+    require(raw and len(raw) <= MAX_JSON, "github_job_log_unavailable")
+    return raw
+
+
+
+def codeql_sarif_claim(get, log_get, run, job, language, original):
+    """Prove the uploaded SARIF ID was declared by the selected trusted job."""
+    entry = original.get("analyses", {}).get(language)
+    require(isinstance(entry, dict) and positive(entry.get("id")),
+            "codeql_sarif_identity_unverified")
+    raw = log_get(job["id"])
+    require(isinstance(raw, bytes) and 0 < len(raw) <= MAX_JSON,
+            "codeql_job_log_unverifiable")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise Refused("codeql_job_log_unverifiable") from exc
+    pattern = re.compile(
+        r"CODEQL_SARIF_UPLOAD_V1 run=([0-9]+) attempt=([0-9]+) "
+        r"language=(actions|javascript-typescript) "
+        r"sarif_id=([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?![A-Za-z0-9-])")
+    matches = pattern.findall(text)
+    require(len(matches) == 1, "codeql_sarif_identity_unverified")
+    run_text, attempt_text, lang_text, sarif_id = matches[0]
+    require(run_text == str(run["id"]) and attempt_text == str(run["run_attempt"])
+            and lang_text == language, "codeql_sarif_job_provenance_mismatch")
+    analysis_id = entry["id"]
+    provider = get(f"{API}/code-scanning/analyses/{analysis_id}")
+    require(isinstance(provider, dict)
+            and provider.get("id") == analysis_id
+            and provider.get("sarif_id") == sarif_id
+            and (provider.get("tool") or {}).get("name") == "CodeQL"
+            and provider.get("analysis_key") == ".github/workflows/codeql.yml:analyze"
+            and provider.get("category") == f"/language:{language}"
+            and provider.get("commit_sha") == entry.get("commit_sha")
+            and provider.get("ref") == entry.get("ref")
+            and provider.get("created_at") == entry.get("created_at")
+            and not provider.get("error"),
+            "codeql_sarif_job_provenance_mismatch")
+    upload = get(f"{API}/code-scanning/sarifs/{sarif_id}")
+    require(isinstance(upload, dict) and upload.get("processing_status") == "complete"
+            and upload.get("analyses_url") ==
+                f"https://api.github.com/{API}/code-scanning/analyses?sarif_id={sarif_id}",
+            "codeql_sarif_upload_not_processed")
+    return {"analysis_id": analysis_id, "sarif_id": sarif_id,
+            "job_id": job["id"], "job_log_bytes": len(raw),
+            "job_log_sha256": digest(raw), "processed": True}
+
 
 
 def _git(checkout, *args):
     try:
-        result = subprocess.run(["git", "--no-replace-objects", "-C", str(checkout), *args],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                timeout=25, check=False)
-        require(result.returncode == 0 and len(result.stdout) <= MAX_JSON,
-                "immutable_source_unavailable")
-        return result.stdout
-    except (OSError, subprocess.SubprocessError) as exc:
+        return _bounded_stdout(["git", "--no-replace-objects", "-C", str(checkout), *args],
+                               max_bytes=MAX_JSON, timeout_seconds=25)
+    except (Refused, OSError, subprocess.SubprocessError) as exc:
         raise Refused("immutable_source_unavailable") from exc
+
+
+
+def runtime_source_proof(checkout, head_sha):
+    """Bind running Python modules and the independent JS job enumerator to HEAD.
+
+    Hashing the current verifier alone is insufficient: its imported policy and
+    SARIF adapter can be replaced without changing the claimed commit. The
+    independent workflow-estate generator checks job inventory, not just YAML
+    file paths or a self-edited manifest row count.
+    """
+    require(isinstance(head_sha, str) and SHA.fullmatch(head_sha),
+            "invalid_head_sha")
+    root = Path(checkout).resolve(strict=True)
+    expected = {
+        "scripts/ci/verify_estate_execution.py": Path(__file__),
+        "scripts/ci/verify_codeql_release.py": Path(verify_codeql_release.__file__),
+        "scripts/ci/estate_policy.py": Path(estate_policy.__file__),
+        "scripts/ci/self_hosted_executor.py": root / "scripts/ci/self_hosted_executor.py",
+        "scripts/ci/workflow-estate.mjs": root / "scripts/ci/workflow-estate.mjs",
+        "config/ci-workflow-estate.json": root / "config/ci-workflow-estate.json",
+    }
+    result = {}
+    for name, module in expected.items():
+        path = root / name
+        require(not path.is_symlink() and path.is_file() and module.resolve() == path.resolve(),
+                "runtime_module_provenance_mismatch")
+        info = path.stat()
+        require(info.st_uid == os.getuid() and info.st_nlink == 1
+                and info.st_size <= MAX_JSON and not (info.st_mode & 0o022),
+                "runtime_module_untrusted")
+        actual = path.read_bytes()
+        require(len(actual) == info.st_size
+                and actual == _git(root, "show", f"{head_sha}:{name}"),
+                "runtime_source_bytes_drift")
+        if name == "scripts/ci/estate_policy.py":
+            require(estate_policy.__source_sha256__ == digest(actual),
+                    "runtime_loaded_dependency_mismatch")
+        if name == "scripts/ci/verify_codeql_release.py":
+            require(verify_codeql_release.__source_sha256__ == digest(actual),
+                    "runtime_loaded_dependency_mismatch")
+        result[name] = digest(actual)
+        if name == "scripts/ci/self_hosted_executor.py":
+            try:
+                parsed = ast.parse(actual, filename=name)
+            except (SyntaxError, UnicodeError, ValueError) as exc:
+                raise Refused("container_label_contract_changed") from exc
+            labels = [node.value.value for node in parsed.body
+                      if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "LABEL"
+                              for target in node.targets)
+                      and isinstance(node.value, ast.Constant)
+                      and isinstance(node.value.value, str)]
+            require(labels == [CONTAINER_LABEL], "container_label_contract_changed")
+    try:
+        check = subprocess.run(["node", "scripts/ci/workflow-estate.mjs", "--check"],
+                               cwd=root, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Refused("independent_job_inventory_unavailable") from exc
+    require(check.returncode == 0, "independent_job_inventory_mismatch")
+    return result
+
 
 
 def source_manifest(checkout, head_sha):
@@ -378,10 +606,11 @@ def complete_steps(job, required):
 def owned_containers_absent(runner_name):
     require(re.fullmatch(r"csw-ci-[1-9][0-9]*-[1-9][0-9]*-[1-9][0-9]*(?:-replacement-1)?",
                          str(runner_name)), "unsafe_runner_name")
-    # Reuse the executor's exact ownership label; never inspect/mutate unrelated containers.
-    from self_hosted_executor import LABEL
+    # The executor source and its LABEL literal are verified against HEAD by
+    # runtime_source_proof() before and after observations; do not import an
+    # unverified module while deciding whether cleanup is complete.
     try:
-        result = subprocess.run(["docker", "ps", "--all", "--filter", f"label={LABEL}={runner_name}",
+        result = subprocess.run(["docker", "ps", "--all", "--filter", f"label={CONTAINER_LABEL}={runner_name}",
                                  "--format", "{{.ID}}"], stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, timeout=15, check=False)
         require(result.returncode == 0, "container_inventory_unavailable")
@@ -408,7 +637,7 @@ def _job_identity(job):
             "conclusion", "started_at", "completed_at", "runner_id", "runner_name", "labels", "steps")}
 
 
-def verify_run(source, run_id, receipts, get, containers):
+def verify_run(source, run_id, receipts, get, containers, log_get=github_job_log):
     require(positive(run_id), "invalid_run_id")
     run = get(f"{API}/actions/runs/{run_id}")
     require(isinstance(run, dict) and run.get("id") == run_id
@@ -431,6 +660,8 @@ def verify_run(source, run_id, receipts, get, containers):
         require(job.get("head_sha", source["head_sha"]) == source["head_sha"], "job_head_mismatch")
     accepted, proofs, observed_jobs, recovered_originals = {}, [], [], []
     if path == ".github/workflows/codeql.yml":
+        require(source["sources"][path] == CODEQL_WORKFLOW_SHA256,
+                "codeql_workflow_adapter_review_required")
         require(len(jobs) == 2 and CODEQL in source["jobs"], "codeql_job_inventory_invalid")
         pr_number = None
         if run.get("event") == "pull_request":
@@ -461,13 +692,20 @@ def verify_run(source, run_id, receipts, get, containers):
             raise Refused("codeql_adapter_refused") from exc
         require(original.get("head_sha") == source["head_sha"]
                 and original.get("run_attempt") == run["run_attempt"], "codeql_adapter_identity_mismatch")
+        uploaded = {}
+        for language, expected_name in verify_codeql_release.LANGUAGES.items():
+            job = next(j for j in observed_jobs if j["name"] == expected_name)
+            uploaded[language] = codeql_sarif_claim(get, log_get, run, job, language, original)
+        require(len({x["sarif_id"] for x in uploaded.values()}) == len(uploaded),
+                "codeql_sarif_identity_duplicate")
         for job, proof in zip(observed_jobs, proofs):
             if "original_receipt_sha256" in proof:
                 recovered_originals.append(replacement_cleanup_subject(receipts, run, job, proof))
         accepted[CODEQL] = {"run_id": run_id, "attempt": run["run_attempt"],
                             "job_ids": [j["id"] for j in observed_jobs],
-                            "adapter": "existing_codeql_release_plus_cleanup",
-                            "sarif": original["analyses"], "security_alert_3": original["security_alert_3"]}
+                            "adapter": "existing_codeql_release_plus_job_sarif_id_and_cleanup",
+                            "sarif": original["analyses"], "uploaded_sarif": uploaded,
+                            "security_alert_3": original["security_alert_3"]}
     else:
         keys = [key for key in VALIDATION if key in source["jobs"] and key.startswith(path + "#")]
         require(keys, "specialised_effect_adapter_required")
@@ -481,13 +719,17 @@ def verify_run(source, run_id, receipts, get, containers):
                 continue
             require(len(matching) == 1, "validation_job_identity_ambiguous")
             job = matching[0]
-            if run["event"] not in source["jobs"][key]["events"]:
-                # A PR-only sparse job is legitimately skipped on dispatch.
-                # This is not sparse acceptance and must not erase the separate
-                # full-check job's genuine evidence.
-                require(job.get("status") == "completed" and job.get("conclusion") == "skipped",
-                        "validation_event_not_allowed")
+            if key == ".github/workflows/ci.yml#sparse-repair-builds" and run["event"] in ("push", "workflow_dispatch"):
+                # The PINNED ci.yml has a pull_request-only `if:` expression,
+                # although the generated manifest lists all workflow events.
+                # Retain genuine full-check evidence without falsely accepting
+                # a skipped sparse job. An unexpected live runner/step is HOLD.
+                require(job.get("status") == "completed" and job.get("conclusion") == "skipped"
+                        and job.get("runner_id") in (None, 0)
+                        and job.get("runner_name") in (None, "")
+                        and not job.get("steps"), "sparse_expected_skip_mismatch")
                 continue
+            require(run["event"] in source["jobs"][key]["events"], "validation_event_not_allowed")
             steps_hash = complete_steps(job, required)
             proof = receipt_proof(receipts, run, job, role="validation",
                                    label=f"clawsweeper-ci-validation-{run_id}-{slot}")
@@ -513,9 +755,10 @@ def verify_run(source, run_id, receipts, get, containers):
 
 
 def build_report(checkout, head_sha, run_ids, receipts, *, get=github_get,
-                 containers=owned_containers_absent):
+                 containers=owned_containers_absent, log_get=github_job_log):
     require(isinstance(run_ids, (list, tuple)) and len(run_ids) <= 12
             and all(positive(r) for r in run_ids) and len(set(run_ids)) == len(run_ids), "invalid_run_selection")
+    runtime_proof = runtime_source_proof(checkout, head_sha)
     source = source_manifest(checkout, head_sha)
     commit = get(f"{API}/commits/{head_sha}")
     require(isinstance(commit, dict) and commit.get("sha") == head_sha
@@ -534,7 +777,7 @@ def build_report(checkout, head_sha, run_ids, receipts, *, get=github_get,
     attempts = []
     for run_id in run_ids:
         try:
-            verified = verify_run(source, run_id, receipts, get, containers)
+            verified = verify_run(source, run_id, receipts, get, containers, log_get)
             for key, proof in verified.items():
                 rows[key]["status"] = "execution_verified"
                 rows[key]["missing"] = []
@@ -544,7 +787,10 @@ def build_report(checkout, head_sha, run_ids, receipts, *, get=github_get,
             reason = str(exc) if isinstance(exc, Refused) else "evidence_readback_unavailable"
             attempts.append({"run_id": run_id, "state": "held", "reason": reason})
     verified_count = sum(r["status"] == "execution_verified" for r in rows.values())
+    require(runtime_source_proof(checkout, head_sha) == runtime_proof,
+            "runtime_source_changed_during_observation")
     return {"schema": "clawsweeper.estate-execution-evidence.v1", "repo": REPO,
+            "runtime_source_proof": runtime_proof,
             "head_sha": head_sha, "tree_sha": source["tree_sha"],
             "manifest_sha256": source["manifest_sha256"],
             "verifier_sha256": digest(Path(__file__).read_bytes()),
@@ -590,7 +836,7 @@ def _write_private(fd, name, raw, *, create_only=False):
 
 
 def observe(checkout, head_sha, run_ids, receipts, output_dir, *, get=github_get,
-            containers=owned_containers_absent):
+            containers=owned_containers_absent, log_get=github_job_log):
     fd = _directory(output_dir, private=True, create=True)
     lock = None
     stamp = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -608,7 +854,7 @@ def observe(checkout, head_sha, run_ids, receipts, output_dir, *, get=github_get
         # leave an old green pointer presented as the current attempt.
         _write_private(fd, "latest.json", canonical({**base, "state": "observing"}))
         try:
-            report = build_report(checkout, head_sha, run_ids, receipts, get=get, containers=containers)
+            report = build_report(checkout, head_sha, run_ids, receipts, get=get, containers=containers, log_get=log_get)
             raw = canonical(report)
             identity = digest(raw)
             _write_private(fd, identity + ".json", raw, create_only=True)

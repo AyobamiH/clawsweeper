@@ -119,7 +119,14 @@ and the original identity; historical recovery flags are not sufficient.
 Other projects' active runners do not prevent this read-only reconciliation.
 
 The CodeQL adapter delegates to the existing SARIF verifier and counts both
-languages as one job definition. The ordinary full-check adapter additionally
+languages as one job definition. The earlier source/timestamp-only SARIF attribution
+could accept uploads from another run. The scoped CodeQL workflow now records the
+actual github/codeql-action/analyze sarif-id output in its authenticated GitHub
+job log, bound to run ID, attempt and language. The read-only verifier retrieves
+that exact job log, independently matches the SARIF ID against the Code Scanning
+analysis and completed-upload endpoints, and rejects absent, duplicate or
+conflicting claims. Earlier CodeQL runs lacking the new upload attestation are
+not evidence for this revised claim and cannot transfer to later commits. The ordinary full-check adapter additionally
 pins the reviewed CI workflow byte digest; altered checkout or command semantics
 require a new adapter review. The sparse job remains held for PR execution until
 an immutable executed-merge attestation is supported. A legitimately skipped
@@ -131,6 +138,26 @@ scenario or native Windows verifier remain held even when GitHub reports green.
 Verified execution does not establish full workflow dependency/event coverage or
 production-effect acceptance. No report from this initial adapter set grants
 production release authority.
+
+CodeQL upload attestations also require an independently reviewed workflow
+byte digest: a changed workflow cannot grant itself trust by regenerating its
+manifest. The executing verifier, its first-party policy, SARIF dependencies, and the
+immutable container-ownership label in the exact executor source,
+and the workflow enumerator must match the selected committed revision before
+and after observation. The policy and SARIF verifier are compiled directly
+from those source bytes (never from cached Python bytecode) before use; their
+loaded-source fingerprints must also match the selected commit. A cache forged
+with valid Python timestamp metadata cannot silently replace executed policy.
+The real enumerator reconciles job membership against
+YAML, so deleting a manifest leaf cannot understate outstanding work. This
+requires running the verifier from the selected revision, not borrowing a newer
+uncommitted verifier and labelling its result as proof of an older source.
+
+GitHub JSON and immutable Git readbacks are streamed through the same bounded
+process-output contract; oversized responses are refused before allocation.
+Job logs are streamed with bounded bytes and time. Overflow and timeout stop
+the owned process group, including descendants after their leader exits; archive
+expansion is bounded separately. No raw provider output becomes a failure reason.
 
 Evidence is private, content-addressed, create-only and fsynced. `latest.json`
 is invalidated before fetching, so an interrupted or failed refresh cannot leave
