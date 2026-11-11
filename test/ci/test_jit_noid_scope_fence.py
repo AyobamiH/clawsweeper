@@ -1,5 +1,8 @@
 """Held CodeQL JIT may disable its own run scope, never replay a JIT POST."""
 import io
+import os
+import subprocess
+from contextlib import ExitStack
 import json
 from pathlib import Path
 import sys
@@ -180,6 +183,148 @@ class HeldNoIdScopeFence(unittest.TestCase):
             self.assertEqual(json.loads(stdout.getvalue())["state"], "security_scope_disarmed")
             disarm.assert_called_once()
             runner.assert_not_called()
+
+
+class RegistrationFailureDiagnostics(unittest.TestCase):
+    SECRET = "ghp_FIXTURE_NEVER_PERSIST_OR_PRINT"
+
+    def fixture_run(self, *, stderr="", stdout="", code=1, network_failure=None):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tools = root / "tools"
+            tools.mkdir()
+            calls = root / "calls.jsonl"
+            gh = tools / "gh"
+            gh.write_text("#!" + sys.executable + "\n"
+                          "import sys,json\nfrom pathlib import Path\n"
+                          f"p=Path({str(calls)!r})\n"
+                          "with p.open('a') as f:f.write(json.dumps(sys.argv[1:])+'\\n')\n"
+                          f"sys.stdout.write({stdout!r})\n"
+                          f"sys.stderr.write({stderr!r})\n"
+                          f"raise SystemExit({code})\n")
+            gh.chmod(0o700)
+            with ExitStack() as patches:
+                patches.enter_context(patch.object(ex, "ROOT", root))
+                patches.enter_context(patch.object(ex, "RECEIPTS", root / "receipts"))
+                patches.enter_context(patch.dict(os.environ, {"PATH": str(tools) + os.pathsep + os.environ["PATH"]}))
+                patches.enter_context(patch.object(ex, "approved_job_image", return_value="sha256:" + "b" * 64))
+                patches.enter_context(patch.object(ex, "stop_owned"))
+                patches.enter_context(patch.object(ex, "lookup_owned_runner", return_value=None))
+                patches.enter_context(patch.object(ex, "runner_absent_verified"))
+                network = patches.enter_context(patch.object(ex, "prepare_network", side_effect=network_failure))
+                result = ex.runner_job(candidate(), active_scope())
+            receipt = json.loads(Path(result["receipt"]).read_text())
+            operations = [json.loads(line) for line in calls.read_text().splitlines()]
+            self.assertEqual(len(operations), 1)
+            self.assertIn("POST", operations[0])
+            self.assertEqual(receipt["state"], "held")
+            self.assertNotIn(self.SECRET, json.dumps(receipt))
+            self.assertNotIn(self.SECRET, json.dumps(result))
+            if network_failure is None:
+                network.assert_not_called()
+            return receipt
+
+    def test_http_failure_retains_only_numeric_status_and_phase(self):
+        receipt = self.fixture_run(stderr=f"gh: denied credential {self.SECRET} (HTTP 403)\n")
+        proof = receipt["failure_diagnostic"]
+        self.assertEqual(proof["phase"], "registration_request")
+        self.assertEqual(proof["code"], "external_command_refused")
+        self.assertEqual(proof["http_status"], 403)
+        self.assertEqual(proof["cli_exit_code"], 1)
+        self.assertIsNone(proof["transport_hint"])
+        self.assertFalse(proof["registration_replay_allowed"])
+        self.assertIn("execution_error_RuntimeError", receipt["issues"])
+
+    def test_transport_failure_is_observable_without_echoing_network_data(self):
+        receipt = self.fixture_run(stderr=f'Post "https://secret.invalid/{self.SECRET}": connect: network is unreachable\n')
+        proof = receipt["failure_diagnostic"]
+        self.assertEqual(proof["transport_hint"], "network_unreachable")
+        self.assertIsNone(proof["http_status"])
+        self.assertFalse(proof["registration_replay_allowed"])
+
+    def test_unknown_failure_does_not_invent_http_or_transport_cause(self):
+        receipt = self.fixture_run(stderr=self.SECRET + " unrecognised error\n")
+        proof = receipt["failure_diagnostic"]
+        self.assertIsNone(proof["http_status"])
+        self.assertIsNone(proof["transport_hint"])
+
+    def test_malformed_json_success_response_never_leaks_payload(self):
+        receipt = self.fixture_run(stdout=self.SECRET + " not json", code=0)
+        self.assertEqual(receipt["failure_diagnostic"]["code"], "github_response_invalid")
+        self.assertEqual(receipt["failure_diagnostic"]["phase"], "registration_request")
+        self.assertIsNone(receipt["failure_diagnostic"]["http_status"])
+
+    def test_incomplete_configuration_identifies_response_phase(self):
+        receipt = self.fixture_run(stdout=json.dumps({"encoded_jit_config": self.SECRET}), code=0)
+        self.assertEqual(receipt["failure_diagnostic"]["code"], "jit_registration_response_incomplete")
+        self.assertEqual(receipt["failure_diagnostic"]["phase"], "registration_response")
+        self.assertNotIn("runner_id", receipt)
+
+    def test_network_preparation_failure_preserves_known_runner_identity(self):
+        receipt = self.fixture_run(stdout=json.dumps({"runner": {"id": 99}, "encoded_jit_config": self.SECRET}),
+                                   code=0, network_failure=RuntimeError(self.SECRET))
+        self.assertEqual(receipt["runner_id"], 99)
+        self.assertEqual(receipt["failure_diagnostic"]["phase"], "network_preparation")
+        self.assertEqual(receipt["failure_diagnostic"]["code"], "unclassified_failure")
+        self.assertFalse(receipt["failure_diagnostic"]["registration_replay_allowed"])
+
+    def test_timeout_diagnostic_does_not_retain_exception_output(self):
+        with patch.object(ex.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                ["gh", "api"], 30, output=self.SECRET, stderr=self.SECRET)):
+            with self.assertRaises(RuntimeError) as held:
+                ex.run_cli(["gh", "api", "--method", "POST", "untrusted"])
+        proof = ex.execution_failure_diagnostic(held.exception, "registration_request")
+        self.assertEqual(proof["code"], "command_timeout")
+        self.assertEqual(proof["transport_hint"], "timeout")
+        self.assertNotIn(self.SECRET, json.dumps(proof))
+
+    def test_adversarial_metadata_cannot_enter_receipt(self):
+        exc = RuntimeError(self.SECRET)
+        exc.safe_cli_diagnostic = {"http_status": True, "cli_exit_code": "secret",
+                                   "transport_hint": self.SECRET, "credential": self.SECRET}
+        proof = ex.execution_failure_diagnostic(exc, "registration_request")
+        self.assertIsNone(proof["http_status"])
+        self.assertIsNone(proof["cli_exit_code"])
+        self.assertIsNone(proof["transport_hint"])
+        self.assertNotIn(self.SECRET, json.dumps(proof))
+        self.assertNotIn("credential", proof)
+
+    def test_output_bound_and_typed_fields_prevent_diagnostic_injection(self):
+        exc = ex.cli_failure("external_command_refused", ["gh", "api"], returncode=True,
+                             stderr="gh: old (HTTP 403)\n" + "x" * 9000)
+        proof = ex.execution_failure_diagnostic(exc, [self.SECRET])
+        self.assertIsNone(proof["http_status"])
+        self.assertIsNone(proof["cli_exit_code"])
+        self.assertEqual(proof["phase"], "unclassified")
+        self.assertEqual(set(proof), {"schema", "phase", "code", "http_status",
+                                     "cli_exit_code", "transport_hint", "registration_replay_allowed"})
+        unrelated = ex.cli_failure("external_command_refused", ["docker", "inspect"],
+                                   returncode=1, stderr="gh: fake (HTTP 403)")
+        self.assertIsNone(ex.execution_failure_diagnostic(unrelated, "network_preparation")["http_status"])
+
+    def test_diagnostic_receipt_still_disarms_once_without_replay(self):
+        receipt = self.fixture_run(stderr=f"gh: refused {self.SECRET} (HTTP 422)\n")
+        with tempfile.TemporaryDirectory() as td:
+            helper = HeldNoIdScopeFence()
+            receipts, controls, lock, original = helper.fixture(td)
+            ex.atomic(original, receipt)
+            before = original.read_bytes()
+            with ExitStack() as patches:
+                for context in helper.context(receipts, controls, lock):
+                    patches.enter_context(context)
+                gh = patches.enter_context(patch.object(ex, "gh"))
+                result = ex.disarm_security_after_held(candidate(), active_scope(), original)
+                self.assertEqual(result["state"], "security_scope_disarmed")
+                self.assertFalse(json.loads(controls.read_text())["enabled"])
+                self.assertEqual(original.read_bytes(), before)
+                with self.assertRaises(AdmissionHold):
+                    ex.disarm_security_after_held(candidate(), active_scope(), original)
+                gh.assert_not_called()
+
+    def test_embedded_status_text_without_gh_status_suffix_is_not_trusted(self):
+        receipt = self.fixture_run(stderr=f"message says (HTTP 401) but ends with {self.SECRET}\n")
+        self.assertIsNone(receipt["failure_diagnostic"]["http_status"])
+
 
 
 if __name__ == "__main__":

@@ -86,13 +86,77 @@ def atomic(path, record):
         os.close(fd)
 
 
+# Diagnostic values are deliberately closed vocabularies. Raw subprocess output,
+# command arguments, exception messages and JIT credentials never enter receipts.
+FAILURE_PHASES = frozenset({"registration_request", "registration_response",
+                            "network_preparation", "runner_execution",
+                            "github_job_readback", "isolation_evidence"})
+FAILURE_CODES = frozenset({"command_timeout", "external_command_refused",
+                          "github_response_invalid", "jit_registration_response_incomplete"})
+TRANSPORT_HINTS = {
+    "network_unreachable": ("network is unreachable", "no route to host"),
+    "dns_lookup_failed": ("no such host", "temporary failure in name resolution"),
+    "tls_failure": ("tls:", "x509:"),
+    "connection_refused": ("connection refused",),
+    "connection_reset": ("connection reset by peer",),
+    "timeout": ("i/o timeout", "context deadline exceeded"),
+}
+
+
+def cli_failure(code, args, *, returncode=None, stderr=None):
+    """Keep safe metadata without changing the existing RuntimeError contract."""
+    error = RuntimeError(code)
+    metadata = {"cli_exit_code": returncode if type(returncode) is int and -255 <= returncode <= 255 else None,
+                "http_status": None, "transport_hint": "timeout" if code == "command_timeout" else None}
+    is_github = (len(args) >= 2 and isinstance(args[0], str)
+                 and Path(args[0]).name == "gh" and args[1] == "api")
+    if is_github and isinstance(stderr, str):
+        # Inspect only a bounded suffix. HTTP metadata must be the CLI's final
+        # status-shaped line; an arbitrary embedded '(HTTP ...)' is not enough.
+        tail = stderr[-8192:].rstrip()
+        last = tail.splitlines()[-1] if tail else ""
+        match = re.fullmatch(r"gh: [^\r\n]*\(HTTP ([45][0-9]{2})\)", last)
+        if match:
+            metadata["http_status"] = int(match.group(1))
+        elif metadata["transport_hint"] is None:
+            lowered = tail.lower()
+            metadata["transport_hint"] = next(
+                (name for name, phrases in TRANSPORT_HINTS.items()
+                 if any(phrase in lowered for phrase in phrases)), None)
+    error.safe_cli_diagnostic = metadata
+    return error
+
+
+def execution_failure_diagnostic(exc, phase):
+    """Return fixed diagnostic fields, never authority to retry registration."""
+    args = getattr(exc, "args", ())
+    code = args[0] if type(args) is tuple and args else None
+    if type(code) is not str or code not in FAILURE_CODES:
+        code = "unclassified_failure"
+    source = getattr(exc, "safe_cli_diagnostic", {})
+    if type(source) is not dict:
+        source = {}
+    status = source.get("http_status")
+    exit_code = source.get("cli_exit_code")
+    hint = source.get("transport_hint")
+    return {
+        "schema": "clawsweeper.execution-failure.v1",
+        "phase": phase if type(phase) is str and phase in FAILURE_PHASES else "unclassified",
+        "code": code,
+        "cli_exit_code": exit_code if type(exit_code) is int and -255 <= exit_code <= 255 else None,
+        "http_status": status if type(status) is int and 400 <= status <= 599 else None,
+        "transport_hint": hint if type(hint) is str and hint in TRANSPORT_HINTS else None,
+        "registration_replay_allowed": False,
+    }
+
+
 def run_cli(args, data=None, timeout=25):
     try:
         p = subprocess.run(args, input=data, text=True, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("command_timeout") from exc
+        raise cli_failure("command_timeout", args) from exc
     if p.returncode:
-        raise RuntimeError("external_command_refused")
+        raise cli_failure("external_command_refused", args, returncode=p.returncode, stderr=p.stderr)
     return p.stdout
 
 
@@ -107,10 +171,13 @@ def gh(path, method="GET", body=None):
         try:
             payload = run_cli(args, data, timeout=30)
             return json.loads(payload) if payload.strip() else {}
-        except (RuntimeError, ValueError):
+        except ValueError as exc:
+            if i + 1 == tries:
+                raise cli_failure("github_response_invalid", args) from exc
+        except RuntimeError:
             if i + 1 == tries:
                 raise
-            time.sleep(1)
+        time.sleep(1)
 
 
 def discover():
@@ -808,6 +875,7 @@ def runner_job(candidate, controls):
     issues = []
     job_success_verified = False
     interruption = None
+    failure_phase = "registration_request"
 
     def record_cleanup_error(exc, reason):
         nonlocal interruption
@@ -821,6 +889,7 @@ def runner_job(candidate, controls):
             "labels": ["self-hosted", "Linux", "X64", candidate.label],
             "work_folder": "_work",
         })
+        failure_phase = "registration_response"
         if not isinstance(response, dict):
             raise RuntimeError("jit_registration_response_incomplete")
         encoded = response.pop("encoded_jit_config", None)
@@ -835,7 +904,9 @@ def runner_job(candidate, controls):
             atomic(target / "receipt.json", receipt)
         if not isinstance(encoded, str) or not encoded or registered_id is None:
             raise RuntimeError("jit_registration_response_incomplete")
+        failure_phase = "network_preparation"
         prepare_network(net, name)
+        failure_phase = "runner_execution"
         log_path = target / "runner.log"
         with log_path.open("xb") as logfile:
             os.fchmod(logfile.fileno(), 0o600)
@@ -857,6 +928,7 @@ def runner_job(candidate, controls):
             receipt["runner_exit"] = process.poll()
         receipt["log_sha256"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
         receipt["log_bytes"] = log_path.stat().st_size
+        failure_phase = "github_job_readback"
         result = {}
         for _ in range(6):
             result = gh(f"{REPO_SLUG}/actions/jobs/{candidate.job_id}")
@@ -888,6 +960,7 @@ def runner_job(candidate, controls):
         # cleanup; unexpected process interruption is durably held.
         job_success_verified = not issues
     except BaseException as exc:
+        receipt["failure_diagnostic"] = execution_failure_diagnostic(exc, failure_phase)
         issues.append(("execution_interrupted_" if not isinstance(exc, Exception)
                        else "execution_error_") + type(exc).__name__)
         if not isinstance(exc, Exception):
