@@ -31,6 +31,8 @@ The optional owner-local observer uses existing authenticated `gh api` GET acces
 node dist/repair/observe-ci-triage.js --watch-seconds 300 --interval-seconds 30
 ```
 
+Transient authenticated GET transport failures receive at most one immediate read retry. A timed observation continues after a held collection-read cycle, without retrying any agent POST. Source, policy, manifest and storage faults still stop immediately. A window ending with an unresolved read failure exits nonzero; the summary counts held cycles explicitly.
+
 The initial watermark is persisted before observation; default behaviour only observes failures completed/updated after activation. `--catch-up-minutes` is an explicit historical sample and must never be presented as a fresh natural event. Collection is bounded to the latest 100 completed runs and at most five new decisions per iteration by default; this is a sample, not exhaustive backlog coverage. The observer never dispatches workflows. No timer or second CI fleet is installed by this command.
 
 ## Durability and rollback

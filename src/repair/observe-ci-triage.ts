@@ -46,19 +46,35 @@ export function ownerGithubRead(env: NodeJS.ProcessEnv): GithubRead {
     ) {
       throw new CiEvidenceError("unsafe_github_endpoint");
     }
-    try {
-      return JSON.parse(
-        execFileSync("gh", ["api", endpoint, "--method", "GET"], {
-          env: readEnv,
-          encoding: "utf8",
-          timeout: 15_000,
-          maxBuffer: 2 * 1024 * 1024,
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
-      ) as unknown;
-    } catch {
-      throw new CiEvidenceError("github_owner_read_unavailable");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return JSON.parse(
+          execFileSync("gh", ["api", endpoint, "--method", "GET"], {
+            env: readEnv,
+            encoding: "utf8",
+            timeout: 15_000,
+            maxBuffer: 2 * 1024 * 1024,
+            stdio: ["ignore", "pipe", "pipe"],
+          }),
+        ) as unknown;
+      } catch (error) {
+        const details =
+          error && typeof error === "object" && "stderr" in error
+            ? String(error.stderr).slice(0, 2048)
+            : "";
+        if (/HTTP 40[13]/i.test(details)) throw new CiEvidenceError("github_owner_auth_refused");
+        const transient =
+          /TLS handshake timeout|connection reset|network is unreachable|connection refused|unexpected EOF|HTTP 50[234]|i\/o timeout|context deadline exceeded/i.test(
+            details,
+          );
+        if (attempt === 0 && transient) {
+          await sleep(300);
+          continue;
+        }
+        throw new CiEvidenceError("github_owner_read_unavailable");
+      }
     }
+    throw new CiEvidenceError("github_owner_read_unavailable");
   };
 }
 
@@ -220,6 +236,47 @@ function initialWatermark(state: string, repo: string, sha: string, lookback: nu
   }
   return notBefore;
 }
+export async function runObservationLoop(options: {
+  observe: () => Promise<Record<string, unknown>>;
+  durationMs: number;
+  intervalMs: number;
+  emit: (value: Record<string, unknown>) => void;
+  clock?: () => number;
+  delay?: (ms: number) => Promise<void>;
+}): Promise<{ cycles: number; heldReadCycles: number; endedWithReadFailure: boolean }> {
+  const clock = options.clock ?? Date.now;
+  const delay = options.delay ?? sleep;
+  const end = clock() + options.durationMs;
+  let cycles = 0;
+  let heldReadCycles = 0;
+  let endedWithReadFailure = false;
+  do {
+    cycles++;
+    try {
+      options.emit(await options.observe());
+      endedWithReadFailure = false;
+    } catch (error) {
+      // A read-only collection failure is retryable; source, policy, storage
+      // and manifest failures must still stop immediately and fail closed.
+      if (!(error instanceof CiEvidenceError) || error.reason !== "github_owner_read_unavailable")
+        throw error;
+      heldReadCycles++;
+      endedWithReadFailure = true;
+      options.emit({
+        schema: "clawsweeper.ci-triage-observation-error.v1",
+        observedAt: new Date(clock()).toISOString(),
+        reason: error.reason,
+        state: "held",
+        externalWorkflowDispatches: 0,
+        modelInvocations: 0,
+      });
+    }
+    if (!options.durationMs || clock() >= end) break;
+    await delay(Math.min(options.intervalMs, end - clock()));
+  } while (clock() < end);
+  return { cycles, heldReadCycles, endedWithReadFailure };
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const numberOption = (name: string, fallback: number) => {
@@ -255,22 +312,25 @@ async function main(): Promise<void> {
     throw new Error("observer_implementation_source_changed");
   }
   const notBefore = initialWatermark(state, repo, sha, lookback);
-  const end = Date.now() + watch * 1000;
-  do {
-    const result = await observeCiTriage({
-      root,
-      env,
-      notBefore,
-      maxEvents: numberOption("--max-events", 5),
-    });
-    console.log(JSON.stringify(result));
-    if (!watch || Date.now() >= end) break;
-    await sleep(Math.min(interval * 1000, end - Date.now()));
-  } while (Date.now() < end);
+  const summary = await runObservationLoop({
+    observe: () =>
+      observeCiTriage({ root, env, notBefore, maxEvents: numberOption("--max-events", 5) }),
+    durationMs: watch * 1000,
+    intervalMs: interval * 1000,
+    emit: (value) => console.log(JSON.stringify(value)),
+  });
+  console.log(JSON.stringify({ schema: "clawsweeper.ci-triage-watch-summary.v1", ...summary }));
+  if (summary.endedWithReadFailure) process.exitCode = 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => {
-    console.error("ci_triage_observer_held");
+  main().catch((error: unknown) => {
+    const reason =
+      error instanceof CiEvidenceError
+        ? error.reason
+        : error instanceof Error && /^[a-z_]{1,80}$/.test(error.message)
+          ? error.message
+          : "observer_unexpected_error";
+    console.error(JSON.stringify({ state: "held", reason }));
     process.exitCode = 1;
   });
 }
