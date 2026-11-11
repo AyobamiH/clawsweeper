@@ -1,0 +1,10 @@
+# DEVELOPMENT RELEASE TEMPLATE ONLY. Not enabled or installed.
+[Unit]
+Description=ClawSweeper read-only estate health (15-minute cadence)
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=20
+Unit=clawsweeper-estate-observer.service
+[Install]
+WantedBy=timers.target

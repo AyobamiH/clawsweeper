@@ -112,6 +112,11 @@
       "path": "ci/windows-kvm-guest-provisioning.md",
       "lifecycle": "proposed",
       "banner": "This is an offline-only KVM Windows guest overlay preparation candidate, not a runner or protected release."
+    },
+    {
+      "path": "ci/estate-observer-recovery.md",
+      "lifecycle": "proposed",
+      "banner": "Development-only read-only observer recovery candidate; the failing installed timer remains unchanged until separately authorised and verified."
     }
   ]
 }

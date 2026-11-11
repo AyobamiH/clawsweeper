@@ -1,0 +1,14 @@
+# DEVELOPMENT RELEASE TEMPLATE ONLY. Never install with unresolved placeholders.
+# Replace with immutable signed checkout and private, dedicated observer release root.
+[Unit]
+Description=ClawSweeper exact-source read-only estate observation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@APPROVED_SOURCE_CHECKOUT@
+ExecStart=/usr/bin/python3 -B @APPROVED_OBSERVER_RELEASE@/scripts/ci/observe_estate_health.py --checkout @APPROVED_SOURCE_CHECKOUT@ --state %h/.local/share/local-ci/clawsweeper-estate-observer
+TimeoutStartSec=160
+NoNewPrivileges=yes
+Environment=PYTHONDONTWRITEBYTECODE=1
