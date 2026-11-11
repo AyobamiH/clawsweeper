@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "./inference-provider-usage.js";
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, writeSync } from "node:fs";
 import { isAbsolute, dirname } from "node:path";
@@ -31,7 +32,8 @@ export interface InferenceDecisionObservation {
   outcome: InferenceMetricOutcome;
   // These values must come from the provider's structured usage response, never
   // an estimate derived from response text, prompt size or a model price sheet.
-  providerUsage?: { inputTokens?: number; outputTokens?: number };
+  providerUsage?: ProviderUsage;
+  decisionId?: string;
 }
 
 const SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/i;
@@ -48,9 +50,20 @@ export function buildInferenceMetric(input: InferenceDecisionObservation) {
   if (!Number.isFinite(input.elapsedMs) || input.elapsedMs < 0) {
     throw new Error("invalid inference elapsed time");
   }
+  if (input.decisionId !== undefined && !/^[a-f0-9]{64}$/.test(input.decisionId)) {
+    throw new Error("invalid inference decision identity");
+  }
   const model = MODEL.test(input.model) ? input.model : "unclassified";
   return {
-    schema: INFERENCE_MEASUREMENT_SCHEMA,
+    schema: input.decisionId
+      ? "clawsweeper.inference-measurement.v2"
+      : INFERENCE_MEASUREMENT_SCHEMA,
+    ...(input.decisionId
+      ? {
+          decisionId: input.decisionId,
+          cachedInputTokens: safeTokens(input.providerUsage?.cachedInputTokens),
+        }
+      : {}),
     invocationId: randomUUID(),
     recordedAt: new Date().toISOString(),
     taskKind: input.taskKind,

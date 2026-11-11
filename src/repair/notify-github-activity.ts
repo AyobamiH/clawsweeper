@@ -6,6 +6,8 @@ import { DEFAULT_TRUSTED_BOTS } from "./config.js";
 import type { JsonObject, JsonValue } from "./json-types.js";
 import { asJsonObject } from "./json-types.js";
 import { parseArgs, repoRoot } from "./lib.js";
+import { beginCiTriage, type CiTriageRuntime } from "./ci-triage.js";
+import type { CiReceipt } from "./ci-triage-ledger.js";
 import {
   boolEnv,
   errorText,
@@ -39,6 +41,7 @@ export type GithubActivityNotifierSummary = {
   failed: number;
   exitCode: number;
   reason: string | null;
+  ciTriage?: CiReceipt | null;
 };
 
 export type GithubActivityNotifierRuntime = {
@@ -47,6 +50,7 @@ export type GithubActivityNotifierRuntime = {
   fetch?: typeof fetch;
   now?: () => Date;
   log?: (message: string) => void;
+  ciTriage?: CiTriageRuntime;
 };
 
 const DEFAULT_REPORT_PATH = "notifications/github-activity-report.json";
@@ -235,6 +239,7 @@ export function normalizeGithubActivity({
             id: run.id ?? null,
             name: run.name ?? null,
             event: run.event ?? null,
+            run_attempt: run.run_attempt ?? null,
             status: run.status ?? null,
             conclusion: run.conclusion ?? null,
             head_sha: run.head_sha ?? null,
@@ -328,9 +333,50 @@ export async function runGithubActivityNotifier(
     return summary;
   }
 
-  const config = resolveOpenClawHookConfig(env);
+  // Pre-model triage is part of this normal notifier, never a model-selected skill.
+  const triage = await beginCiTriage({
+    root,
+    env,
+    eventType: activity.type,
+    repository: activity.repo,
+    workflowRun: activity.payload.workflow_run,
+    dryRun,
+    ...(runtime.ciTriage ? { runtime: runtime.ciTriage } : {}),
+  });
+  if (triage.kind === "terminal") {
+    const summary = summaryRow("skipped", 0, triage.held ? 1 : 0, triage.reason);
+    summary.ciTriage = triage.receipt;
+    summary.exitCode = triage.held ? 1 : 0;
+    if (args["write-report"])
+      writeJsonFile(reportPath, JSON.parse(JSON.stringify(summary)) as JsonValue);
+    log(JSON.stringify(summary));
+    return summary;
+  }
+  const session = triage.kind === "forward" ? triage.session : null;
+  let config;
+  try {
+    config = resolveOpenClawHookConfig(env);
+  } catch (error) {
+    if (!session) throw error;
+    const summary = summaryRow("skipped", 0, 1, "ci_triage_existing_agent_configuration_invalid");
+    summary.ciTriage = session.hold("existing_agent_configuration_invalid");
+    summary.exitCode = 1;
+    session.close();
+    log(JSON.stringify(summary));
+    return summary;
+  }
   if (!config) {
-    const summary = summaryRow("skipped", 0, 0, "OpenClaw hook notification is not configured");
+    const summary = summaryRow(
+      "skipped",
+      0,
+      session ? 1 : 0,
+      "OpenClaw hook notification is not configured",
+    );
+    if (session) {
+      summary.ciTriage = session.hold("existing_agent_not_configured");
+      summary.exitCode = 1;
+      session.close();
+    }
     log(JSON.stringify(summary));
     return summary;
   }
@@ -338,23 +384,58 @@ export async function runGithubActivityNotifier(
   let hookRunId: string | null = null;
   let failed = 0;
   let reason: string | null = null;
+  let ciReceipt: CiReceipt | null = null;
   if (!dryRun) {
     try {
+      if (session) {
+        const held = await session.beforeDispatch();
+        if (held) {
+          const summary = summaryRow("skipped", 0, 1, held.reason);
+          summary.ciTriage = held;
+          summary.exitCode = 1;
+          log(JSON.stringify(summary));
+          return summary;
+        }
+      }
       const result = await postOpenClawAgentHook({
-        config,
+        // A lost response may conceal an accepted effect. Never blind-retry a
+        // durably claimed CI handoff; its idempotency identity survives restart.
+        config: session ? { ...config, retryAttempts: 1 } : config,
         fetcher,
         post: {
           name: `GitHub ${activity.type} ${activity.repo}`,
-          message: renderGithubActivityMessage(activity, config.discordTarget),
-          idempotencyKey: activity.idempotencyKey,
+          message:
+            renderGithubActivityMessage(activity, config.discordTarget) +
+            (session
+              ? `\nCI decision ID: ${session.decisionId}\nCI metadata requires investigation; do not infer source tests or root cause from an unexecuted job.`
+              : ""),
+          idempotencyKey: session ? `ci-triage:${session.decisionId}` : activity.idempotencyKey,
           deliver,
         },
       });
       hookRunId = result.runId;
+      if (session) {
+        ciReceipt = session.delivered(hookRunId);
+        if (ciReceipt.state !== "forwarded") {
+          failed = 1;
+          reason = "ci_triage_agent_delivery_uncertain";
+        }
+      }
     } catch (error) {
       failed = 1;
-      reason = errorText(error);
+      reason = session ? "ci_triage_agent_delivery_not_verified" : errorText(error);
+      if (session) {
+        try {
+          ciReceipt = session.deliveryFailed();
+        } catch {
+          /* Retain existing durable intent. */
+        }
+      }
+    } finally {
+      session?.close();
     }
+  } else {
+    session?.close();
   }
 
   if (args["write-report"]) {
@@ -373,7 +454,8 @@ export async function runGithubActivityNotifier(
   }
 
   const summary = summaryRow("ok", failed ? 0 : 1, failed, reason);
-  summary.exitCode = failed > 0 && strict ? 1 : 0;
+  summary.exitCode = failed > 0 && (strict || Boolean(session)) ? 1 : 0;
+  if (ciReceipt) summary.ciTriage = ciReceipt;
   log(JSON.stringify(summary, null, 2));
   return summary;
 }

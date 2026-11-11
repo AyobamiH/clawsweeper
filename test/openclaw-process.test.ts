@@ -799,3 +799,39 @@ test("OpenClaw zai models get built-in Coding Plan endpoint defaults", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("OpenClaw result retains structured usage before normalising model text", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawsweeper-openclaw-usage-"));
+  try {
+    const result = runOpenclawProcess({
+      label: "provider-usage",
+      prompt: "read-only fixture",
+      model: "openai/test",
+      cwd: root,
+      timeoutMs: 10000,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_OPENCLAW_BIN: fakeOpenclaw(root),
+        OPENCLAW_TEST_RECORD: join(root, "record.json"),
+        OPENCLAW_TEST_STDOUT: JSON.stringify({
+          result: {
+            payloads: [{ text: "done" }],
+            meta: {
+              stopReason: "stop",
+              agentMeta: { usage: { input: 50, output: 3, cacheRead: 40 } },
+            },
+          },
+        }),
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "done");
+    assert.deepEqual(result.providerUsage, {
+      inputTokens: 50,
+      outputTokens: 3,
+      cachedInputTokens: 40,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

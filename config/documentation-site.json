@@ -112,6 +112,11 @@
       "path": "ci/windows-kvm-guest-provisioning.md",
       "lifecycle": "proposed",
       "banner": "This is an offline-only KVM Windows guest overlay preparation candidate, not a runner or protected release."
+    },
+    {
+      "path": "engineering/automatic-ci-triage.md",
+      "lifecycle": "proposed",
+      "banner": "This is a scoped automatic-triage candidate; source tests and local HTTP fixtures do not establish deployed natural-event acceptance."
     }
   ]
 }
