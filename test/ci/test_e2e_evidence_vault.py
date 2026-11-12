@@ -168,8 +168,11 @@ class EvidenceVaultTests(unittest.TestCase):
     def test_private_parent_and_single_sticky_leaf(self):
         self.assertEqual(self.vault.stat().st_mode & 0o7777, 0o1777)
         self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
-        self.assertEqual(evidence.mount_args(self.vault),
-            ["--mount", f"type=bind,src={self.vault},dst=/e2e-evidence"])
+        volume = evidence.volume_name("csw-ci-123-456-1")
+        self.assertEqual(evidence.mount_args(volume),
+            ["--mount", f"type=volume,src={volume},dst=/e2e-evidence,volume-nocopy"])
+        with self.assertRaisesRegex(evidence.EvidenceHold, "e2e_bounded_volume_required"):
+            evidence.mount_args(self.vault)
         with self.assertRaisesRegex(evidence.EvidenceHold, "e2e_vault_creation_failed"):
             evidence.create_vault(self.root)
         self.root.chmod(0o777)

@@ -15,15 +15,19 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import shutil
 import sqlite3
 import stat
 import subprocess
+import tarfile
 import sys
 import time
 
 from self_hosted_policy import AdmissionHold, ISOLATION_HARNESS_FILES, REPOSITORY, REVIEW_EVENTS, SHA, WORKFLOWS, category_enabled, classify, is_release_preview
-from e2e_evidence_vault import EvidenceHold, create_vault, mount_args, verify_vault
+from e2e_evidence_vault import (EvidenceHold, MAX_FILE_BYTES, MAX_FILES, MAX_TOTAL_BYTES,
+                                VOLUME_BYTES, VOLUME_INODES, VOLUME_OPTIONS,
+                                _relative, create_vault, mount_args, verify_vault, volume_name)
 
 HOME = Path.home()
 ROOT = HOME / ".local/share/local-ci/clawsweeper-selfhosted"
@@ -51,6 +55,22 @@ MAX_SECONDS = 42 * 60
 # by 115 minutes to reserve five minutes for verified cleanup and deregistration.
 # Never extend the privileged/security role deadlines.
 ISOLATION_MAX_SECONDS = 115 * 60
+# Kernel-enforced isolation Docker CLI output limit; verification alone is too late.
+ISOLATION_MAX_LOG_BYTES = 128 * 1024 * 1024
+# Per-job Docker-local tmpfs quota covers the entire Actions Runner home,
+# including JIT helper state, workspace and rootless Podman vfs. Docker's
+# overlay2 on ext4 cannot enforce a writable-root size: it MUST be read-only.
+ISOLATION_HOME_VOLUME_BYTES = 3 * 1024 * 1024 * 1024
+ISOLATION_HOME_VOLUME_INODES = 262144
+ISOLATION_HOME_OPTIONS = (
+    f"size={ISOLATION_HOME_VOLUME_BYTES},nr_inodes={ISOLATION_HOME_VOLUME_INODES},"
+    "uid=1001,gid=1001,mode=0750"
+)
+ISOLATION_WORKER_TMPFS = (
+    "/tmp:rw,nosuid,nodev,size=256m,nr_inodes=32768,mode=1777",
+    "/var/tmp:rw,nosuid,nodev,size=64m,nr_inodes=8192,mode=1777",
+    "/run:rw,nosuid,nodev,size=64m,nr_inodes=8192,mode=0755",
+)
 
 
 def runner_limits(candidate):
@@ -779,6 +799,10 @@ def select_runner_intent(candidate):
         raise AdmissionHold("unsafe_prior_intent")
     if not old.exists():
         return old, name, None
+    if candidate.role == "isolation":
+        # Selection remains read-only. Recovery has its own exclusive, scoped
+        # entrypoint and never grants a new registration for this identity.
+        raise AdmissionHold("existing_or_uncertain_isolation_intent")
     if (candidate.role != "security"
             or candidate.workflow != ".github/workflows/codeql.yml"
             or not old.is_dir() or old.stat().st_uid != os.getuid()
@@ -846,27 +870,641 @@ def select_runner_intent(candidate):
     }
 
 
+
+PRE_JIT_PREPARATION_SCHEMA = "clawsweeper.isolation-pre-jit-preparation.v1"
+
+
+def isolation_preparation_record(candidate, name, image_id):
+    """Durable exact identity BEFORE any Docker volume/holder is allocated."""
+    return {
+        "schema": PRE_JIT_PREPARATION_SCHEMA, "state": "preparing",
+        "run_id": candidate.run_id, "job_id": candidate.job_id,
+        "attempt": candidate.run_attempt, "head_sha": candidate.sha,
+        "workflow": candidate.workflow, "event": candidate.event,
+        "role": "isolation", "label": candidate.label,
+        "runner_name": name, "image_sha256": image_id,
+        "evidence_volume": volume_name(name),
+        "home_volume": isolation_home_volume_name(name),
+        "holder": name + "-vault-holder", "seed": name + "-home-seed",
+        "jit_post_may_have_started": False, "created_at": now(),
+    }
+
+
+def _private_preparation_file(path):
+    if path.is_symlink() or not path.is_file():
+        raise AdmissionHold("unsafe_isolation_preparation_intent")
+    info = path.stat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_size > 8192):
+        raise AdmissionHold("unsafe_isolation_preparation_intent")
+    try:
+        record = json.loads(path.read_bytes())
+    except (ValueError, UnicodeError) as exc:
+        raise AdmissionHold("invalid_isolation_preparation_intent") from exc
+    if not isinstance(record, dict):
+        raise AdmissionHold("invalid_isolation_preparation_intent")
+    return record
+
+
+def reconcile_isolation_preparation(target, candidate, name):
+    """Reclaim ONLY a proven pre-JIT owner resource; never retry registration.
+
+    The fsynced transition to registration_may_have_started precedes POST.
+    Earlier states therefore prove NO POST from this executor. A later state
+    always holds for separate JIT reconciliation, including after a crash.
+    """
+    expected_dir = RECEIPTS / (
+        f"run-{candidate.run_id}-job-{candidate.job_id}-attempt-{candidate.run_attempt}")
+    if (target != expected_dir or target.is_symlink() or not target.is_dir()
+            or target.stat().st_uid != os.getuid()
+            or stat.S_IMODE(target.stat().st_mode) != 0o700
+            or candidate.role != "isolation"):
+        raise AdmissionHold("isolation_preparation_owner_or_path_mismatch")
+    path = target / "preparation-intent.json"
+    record = _private_preparation_file(path)
+    expected = isolation_preparation_record(candidate, name, record.get("image_sha256"))
+    expected.pop("created_at")
+    expected.pop("state")
+    expected.pop("jit_post_may_have_started")
+    if (not isinstance(record.get("image_sha256"), str)
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", record["image_sha256"])
+            or any(record.get(k) != v for k, v in expected.items())
+            or type(record.get("jit_post_may_have_started")) is not bool):
+        raise AdmissionHold("isolation_preparation_binding_invalid")
+    state = record.get("state")
+    post_possible = state in ("registration_may_have_started",
+                              "cleanup_verified_terminal")
+    if state not in ("preparing", "resources_prepared", "cleanup_verified",
+                     "registration_may_have_started", "cleanup_verified_terminal"):
+        raise AdmissionHold("isolation_preparation_state_invalid")
+    if record["jit_post_may_have_started"] != post_possible:
+        raise AdmissionHold("isolation_preparation_phase_mismatch")
+    receipt = target / "receipt.json"
+    if receipt.exists() or receipt.is_symlink():
+        saved = _private_preparation_file(receipt)
+        fields = {"schema": "clawsweeper.selfhosted-jit.v1",
+                  "run_id": candidate.run_id, "job_id": candidate.job_id,
+                  "attempt": candidate.run_attempt, "head_sha": candidate.sha,
+                  "workflow": candidate.workflow, "event": candidate.event,
+                  "role": "isolation", "label": candidate.label,
+                  "runner_name": name, "image_sha256": record["image_sha256"],
+                  "state": "registration_uncertain"}
+        if any(saved.get(k) != v for k, v in fields.items() if k != "state"):
+            raise AdmissionHold("isolation_preparation_receipt_uncertain")
+        if saved.get("state") == "registration_uncertain":
+            if (state not in ("resources_prepared", "registration_may_have_started",
+                              "cleanup_verified_terminal")
+                    or "runner_id" in saved):
+                raise AdmissionHold("isolation_preparation_receipt_uncertain")
+        elif saved.get("state") in ("passed", "held"):
+            rid = saved.get("runner_id")
+            if (not post_possible or not isinstance(saved.get("finished_at"), str)
+                    or not isinstance(saved.get("issues"), list)
+                    or (saved["state"] == "passed" and saved["issues"])
+                    or (rid is not None and (type(rid) is not int or rid <= 0))):
+                raise AdmissionHold("isolation_terminal_receipt_invalid")
+        else:
+            raise AdmissionHold("isolation_preparation_receipt_uncertain")
+    elif post_possible:
+        raise AdmissionHold("isolation_post_boundary_receipt_missing")
+    if post_possible:
+        # A submitted JIT POST may have been lost. Do not clean up a running
+        # job, infer non-registration from a missing response, or retry POST.
+        try:
+            run = gh(f"{REPO_SLUG}/actions/runs/{candidate.run_id}")
+            job = gh(f"{REPO_SLUG}/actions/jobs/{candidate.job_id}")
+            if (run.get("id") != candidate.run_id
+                    or run.get("run_attempt") != candidate.run_attempt
+                    or run.get("head_sha") != candidate.sha
+                    or run.get("path") != candidate.workflow
+                    or job.get("id") != candidate.job_id
+                    or job.get("run_id") != candidate.run_id
+                    or job.get("status") != "completed"
+                    or job.get("conclusion") not in ("success", "failure", "cancelled")
+                    or job.get("runner_name") not in (None, "", name)):
+                raise AdmissionHold("isolation_post_boundary_job_not_terminal")
+            rid = saved.get("runner_id")
+            if saved["state"] == "passed":
+                if (job.get("conclusion") != "success"
+                        or job.get("runner_name") != name
+                        or type(rid) is not int or job.get("runner_id") != rid):
+                    raise AdmissionHold("isolation_terminal_passed_binding_mismatch")
+            if rid is not None and job.get("runner_id") not in (None, 0, rid):
+                raise AdmissionHold("isolation_terminal_runner_identity_drift")
+            logged = saved.get("github_job")
+            if logged is not None:
+                if not isinstance(logged, dict) or any(
+                        logged.get(k) is not None and logged.get(k) != job.get(k)
+                        for k in ("id", "run_id", "status", "conclusion", "runner_name")):
+                    raise AdmissionHold("isolation_terminal_receipt_job_drift")
+            if lookup_owned_runner(name, candidate.label, rid, allow_busy=True) is not None:
+                raise AdmissionHold("isolation_post_boundary_runner_present")
+            runner_absent_verified(rid, name)
+        except AdmissionHold:
+            raise
+        except (RuntimeError, KeyError, TypeError, OSError) as exc:
+            raise AdmissionHold("isolation_post_boundary_provider_unverified") from exc
+        # Cleanup is safe only after an authenticated terminal job and two
+        # bounded full-inventory reads. Preserve the durable source phase:
+        # post-possible cleanup MUST remain idempotent on later invocation.
+    # Before terminal GitHub proof, never stop a potentially running job.
+    # Afterwards remove ONLY exact-owned/label-verified worker/net children.
+    for child in (name + "-worker", name + "-net"):
+        if inspect_owned(child, name) is not None:
+            if not post_possible:
+                raise AdmissionHold("isolation_pre_jit_worker_unexpected")
+            stop_owned(child, name)
+            if inspect_owned(child, name) is not None:
+                raise AdmissionHold("isolation_terminal_worker_cleanup_unverified")
+    if state not in ("cleanup_verified", "cleanup_verified_terminal"):
+        try:
+            remove_isolation_holder(record["seed"], name)
+            cleanup_isolation_volume(record["evidence_volume"],
+                                     record["holder"], name)
+        except BaseException as exc:
+            raise AdmissionHold("isolation_pre_jit_cleanup_unverified") from exc
+    if (inspect_owned(record["seed"], name) is not None
+            or inspect_owned(record["holder"], name) is not None
+            or inspect_isolation_volume(record["evidence_volume"], name) is not None
+            or inspect_isolation_volume(record["home_volume"], name,
+                                        options=ISOLATION_HOME_OPTIONS) is not None):
+        raise AdmissionHold("isolation_pre_jit_cleanup_unverified")
+    if state not in ("cleanup_verified", "cleanup_verified_terminal"):
+        atomic(path, dict(record,
+                          state=("cleanup_verified_terminal" if post_possible
+                                 else "cleanup_verified"),
+                          jit_post_may_have_started=post_possible,
+                          cleanup_verified_at=now(), registration_replayed=False,
+                          registration_outcome=("terminal_provider_reconciled" if post_possible
+                                                else "no_post_possible")))
+    return {"state": "cleanup_verified_no_registration_retry", "run_id": candidate.run_id,
+            "job_id": candidate.job_id, "attempt": candidate.run_attempt,
+            "runner_name": name, "registration_replayed": False}
+
+
+def isolation_log_limiter():
+    """Require a trusted kernel RLIMIT_FSIZE launcher BEFORE a JIT POST.
+
+    The Docker CLI writes directly into the owner-private runner.log.
+    A post-run 128-MiB digest check alone does not bound host disk or memory.
+    """
+    launcher = Path("/usr/bin/prlimit")
+    try:
+        meta = launcher.lstat()
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0
+                or meta.st_mode & 0o022 or not os.access(launcher, os.X_OK)):
+            raise AdmissionHold("isolation_log_limit_unavailable")
+    except OSError as exc:
+        raise AdmissionHold("isolation_log_limit_unavailable") from exc
+    return str(launcher)
+
+
+def isolation_bounded_command(cmd, limiter):
+    """Cap both the Docker daemon's persisted logs and its attached CLI output.
+
+    The host currently uses the JSON-file logging driver; absent explicit
+    rotation it is unlimited even if the foreground Docker CLI has RLIMIT_FSIZE.
+    Only isolation receives these flags; the accepted CodeQL command is unchanged.
+    """
+    if (not isinstance(cmd, list) or cmd[:2] != ["docker", "run"]
+            or not isinstance(limiter, str) or limiter != "/usr/bin/prlimit"):
+        raise AdmissionHold("isolation_log_command_invalid")
+    if ("--read-only" not in cmd or not any(
+            isinstance(arg, str) and arg.startswith("type=volume,src=")
+            and arg.endswith(",dst=/home/runner") for arg in cmd)):
+        raise AdmissionHold("isolation_worker_storage_unbounded")
+    return [limiter, f"--fsize={ISOLATION_MAX_LOG_BYTES}", "--",
+            "docker", "run", "--log-driver=json-file",
+            "--log-opt=max-size=16m", "--log-opt=max-file=2", *cmd[2:]]
+
+
+def isolation_log_digest(path, *, limit=ISOLATION_MAX_LOG_BYTES):
+    """Stream a sealed isolation logfile; never materialise all bytes in RAM."""
+    if type(limit) is not int or limit < 1 or limit > ISOLATION_MAX_LOG_BYTES:
+        raise AdmissionHold("isolation_log_limit_invalid")
+    try:
+        before = path.lstat()
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_uid != os.getuid()
+                or stat.S_IMODE(before.st_mode) != 0o600
+                or before.st_size > limit):
+            raise AdmissionHold("isolation_log_unsafe_or_oversized")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                    before.st_dev, before.st_ino, before.st_size):
+                raise AdmissionHold("isolation_log_changed")
+            digest, n = hashlib.sha256(), 0
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                n += len(chunk)
+                if n > limit:
+                    raise AdmissionHold("isolation_log_unsafe_or_oversized")
+                digest.update(chunk)
+            after = os.fstat(fd)
+            if (n != before.st_size
+                    or (opened.st_dev, opened.st_ino, opened.st_size,
+                        opened.st_mtime_ns, opened.st_ctime_ns) !=
+                       (after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns, after.st_ctime_ns)):
+                raise AdmissionHold("isolation_log_changed")
+        finally:
+            os.close(fd)
+        return digest.hexdigest(), n
+    except OSError as exc:
+        raise AdmissionHold("isolation_log_unreadable") from exc
+
+
+
+def isolation_home_volume_name(owner):
+    """A separate disposable quota home for each exact runner identity."""
+    return volume_name(owner) + "-home"
+
+
+def isolation_worker_storage_args(owner):
+    """No writable host-backed overlay or bind inside untrusted E2E workers."""
+    home = isolation_home_volume_name(owner)
+    flags = ["--read-only"]
+    for entry in ISOLATION_WORKER_TMPFS:
+        flags.extend(["--tmpfs", entry])
+    return [*flags, "--mount", f"type=volume,src={home},dst=/home/runner"]
+
+
+def inspect_isolation_volume(volume, owner, *, options=VOLUME_OPTIONS):
+    """Inspect the exact Docker-local tmpfs identity; never adopt an alien name."""
+    try:
+        result = subprocess.run(["docker", "volume", "inspect", volume],
+                                capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AdmissionHold("isolation_volume_inspection_unavailable") from exc
+    if result.returncode:
+        if "no such volume" in result.stderr.lower():
+            return None
+        raise AdmissionHold("isolation_volume_inspection_unavailable")
+    try:
+        payload = json.loads(result.stdout)
+        if (len(payload) != 1 or payload[0].get("Name") != volume
+                or payload[0].get("Driver") != "local"
+                or payload[0].get("Options") != {"type": "tmpfs", "device": "tmpfs",
+                                                    "o": options}
+                or payload[0].get("Labels", {}).get(LABEL) != owner):
+            raise AdmissionHold("isolation_volume_ownership_or_quota_mismatch")
+        return payload[0]
+    except (ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise AdmissionHold("isolation_volume_identity_unverifiable") from exc
+
+
+def remove_isolation_holder(holder, owner):
+    """Remove only a container whose exact private owner label we can prove."""
+    if inspect_owned(holder, owner) is not None:
+        run_cli(["docker", "rm", "--force", holder], timeout=25)
+    if inspect_owned(holder, owner) is not None:
+        raise AdmissionHold("isolation_holder_cleanup_unverified")
+
+
+def cleanup_isolation_volume(volume, holder, owner):
+    """Clean both independently quota-bound volumes; prove identities absent."""
+    remove_isolation_holder(holder, owner)
+    errors = []
+    for name, options in (
+            (volume, VOLUME_OPTIONS),
+            (isolation_home_volume_name(owner), ISOLATION_HOME_OPTIONS)):
+        try:
+            if inspect_isolation_volume(name, owner, options=options) is not None:
+                run_cli(["docker", "volume", "rm", name], timeout=25)
+            if inspect_isolation_volume(name, owner, options=options) is not None:
+                errors.append("volume_remains")
+        except Exception:
+            errors.append("volume_cleanup_unverified")
+    if errors:
+        raise AdmissionHold("isolation_volume_cleanup_unverified")
+
+
+def prepare_isolation_volume(owner, image_id):
+    """Bound bytes AND inodes by a kernel tmpfs quota before any JIT POST.
+
+    An isolated, read-only holder preserves the tmpfs across the runner's exit.
+    The worker gets only the volume, never the host's receipt or Docker socket.
+    """
+    volume = volume_name(owner)
+    home = isolation_home_volume_name(owner)
+    holder = owner + "-vault-holder"
+    seed = owner + "-home-seed"
+    if (inspect_isolation_volume(volume, owner) is not None
+            or inspect_isolation_volume(home, owner,
+                                        options=ISOLATION_HOME_OPTIONS) is not None
+            or inspect_owned(holder, owner) is not None
+            or inspect_owned(seed, owner) is not None):
+        raise AdmissionHold("isolation_volume_identity_already_exists")
+    try:
+        created = run_cli(["docker", "volume", "create", "--driver", "local",
+            "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+            "--opt", "o=" + VOLUME_OPTIONS, "--label", LABEL + "=" + owner,
+            volume], timeout=25).strip()
+        if created != volume or inspect_isolation_volume(volume, owner) is None:
+            raise AdmissionHold("isolation_volume_creation_unverified")
+        created_home = run_cli(["docker", "volume", "create", "--driver", "local",
+            "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+            "--opt", "o=" + ISOLATION_HOME_OPTIONS,
+            "--label", LABEL + "=" + owner, home], timeout=25).strip()
+        if (created_home != home or inspect_isolation_volume(
+                home, owner, options=ISOLATION_HOME_OPTIONS) is None):
+            raise AdmissionHold("isolation_home_volume_creation_unverified")
+        run_cli(["docker", "create", "--name", holder,
+            "--label", LABEL + "=" + owner,
+            "--network", "none", "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--memory", "128m",
+            "--pids-limit", "24",
+            "--mount", f"type=volume,src={home},dst=/bounded-home",
+            "--mount", f"type=volume,src={volume},dst=/e2e-evidence,readonly",
+            image_id, "bash", "-ec", "sleep 7500"], timeout=25)
+        if inspect_owned(holder, owner) is None:
+            raise AdmissionHold("isolation_holder_identity_unverified")
+        run_cli(["docker", "start", holder], timeout=25)
+        live = inspect_owned(holder, owner)
+        if live is None or live.get("State", {}).get("Running") is not True:
+            raise AdmissionHold("isolation_holder_not_running")
+        # Keep BOTH tmpfs volumes mounted through the existing trusted holder.
+        # The pinned-image seed copies bootstrap files into its writable quota
+        # home, never a host directory. If any phase fails, no JIT POST occurs.
+        seed_cmd = [
+            "docker", "run", "--rm", "--name", seed,
+            "--label", LABEL + "=" + owner, "--network", "none",
+            "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--memory", "2g",
+            "--pids-limit", "64", "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=32m,nr_inodes=4096,mode=1777",
+            "--mount", f"type=volume,src={home},dst=/bounded-home",
+            image_id, "bash", "-ec",
+            "cp -a --no-preserve=ownership /home/runner/. /bounded-home/; "
+            "test -x /bounded-home/run.sh; "
+            "test -x /bounded-home/bin/Runner.Listener; "
+            "test -w /bounded-home; echo RUNNER_HOME_SEEDED",
+        ]
+        if run_cli(seed_cmd, timeout=90).strip() != "RUNNER_HOME_SEEDED":
+            raise AdmissionHold("isolation_home_pre_jit_seed_unverified")
+        if inspect_owned(seed, owner) is not None:
+            raise AdmissionHold("isolation_home_seed_cleanup_unverified")
+        for params, expected in (
+                (["-B1", "/bounded-home"], ISOLATION_HOME_VOLUME_BYTES),
+                (["-i", "/bounded-home"], ISOLATION_HOME_VOLUME_INODES)):
+            listing = run_cli(["docker", "exec", holder, "df", *params], timeout=25)
+            try:
+                actual = int(listing.strip().splitlines()[-1].split()[1])
+            except (IndexError, ValueError) as exc:
+                raise AdmissionHold("isolation_home_kernel_quota_unverified") from exc
+            if actual != expected:
+                raise AdmissionHold("isolation_home_kernel_quota_unverified")
+        run_cli(["docker", "exec", holder, "test", "-x",
+                 "/bounded-home/run.sh"], timeout=25)
+        # Docker engine, not a post-run Python validator, must enforce this.
+        # This probe executes only the trusted pinned image; never PR code.
+        checked = run_cli(["docker", "exec", holder, "bash", "-ec",
+            'test "$(stat -c %a /e2e-evidence)" = "1777"; '
+            "test \"$(df -B1 /e2e-evidence | tail -n 1 | awk '{print $2}')\" "
+            f'= "{VOLUME_BYTES}"; '
+            "test \"$(df -i /e2e-evidence | tail -n 1 | awk '{print $2}')\" "
+            f'= "{VOLUME_INODES}"; '
+            'printf "BOUNDED_TMPFS_CONFIRMED\n"'], timeout=25)
+        if checked.strip() != "BOUNDED_TMPFS_CONFIRMED":
+            raise AdmissionHold("isolation_kernel_quota_unverified")
+        return volume, holder
+    except BaseException:
+        # No JIT POST has happened; never retry a possibly ambiguous create.
+        try:
+            remove_isolation_holder(seed, owner)
+            cleanup_isolation_volume(volume, holder, owner)
+        except BaseException as exc:
+            raise AdmissionHold("isolation_volume_pre_jit_cleanup_unverified") from exc
+        raise
+
+
+class _BoundedTarInput:
+    """Limit transport bytes as well as declared files. Docker cp emits raw tar."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        # Budget for tar headers, PAX records and directory entries; no
+        # unlimited stream even when the archive carries zero file contents.
+        self.limit = MAX_TOTAL_BYTES + MAX_FILES * 8192
+        self.total = 0
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = 1024 * 1024
+        remaining = self.limit - self.total
+        if remaining < 0:
+            raise AdmissionHold("isolation_export_stream_oversized")
+        # One byte beyond the limit makes the refusal unambiguous.
+        data = self.stream.read(min(size, remaining + 1))
+        self.total += len(data)
+        if self.total > self.limit:
+            raise AdmissionHold("isolation_export_stream_oversized")
+        return data
+
+
+def _bounded_tar_evidence_export(stream, vault):
+    """Extract only bounded regular bytes from Docker's untrusted tar stream.
+
+    A tmpfs quota limits allocated blocks, NOT sparse file logical length:
+    truncate -s 1T uses almost no tmpfs blocks. Never use docker cp directly
+    into a host directory before inspecting each declared logical file size.
+    This reader rejects oversize tar headers before writing their payload.
+    """
+    if not vault.is_dir() or vault.is_symlink() or any(vault.iterdir()):
+        raise AdmissionHold("isolation_export_destination_unsafe")
+    seen = set()
+    file_count = directory_count = total_bytes = 0
+    try:
+        with tarfile.open(fileobj=_BoundedTarInput(stream), mode="r|") as archive:
+            for member in archive:
+                name = member.name
+                if name.startswith("./"):
+                    name = name[2:]
+                if name.startswith("e2e-evidence/"):
+                    name = name[len("e2e-evidence/"):]
+                # Docker cp of a directory may include the archive root.
+                if name in ("", ".", "e2e-evidence"):
+                    if not member.isdir():
+                        raise AdmissionHold("isolation_export_unsafe_root")
+                    continue
+                try:
+                    rel = _relative(name)
+                except EvidenceHold as exc:
+                    raise AdmissionHold("isolation_export_unsafe_path") from exc
+                if rel in seen:
+                    raise AdmissionHold("isolation_export_duplicate_path")
+                seen.add(rel)
+                if len(seen) > MAX_FILES * 4:
+                    raise AdmissionHold("isolation_export_excessive_entries")
+                if (getattr(member, "sparse", None)
+                        or any(key.startswith("GNU.sparse")
+                               for key in member.pax_headers)):
+                    raise AdmissionHold("isolation_export_sparse_entry")
+                target = vault.joinpath(*rel.split("/"))
+                # The destination has private 0700 ancestors, and only this
+                # owner process creates entries. Never honour archive modes.
+                if member.isdir():
+                    directory_count += 1
+                    if directory_count > MAX_FILES * 3:
+                        raise AdmissionHold("isolation_export_excessive_directories")
+                    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    meta = target.lstat()
+                    if (not stat.S_ISDIR(meta.st_mode)
+                            or meta.st_uid != os.getuid() or meta.st_mode & 0o022):
+                        raise AdmissionHold("isolation_export_unsafe_directory")
+                    continue
+                if not member.isfile() or type(member.size) is not int:
+                    raise AdmissionHold("isolation_export_special_file_refused")
+                if member.size < 0 or member.size > MAX_FILE_BYTES:
+                    raise AdmissionHold("isolation_export_file_oversized")
+                file_count += 1
+                total_bytes += member.size
+                if file_count > MAX_FILES + 3 or total_bytes > MAX_TOTAL_BYTES:
+                    raise AdmissionHold("isolation_export_total_oversized")
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                for parent in (target.parent, *list(target.parents)[1:-1]):
+                    if parent == vault:
+                        break
+                    meta = parent.lstat()
+                    if (not stat.S_ISDIR(meta.st_mode) or meta.st_uid != os.getuid()
+                            or meta.st_mode & 0o022):
+                        raise AdmissionHold("isolation_export_unsafe_parent")
+                body = archive.extractfile(member)
+                if body is None:
+                    raise AdmissionHold("isolation_export_file_unreadable")
+                fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW, 0o600)
+                try:
+                    with os.fdopen(fd, "wb", closefd=False) as output:
+                        remaining = member.size
+                        while remaining:
+                            chunk = body.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise AdmissionHold("isolation_export_truncated_file")
+                            output.write(chunk)
+                            remaining -= len(chunk)
+                        output.flush()
+                        os.fsync(output.fileno())
+                finally:
+                    os.close(fd)
+    except AdmissionHold:
+        raise
+    except (tarfile.TarError, EOFError, OSError, ValueError) as exc:
+        raise AdmissionHold("isolation_export_archive_unverifiable") from exc
+    if file_count == 0:
+        raise AdmissionHold("isolation_export_empty_archive")
+    return {"file_count": file_count, "logical_bytes": total_bytes}
+
+
+def export_isolation_volume(volume, holder, owner, vault):
+    """Stream a Docker-local tmpfs through pre-write size and path guards."""
+    if (inspect_isolation_volume(volume, owner) is None
+            or (live := inspect_owned(holder, owner)) is None
+            or live.get("State", {}).get("Running") is not True):
+        raise AdmissionHold("isolation_evidence_holder_unverifiable")
+    meta = vault.lstat()
+    if (not stat.S_ISDIR(meta.st_mode) or meta.st_uid != os.getuid()
+            or stat.S_IMODE(meta.st_mode) != 0o1777 or any(vault.iterdir())):
+        raise AdmissionHold("isolation_evidence_export_destination_unsafe")
+    limiter = Path("/usr/bin/timeout")
+    info = limiter.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o022 or not os.access(limiter, os.X_OK)):
+        raise AdmissionHold("isolation_export_timeout_untrusted")
+    try:
+        process = subprocess.Popen(
+            [str(limiter), "--kill-after=5s", "120s",
+             "docker", "cp", holder + ":/e2e-evidence/.", "-"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            evidence = _bounded_tar_evidence_export(process.stdout, vault)
+            if process.wait(timeout=8) != 0:
+                raise AdmissionHold("isolation_export_copy_failed")
+            return evidence
+        finally:
+            if process.poll() is None:
+                # The timeout wrapper may have spawned a Docker CLI child.
+                # Kill only this newly-created session, never shared CI jobs.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait(timeout=8)
+            process.stdout.close()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AdmissionHold("isolation_export_process_unverifiable") from exc
+
+
 def runner_job(candidate, controls):
     private_dir(RECEIPTS)
     target, name, lineage = select_runner_intent(candidate)
     worker = name + "-worker"
     net = name + "-net"
     image_id = approved_job_image(candidate, controls)
+    # Refuse isolation *before* an irreversible JIT POST if bounded host log
+    # capture cannot be guaranteed. CodeQL/ops command paths are unchanged.
+    limiter = isolation_log_limiter() if candidate.role == "isolation" else None
+    storage_args = (isolation_worker_storage_args(name)
+                    if candidate.role == "isolation" else [])
     if lineage is not None and lineage["original_image_sha256"] != image_id:
         raise AdmissionHold("recovered_runner_image_drift")
     private_dir(target)
-    # Only isolation receives a fresh leaf; recovery/security never share a vault.
-    vault = create_vault(target) if candidate.role == "isolation" else None
-    receipt = {
-        "schema": "clawsweeper.selfhosted-jit.v1", "run_id": candidate.run_id,
-        "job_id": candidate.job_id, "attempt": candidate.run_attempt,
-        "head_sha": candidate.sha, "workflow": candidate.workflow, "event": candidate.event,
-        "role": candidate.role, "label": candidate.label, "runner_name": name,
-        "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
-    }
-    if lineage is not None:
-        receipt.update({k: v for k, v in lineage.items() if k != "original_image_sha256"})
-    atomic(target / "receipt.json", receipt)
+    preparation = None
+    preparation_path = target / "preparation-intent.json"
+    if candidate.role == "isolation":
+        # No Docker resource may exist until this exact identity is fsynced.
+        preparation = isolation_preparation_record(candidate, name, image_id)
+        atomic(preparation_path, preparation)
+    volume = holder = vault = None
+    try:
+        # Only isolation receives a fresh leaf; security never shares a vault.
+        vault = create_vault(target) if candidate.role == "isolation" else None
+        # Quota volumes and holder are under the same pre-JIT cleanup guard.
+        if vault is not None:
+            volume, holder = prepare_isolation_volume(name, image_id)
+            atomic(preparation_path, dict(preparation, state="resources_prepared"))
+        receipt = {
+            "schema": "clawsweeper.selfhosted-jit.v1", "run_id": candidate.run_id,
+            "job_id": candidate.job_id, "attempt": candidate.run_attempt,
+            "head_sha": candidate.sha, "workflow": candidate.workflow, "event": candidate.event,
+            "role": candidate.role, "label": candidate.label, "runner_name": name,
+            "image_sha256": image_id, "state": "registration_uncertain", "created_at": now(),
+        }
+        if lineage is not None:
+            receipt.update({k: v for k, v in lineage.items() if k != "original_image_sha256"})
+        atomic(target / "receipt.json", receipt)
+        if preparation is not None:
+            # This durable fence MUST precede the first non-idempotent JIT POST.
+            # Recovery never assumes registration did not occur beyond it.
+            atomic(preparation_path, dict(preparation,
+                   state="registration_may_have_started",
+                   jit_post_may_have_started=True))
+    except BaseException:
+        if preparation is not None:
+            # Even receipt write/rename and pre-JIT journal failures require
+            # independently verified owner-only cleanup, without registration.
+            try:
+                # We are still synchronously BEFORE the POST, even if the
+                # post-possible journal write had reached disk before failing.
+                # Clean exact locally named resources without trusting a
+                # partial receipt, then durably mark the no-POST resolution.
+                remove_isolation_holder(name + "-home-seed", name)
+                cleanup_isolation_volume(volume_name(name),
+                                         name + "-vault-holder", name)
+                saved = _private_preparation_file(preparation_path)
+                atomic(preparation_path, dict(saved, state="cleanup_verified",
+                       jit_post_may_have_started=False,
+                       cleanup_verified_at=now(), registration_replayed=False,
+                       registration_outcome="no_post_possible"))
+            except BaseException as cleanup_exc:
+                raise AdmissionHold("isolation_pre_jit_cleanup_unverified") from cleanup_exc
+        raise
     # Registration is non-idempotent. Enter cleanup protection BEFORE the POST.
     # Persist an uncertain intent first; a crash leaves recovery an exact identity
     # to reconcile, but never permission to submit the POST again.
@@ -914,8 +1552,13 @@ def runner_job(candidate, controls):
                    "--label", LABEL+"="+name, "--network", "container:"+net,
                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "500",
                    "--memory", runner_limits(candidate)[1], "--cpus", "2",
-                   *(mount_args(vault) if vault is not None else []), image_id,
+                   *storage_args, *(mount_args(volume) if vault is not None else []), image_id,
                    "bash", "-ec", 'IFS= read -r config; exec ./run.sh --jitconfig "$config"']
+            if limiter is not None:
+                # prlimit execs Docker with a per-process kernel file-size cap.
+                # Excess output terminates the CLI and invokes existing JIT
+                # cleanup/fencing; there is no host-socket mount in the runner.
+                cmd = isolation_bounded_command(cmd, limiter)
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=logfile, stderr=subprocess.STDOUT, text=True)
             process.stdin.write(encoded + "\n")
             process.stdin.close()
@@ -926,8 +1569,12 @@ def runner_job(candidate, controls):
             except subprocess.TimeoutExpired:
                 issues.append("runner_time_limit")
             receipt["runner_exit"] = process.poll()
-        receipt["log_sha256"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
-        receipt["log_bytes"] = log_path.stat().st_size
+        if candidate.role == "isolation":
+            receipt["log_sha256"], receipt["log_bytes"] = isolation_log_digest(log_path)
+        else:
+            # Retain the already-accepted CodeQL/runtime path unchanged.
+            receipt["log_sha256"] = hashlib.sha256(log_path.read_bytes()).hexdigest()
+            receipt["log_bytes"] = log_path.stat().st_size
         failure_phase = "github_job_readback"
         result = {}
         for _ in range(6):
@@ -949,6 +1596,9 @@ def runner_job(candidate, controls):
             # synthetic-merge SHA and exact ancestry come from fresh GitHub
             # reads, not from the untrusted runner's receipt or environment.
             try:
+                # The volume remains mounted in the trusted read-only holder
+                # until the bounded transfer completes after runner exit.
+                export_isolation_volume(volume, holder, name, vault)
                 checkout = expected_isolation_checkout(candidate, controls)
                 receipt["e2e_proof"] = verify_vault(
                     vault, run_id=candidate.run_id, attempt=candidate.run_attempt,
@@ -973,6 +1623,11 @@ def runner_job(candidate, controls):
                 stop_owned(child, name)
             except BaseException as exc:
                 record_cleanup_error(exc, "owned_cleanup_unverified")
+        if volume is not None:
+            try:
+                cleanup_isolation_volume(volume, holder, name)
+            except BaseException as exc:
+                record_cleanup_error(exc, "isolation_volume_cleanup_unverified")
         if process is not None:
             try:
                 process.wait(timeout=15)
@@ -1183,9 +1838,48 @@ def disarm_security_after_held(candidate, controls, receipt_path):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("inspect", "cycle"))
+    parser.add_argument("mode", choices=("inspect", "cycle", "reconcile-pre-jit"))
+    parser.add_argument("--run-id", type=int)
+    parser.add_argument("--job-id", type=int)
+    parser.add_argument("--attempt", type=int)
+    parser.add_argument("--expected-sha")
     args = parser.parse_args()
     private_dir(ROOT)
+    if args.mode == "reconcile-pre-jit":
+        # Explicit exact-job resource recovery, even when admission is default
+        # denied. It cannot dispatch/register or touch foreign-labelled objects.
+        if (not all(type(i) is int and i > 0 for i in (
+                args.run_id, args.job_id, args.attempt))
+                or not isinstance(args.expected_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", args.expected_sha)):
+            raise AdmissionHold("pre_jit_recovery_exact_identity_required")
+        with LOCK.open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise AdmissionHold("existing_executor_owns_lock") from exc
+            with shared_fleet_admission_lock():
+                target = RECEIPTS / (f"run-{args.run_id}-job-{args.job_id}"
+                                     f"-attempt-{args.attempt}")
+                record = _private_preparation_file(
+                    target / "preparation-intent.json")
+                if (record.get("run_id") != args.run_id
+                        or record.get("job_id") != args.job_id
+                        or record.get("attempt") != args.attempt
+                        or record.get("head_sha") != args.expected_sha):
+                    raise AdmissionHold("pre_jit_recovery_source_identity_mismatch")
+                from types import SimpleNamespace
+                candidate = SimpleNamespace(
+                    run_id=args.run_id, job_id=args.job_id,
+                    run_attempt=args.attempt, sha=args.expected_sha,
+                    workflow=record.get("workflow"), event=record.get("event"),
+                    role=record.get("role"), label=record.get("label"))
+                # Derive the owner name from explicit numeric IDs, not from
+                # potentially tampered journal content.
+                name = f"csw-ci-{args.run_id}-{args.job_id}-{args.attempt}"
+                print(json.dumps(reconcile_isolation_preparation(
+                    target, candidate, name)))
+        return
     if args.mode == "inspect":
         controls = load_controls()
         found = discover()
@@ -1237,6 +1931,18 @@ def main():
                 # reserve/dispatch work. Hold it through cleanup so neither
                 # owner can admit a concurrent external effect.
                 with shared_fleet_admission_lock():
+                    if c.role == "isolation":
+                        key = (f"run-{c.run_id}-job-{c.job_id}"
+                               f"-attempt-{c.run_attempt}")
+                        prior = RECEIPTS / key
+                        if prior.exists() or prior.is_symlink():
+                            name = f"csw-ci-{c.run_id}-{c.job_id}-{c.run_attempt}"
+                            if ((prior / "preparation-intent.json").exists()
+                                    or (prior / "preparation-intent.json").is_symlink()):
+                                result = reconcile_isolation_preparation(prior, c, name)
+                                print(json.dumps(result))
+                                return
+                            raise AdmissionHold("existing_or_uncertain_isolation_intent")
                     capacity(c, controls)
                     result = runner_job(c, controls)
                     if c.role == "security" and result.get("state") == "held":
