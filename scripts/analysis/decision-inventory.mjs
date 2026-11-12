@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCHEMA = "clawsweeper.inference-measurement.v1";
+const SCHEMA_V2 = "clawsweeper.inference-measurement.v2";
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_EVENTS = 50_000;
 const FIELDS = [
@@ -58,11 +59,19 @@ export function validateInferenceMeasurement(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("invalid inference measurement object");
   }
-  if (Object.keys(value).sort().join(",") !== FIELDS) {
+  const expectedFields =
+    value.schema === SCHEMA_V2
+      ? [...FIELDS.split(","), "decisionId", "cachedInputTokens"].sort().join(",")
+      : FIELDS;
+  if (Object.keys(value).sort().join(",") !== expectedFields) {
     throw new Error("unexpected inference measurement fields");
   }
   if (
-    value.schema !== SCHEMA ||
+    ![SCHEMA, SCHEMA_V2].includes(value.schema) ||
+    (value.schema === SCHEMA_V2 &&
+      (typeof value.decisionId !== "string" ||
+        !/^[a-f0-9]{64}$/.test(value.decisionId) ||
+        (value.cachedInputTokens !== null && !validNonNegativeInteger(value.cachedInputTokens)))) ||
     !TASKS.has(value.taskKind) ||
     !PROVIDERS.has(value.provider) ||
     !OUTCOMES.has(value.outcome) ||
@@ -83,7 +92,9 @@ export function validateInferenceMeasurement(value) {
   }
   if (
     value.usageSource === "unavailable" &&
-    (value.inputTokens !== null || value.outputTokens !== null)
+    (value.inputTokens !== null ||
+      value.outputTokens !== null ||
+      (value.schema === SCHEMA_V2 && value.cachedInputTokens !== null))
   ) {
     throw new Error("unattributed provider usage");
   }
@@ -105,10 +116,20 @@ function summary(events) {
   let usageAvailable = 0;
   let inputObserved = 0;
   let outputObserved = 0;
+  const correlatedDecisions = new Set();
+  let knownCachedInputTokens = 0;
   let knownInputTokens = 0;
   let knownOutputTokens = 0;
 
   for (const e of events) {
+    if (e.schema === SCHEMA_V2) correlatedDecisions.add(e.decisionId);
+    if (
+      e.schema === SCHEMA_V2 &&
+      e.usageSource === "provider_response" &&
+      e.cachedInputTokens !== null
+    ) {
+      knownCachedInputTokens += e.cachedInputTokens;
+    }
     byTask[e.taskKind] = (byTask[e.taskKind] || 0) + 1;
     byProvider[e.provider] = (byProvider[e.provider] || 0) + 1;
     const rev = e.sourceRevision || "unknown";
@@ -152,6 +173,8 @@ function summary(events) {
       total: n,
     },
     tokensFromProviderResponses: { input: knownInputTokens, output: knownOutputTokens },
+    correlatedDecisions: correlatedDecisions.size,
+    cachedInputTokensFromProviderResponses: knownCachedInputTokens,
     actualCostUsd: null,
     verifiedCompletedTasks: null,
     cashSavingsDetermination: "insufficient_provider_billing_and_verified_task_outcomes",

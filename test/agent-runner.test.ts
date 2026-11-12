@@ -232,13 +232,14 @@ if (process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE) {
   process.stderr.write("unexpected private telemetry path in model subprocess");
   process.exitCode = 22;
 }
-process.stdout.write("ok");
+process.stdout.write(JSON.stringify({type:"turn.completed",usage:{input_tokens:32,output_tokens:7,cached_input_tokens:16}}));
 `,
   );
   chmodSync(binary, 0o755);
   try {
     const result = runAgentProcess({
       label: "default-codex",
+      inferenceDecisionId: "c".repeat(64),
       inferenceTaskKind: "review",
       scanSource: { kind: "prompt" },
       prompt,
@@ -276,7 +277,11 @@ process.stdout.write("ok");
     assert.equal(metric.model, "unknown");
     assert.equal(metric.outcome, "process_ok");
     assert.equal(metric.completionVerified, false);
-    assert.equal(metric.inputTokens, null);
+    assert.equal(metric.inputTokens, 32);
+    assert.equal(metric.outputTokens, 7);
+    assert.equal(metric.cachedInputTokens, 16);
+    assert.equal(metric.decisionId, "c".repeat(64));
+    assert.equal(metric.schema, "clawsweeper.inference-measurement.v2");
     assert.doesNotMatch(JSON.stringify(metric), /prompt over stdin|exact schema bytes/);
   } finally {
     if (originalMetricsPath === undefined) delete process.env.CLAWSWEEPER_INFERENCE_METRICS_FILE;

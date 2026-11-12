@@ -1,3 +1,4 @@
+import { codexJsonlUsage, structuredProviderUsage } from "./inference-provider-usage.js";
 import { randomInt } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,6 +25,7 @@ export interface RunAgentProcessOptions {
   label: string;
   prompt: string;
   inferenceTaskKind?: InferenceTaskKind;
+  inferenceDecisionId?: string;
   // Generated diagnostic copy only; never an original input or requested export.
   diagnosticPromptPath?: string;
   scanSource: AgentScanSource;
@@ -58,6 +60,7 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
     selectedRunner === "openclaw" ? "openclaw" : selectedRunner === "codex" ? "codex" : "unknown";
   const observation = {
     taskKind: options.inferenceTaskKind ?? "unspecified",
+    ...(options.inferenceDecisionId ? { decisionId: options.inferenceDecisionId } : {}),
     provider,
     model:
       provider === "openclaw"
@@ -75,8 +78,12 @@ export function runAgentProcess(options: RunAgentProcessOptions): CodexProcessRe
   const childOptions = { ...options, env: childEnv };
   try {
     const result = runAgentProcessUnmetered(childOptions);
+    const providerUsage =
+      structuredProviderUsage(result.providerUsage) ??
+      (provider === "codex" ? codexJsonlUsage(result.stdout) : undefined);
     recordInferenceDecisionMetric({
       ...observation,
+      ...(providerUsage ? { providerUsage } : {}),
       elapsedMs: Date.now() - startedAt,
       outcome: result.status === 0 && !result.error ? "process_ok" : "process_failed",
     });

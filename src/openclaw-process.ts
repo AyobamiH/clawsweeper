@@ -1,3 +1,4 @@
+import { openclawEnvelopeUsage } from "./inference-provider-usage.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -294,6 +295,8 @@ function normalizeOpenclawResult(
 ): CodexProcessResult {
   if (processResult.error) return processResult;
   const parsed = parseOpenclawEnvelope(completeStdout, processResult.stderr);
+  const providerUsage = openclawEnvelopeUsage(parsed.envelope);
+  if (providerUsage) processResult = { ...processResult, providerUsage };
   if (parsed.failure) {
     if (/\btimeout\b/i.test(parsed.failure.message)) {
       (parsed.failure as NodeJS.ErrnoException).code = "ETIMEDOUT";

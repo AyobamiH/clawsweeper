@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "./inference-provider-usage.js";
 import { isCodexUsageLimitError, codexJsonlFailureDetail } from "./codex-transient.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,6 +19,7 @@ export interface CodexProcessResult {
   error?: Error;
   stdout: string;
   stderr: string;
+  providerUsage?: ProviderUsage;
 }
 
 interface SerializedCodexProcessResult {
