@@ -12,6 +12,13 @@ on:
       - "results/**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      validation_lane:
+        description: "Explicit ordinary validation only; no inference or Windows job"
+        required: true
+        type: choice
+        default: none
+        options: [none, check, sparse]
 
 permissions:
   contents: read
@@ -28,10 +35,9 @@ jobs:
       CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
       CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'pull_request' &&
+      ${{ github.event_name == 'pull_request' &&
            github.event.pull_request.head.repo.full_name == github.repository &&
-           github.actor == 'AyobamiH') }}
+           github.actor == 'AyobamiH' }}
     runs-on:
       [self-hosted, Linux, X64, "clawsweeper-ci-review-${{ github.run_id }}-hosted-review-scan"]
     timeout-minutes: 10
@@ -97,6 +103,9 @@ jobs:
 
   check:
     name: pnpm check
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' ||
+          (github.actor == 'AyobamiH' && inputs.validation_lane == 'check') }}
     runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-validation-${{ github.run_id }}-check"]
     # Full owner-hosted canonical checks have taken over 26 minutes on 2 CPUs.
     # Keep a bounded JIT exit/cleanup margin under MAX_SECONDS=42 minutes.
@@ -129,7 +138,10 @@ jobs:
 
   sparse-repair-builds:
     name: sparse repair build smoke
-    if: github.event_name == 'pull_request'
+    if: >-
+      ${{ github.event_name == 'pull_request' ||
+          (github.event_name == 'workflow_dispatch' &&
+           github.actor == 'AyobamiH' && inputs.validation_lane == 'sparse') }}
     runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-validation-${{ github.run_id }}-sparse"]
     timeout-minutes: 10
     steps:
@@ -144,6 +156,7 @@ jobs:
 
   windows-codex-launch:
     name: Windows Codex launcher
+    if: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on:
       [
         self-hosted,

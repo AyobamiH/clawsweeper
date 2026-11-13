@@ -58,6 +58,12 @@ class ReadonlyValidation(unittest.TestCase):
                         p.classify(run(event), job(slot))
         with self.assertRaisesRegex(p.AdmissionHold, "unapproved_event"):
             p.classify(run("push", branch="main", actor="AyobamiH", sha=BASE), job("sparse"))
+        self.assertEqual(
+            p.classify(
+                run("workflow_dispatch", branch="develop", actor="AyobamiH"),
+                job("sparse"),
+            ).role, "validation"
+        )
 
     def test_review_and_windows_jobs_stay_separate(self):
         # Standard-library test: Python CI must not depend on host PyYAML.
@@ -89,6 +95,105 @@ class ReadonlyValidation(unittest.TestCase):
             self.assertIn("persist-credentials: false", body)
             self.assertNotIn("secrets.", body)
         self.assertIn("permissions:\n  contents: read", text)
+
+    def test_manual_ci_runs_exactly_one_owner_selected_validation_lane(self):
+        text = (ROOT / ".github/workflows/ci.yml").read_text()
+        header = text.split("\njobs:\n", 1)[0]
+        self.assertIn("workflow_dispatch:\n    inputs:\n      validation_lane:", header)
+        for part in ("required: true", "type: choice", "default: none",
+                     "options: [none, check, sparse]"):
+            self.assertIn(part, header)
+        sections = {}
+        import re
+        for name in ("hosted-review-scan", "check", "sparse-repair-builds", "windows-codex-launch"):
+            start = f"  {name}:\n"
+            self.assertIn(start, text)
+            tail = text.split(start, 1)[1]
+            following = re.search(r"(?m)^  [A-Za-z][A-Za-z0-9_-]+:$", tail)
+            sections[name] = tail[:following.start()] if following else tail
+        self.assertIn("github.event_name == 'pull_request'", sections["hosted-review-scan"])
+        self.assertNotIn("github.event_name == 'workflow_dispatch' ||", sections["hosted-review-scan"])
+        self.assertIn("inputs.validation_lane == 'check'", sections["check"])
+        self.assertIn("inputs.validation_lane == 'sparse'", sections["sparse-repair-builds"])
+        self.assertIn("github.actor == 'AyobamiH'", sections["check"])
+        self.assertIn("github.actor == 'AyobamiH'", sections["sparse-repair-builds"])
+        self.assertIn("github.event_name != 'workflow_dispatch'", sections["windows-codex-launch"])
+        # PR and push retain their previous job participation; manual dispatch
+        # selects only one ordinary lane, and the default selects none.
+        def job_admitted(name, event, lane, actor="AyobamiH", owner_pr=True):
+            if name == "hosted-review-scan":
+                return event == "pull_request" and actor == "AyobamiH" and owner_pr
+            if name == "check":
+                return event != "workflow_dispatch" or (actor == "AyobamiH" and lane == "check")
+            if name == "sparse-repair-builds":
+                return event == "pull_request" or (event == "workflow_dispatch" and actor == "AyobamiH" and lane == "sparse")
+            return event != "workflow_dispatch"
+        for lane, expected in (("none", ()), ("check", ("check",)), ("sparse", ("sparse-repair-builds",)),
+                               ("review", ()), ("windows", ())):
+            actual = tuple(name for name in sections if job_admitted(name, "workflow_dispatch", lane))
+            self.assertEqual(actual, expected)
+        for lane in ("check", "sparse"):
+            self.assertFalse(any(job_admitted(name, "workflow_dispatch", lane, "outsider") for name in sections))
+        self.assertEqual(
+            tuple(name for name in sections if job_admitted(name, "push", "none")),
+            ("check", "windows-codex-launch"),
+        )
+
+    def test_signed_private_develop_validation_needs_exclusive_run_scope(self):
+        current = run("workflow_dispatch", branch="develop", actor="AyobamiH")
+        candidate = p.classify(current, job())
+        digest = hashlib.sha256(b"private-preview").hexdigest()
+        scope = dict(accepted=True, branch="develop", head_sha=HEAD, workflow_sha256=digest)
+        base_controls = controls(
+            enabled_roles=["validation"], allowed_run_ids=[RUN_ID],
+            allowed_branches=["develop"], validation_candidate_sha256=digest,
+        )
+        with self.assertRaisesRegex(p.AdmissionHold, "validation_private_preview_not_accepted"):
+            p.category_enabled(candidate, base_controls)
+        accepted = dict(base_controls, validation_private_preview=scope)
+        self.assertTrue(p.category_enabled(candidate, accepted))
+        for override in (
+            {"operations_accepted": True}, {"allowed_run_ids": [RUN_ID, RUN_ID + 1]},
+            {"enabled_roles": ["validation", "ops"]},
+            {"validation_private_preview": dict(scope, head_sha="f" * 40)},
+            {"validation_private_preview": dict(scope, workflow_sha256="f" * 64)},
+        ):
+            with self.subTest(override=override), self.assertRaises(p.AdmissionHold):
+                p.category_enabled(candidate, dict(accepted, **override))
+        with self.assertRaisesRegex(p.AdmissionHold, "validation_default_branch_owner_unverified"):
+            p.classify(run("workflow_dispatch", branch="develop", actor="outsider"), job())
+        with self.assertRaisesRegex(p.AdmissionHold, "validation_default_branch_owner_unverified"):
+            p.classify(run("workflow_dispatch", branch="feature", actor="AyobamiH"), job())
+        with self.assertRaisesRegex(p.AdmissionHold, "validation_default_branch_owner_unverified"):
+            p.classify(run("push", branch="develop", actor="AyobamiH"), job())
+
+        def github(path):
+            if path.endswith("/git/ref/heads/main"):
+                return {"object": {"sha": BASE}}
+            if path.endswith("/git/ref/heads/develop"):
+                return {"object": {"sha": HEAD}}
+            if path.endswith("/commits/" + HEAD):
+                return {"sha": HEAD, "commit": {"verification": {"verified": True}}}
+            if path.endswith("?ref=" + BASE):
+                return {"content": base64.b64encode(b"original").decode()}
+            if path.endswith("?ref=" + HEAD):
+                return {"content": base64.b64encode(b"private-preview").decode()}
+            raise AssertionError(path)
+        with patch.object(e, "gh", side_effect=github):
+            self.assertTrue(e.source_authorised(candidate, accepted))
+        for failure, reason in (
+            (lambda path: {"object": {"sha": "c" * 40}} if path.endswith("/git/ref/heads/develop") else github(path),
+             "validation_private_preview_head_drift"),
+            (lambda path: {"sha": HEAD, "commit": {"verification": {"verified": False}}}
+             if path.endswith("/commits/" + HEAD) else github(path),
+             "validation_private_preview_signature_unverified"),
+            (lambda path: {"content": base64.b64encode(b"tampered").decode()}
+             if path.endswith("?ref=" + HEAD) else github(path),
+             "validation_candidate_workflow_drift"),
+        ):
+            with self.subTest(reason=reason), patch.object(e, "gh", side_effect=failure):
+                with self.assertRaisesRegex(p.AdmissionHold, reason):
+                    e.source_authorised(candidate, accepted)
 
     def test_default_denial_and_owner_bounded_preview(self):
         c = p.classify(run(), job())

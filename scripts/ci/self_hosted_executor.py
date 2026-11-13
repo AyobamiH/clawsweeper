@@ -353,6 +353,21 @@ def source_authorised(candidate, controls):
             if parents != [candidate.trusted_base_sha, candidate.sha]:
                 raise AdmissionHold("validation_merge_parents_changed")
             sources = (candidate.sha, merge_sha)
+        elif candidate.event == "workflow_dispatch" and candidate.branch == "develop":
+            # Verify the signed private develop head and exact workflow bytes.
+            # Passing on a different feature branch, stale head, or unsigned
+            # commit is never authority to execute on the owner's machine.
+            scope = controls.get("validation_private_preview")
+            if not isinstance(scope, dict) or scope.get("head_sha") != candidate.sha:
+                raise AdmissionHold("validation_private_preview_not_accepted")
+            develop = gh(f"{REPO_SLUG}/git/ref/heads/develop")["object"]["sha"]
+            if develop != candidate.sha:
+                raise AdmissionHold("validation_private_preview_head_drift")
+            commit = gh(f"{REPO_SLUG}/commits/{candidate.sha}")
+            if (commit.get("sha") != candidate.sha
+                    or commit.get("commit", {}).get("verification", {}).get("verified") is not True):
+                raise AdmissionHold("validation_private_preview_signature_unverified")
+            sources = (candidate.sha,)
         else:
             if candidate.sha != main:
                 raise AdmissionHold("validation_default_branch_sha_changed")

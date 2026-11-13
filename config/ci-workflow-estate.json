@@ -35,7 +35,7 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
+      "sha256": "31e6b3920c80a1468025d3019a65dfe8f3497637d37961140eb4be3b07c100a3",
       "events": ["pull_request", "push", "workflow_dispatch"]
     },
     {
@@ -355,7 +355,7 @@
       ],
       "events": ["pull_request", "push", "workflow_dispatch"],
       "risks": [],
-      "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
+      "source_sha256": "31e6b3920c80a1468025d3019a65dfe8f3497637d37961140eb4be3b07c100a3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "local_label_unverified"
     },
@@ -373,7 +373,7 @@
       ],
       "events": ["pull_request", "push", "workflow_dispatch"],
       "risks": ["secret_reference"],
-      "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
+      "source_sha256": "31e6b3920c80a1468025d3019a65dfe8f3497637d37961140eb4be3b07c100a3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
@@ -391,7 +391,7 @@
       ],
       "events": ["pull_request", "push", "workflow_dispatch"],
       "risks": [],
-      "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
+      "source_sha256": "31e6b3920c80a1468025d3019a65dfe8f3497637d37961140eb4be3b07c100a3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "local_label_unverified"
     },
@@ -409,7 +409,7 @@
       ],
       "events": ["pull_request", "push", "workflow_dispatch"],
       "risks": [],
-      "source_sha256": "bebf237146b6d005e08cce433d6ea84525559d9441afa31443b78096c0364526",
+      "source_sha256": "31e6b3920c80a1468025d3019a65dfe8f3497637d37961140eb4be3b07c100a3",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "genuine_windows_required"
     },
