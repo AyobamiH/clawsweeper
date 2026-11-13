@@ -17,6 +17,14 @@ import { resolveSpawnCommand } from "../../dist/command.js";
 import { runCommand, runContainedCommand } from "../../dist/repair/command-runner.js";
 import { mockCommandBinEnv } from "../helpers.ts";
 
+// Synthetic test subprocesses can be deliberately terminated. Do not let them
+// write partial JSON into the parent Node test runner coverage directory.
+// Test-worker coverage remains enabled and the production runner is unchanged.
+const SYNTHETIC_NODE_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  NODE_V8_COVERAGE: undefined,
+};
+
 const WRITE_MARKER_AFTER_DELAY_SCRIPT = [
   'const fs = require("node:fs");',
   "const [marker, delay] = process.argv.slice(1);",
@@ -37,10 +45,11 @@ const SPAWN_DETACHED_MARKER_SCRIPT = [
 ].join(" ");
 
 test("runCommand handles validation output larger than Node's sync spawn default", () => {
-  const output = runCommand(process.execPath, [
-    "-e",
-    "process.stdout.write('x'.repeat(2 * 1024 * 1024))",
-  ]);
+  const output = runCommand(
+    process.execPath,
+    ["-e", "process.stdout.write('x'.repeat(2 * 1024 * 1024))"],
+    { env: SYNTHETIC_NODE_ENV },
+  );
 
   assert.equal(output.length, 2 * 1024 * 1024);
 });
@@ -50,6 +59,7 @@ test("runCommand reports command timeouts with the rendered command", () => {
     () =>
       runCommand(process.execPath, ["-e", "setTimeout(() => process.stdout.write('done'), 1000)"], {
         timeoutMs: 10,
+        env: SYNTHETIC_NODE_ENV,
       }),
     /command timed out after 10ms: .*node.* -e/,
   );
@@ -63,7 +73,7 @@ test("contained commands allow worst-case serialized output within each stream l
       "-e",
       `const output = Buffer.alloc(${bytesPerStream}, 1); process.stdout.write(output); process.stderr.write(output);`,
     ],
-    { maxBuffer: 256 * 1024 },
+    { maxBuffer: 256 * 1024, env: SYNTHETIC_NODE_ENV },
   );
 
   assert.equal(Buffer.byteLength(output), bytesPerStream);
@@ -92,7 +102,7 @@ test(
               ].join(" "),
               marker,
             ],
-            { maxBuffer: 1024, timeoutMs: 3_000 },
+            { maxBuffer: 1024, timeoutMs: 3_000, env: SYNTHETIC_NODE_ENV },
           ),
         /validation command output exceeded the buffer limit/,
       );
@@ -187,7 +197,7 @@ test(
         {
           cwd: target,
           env: {
-            ...process.env,
+            ...SYNTHETIC_NODE_ENV,
             CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
           },
           timeoutMs: 3_000,
@@ -226,7 +236,7 @@ test(
             {
               cwd: root,
               env: {
-                ...process.env,
+                ...SYNTHETIC_NODE_ENV,
                 CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
               },
               timeoutMs: 5_000,
@@ -277,7 +287,7 @@ test(
         {
           cwd: root,
           env: {
-            ...process.env,
+            ...SYNTHETIC_NODE_ENV,
             CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
           },
           timeoutMs: 3_000,
@@ -350,7 +360,7 @@ test(
         {
           cwd: root,
           env: {
-            ...process.env,
+            ...SYNTHETIC_NODE_ENV,
             CLAWSWEEPER_TEST_FORCE_LINUX_CONTAINMENT: "1",
           },
           timeoutMs: 3_000,
@@ -387,7 +397,7 @@ test("runCommand honors shared command bin overrides", () => {
     assert.equal(
       runCommand("validate", args, {
         env: {
-          ...process.env,
+          ...SYNTHETIC_NODE_ENV,
           ...mockCommandBinEnv("validate", commandPath),
         },
       }),
