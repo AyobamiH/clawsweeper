@@ -105,6 +105,32 @@ class ExistingFleetAdmissionTests(unittest.TestCase):
             self.claim(payload=changed)
         self.assertEqual(len(self.rows()), 1)
 
+    def test_recycled_delivery_uuid_cannot_switch_event_or_source_identity(self):
+        self.claim()
+        pr = {
+            "repository": {"full_name": router.REPO}, "action": "synchronize",
+            "pull_request": {
+                "number": 101, "state": "open", "draft": False,
+                "user": {"login": "AyobamiH"},
+                "head": {"sha": self.head, "repo": {"full_name": router.REPO}},
+                "base": {"ref": "main", "repo": {"full_name": router.REPO}},
+            },
+        }
+        with self.assertRaisesRegex(Hold, "same_delivery_identity_with_changed_signed_payload"):
+            self.claim(payload=pr, event_name="pull_request")
+        self.assertEqual(len(self.rows()), 1)
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM observations").fetchone()[0], 1)
+
+    def test_distinct_delivery_uuid_reconciles_same_suite_without_second_job(self):
+        first = self.claim()
+        second = self.claim(delivery_id="11234567-89ab-cdef-0123-456789abcdef")
+        self.assertEqual(second["admission"], "already_admitted")
+        self.assertEqual(first["existing_fleet_job_id"], second["existing_fleet_job_id"])
+        self.assertEqual(len(self.rows()), 1)
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM observations").fetchone()[0], 2)
+
     def test_pr_two_intents_but_one_existing_suite(self):
         pr = {
             "repository": {"full_name": router.REPO}, "action": "synchronize",
@@ -120,7 +146,8 @@ class ExistingFleetAdmissionTests(unittest.TestCase):
         self.assertEqual(len(result["job_intents"]), 2)
         self.assertEqual(len(self.rows()), 1)
         with self.assertRaisesRegex(Hold, "different_event_ref"):
-            self.claim()  # same suite/SHA, but a different event is not relabelled
+            self.claim(delivery_id="21234567-89ab-cdef-0123-456789abcdef")
+            # A distinct authenticated delivery cannot relabel the same suite/SHA.
         self.assertEqual(len(self.rows()), 1)
 
     def test_untrusted_event_ref_or_hmac_cannot_admit(self):

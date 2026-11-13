@@ -112,7 +112,13 @@ def claim_existing_fleet_delivery(
             _queue_schema(db)
             try:
                 db.execute("BEGIN IMMEDIATE")
-                key = "direct-local:" + intent["intent_identity_sha256"]
+                # One delivery UUID has one immutable authenticated identity.
+                # The event/commit-dependent intent digest is unsuitable as the
+                # dedup key: a recycled signed UUID could otherwise claim a new
+                # source/event before the receiver's ledger can reconcile it.
+                key = "direct-local:" + hashlib.sha256(
+                    (REPO + "\\n" + delivery_id.lower()).encode("ascii")
+                ).hexdigest()
                 prior = db.execute(
                     "SELECT value FROM observations WHERE key=?", (key,)
                 ).fetchone()
@@ -123,7 +129,10 @@ def claim_existing_fleet_delivery(
                         raise Hold("unreadable_existing_delivery_identity") from exc
                     if (previous.get("delivery_sha256") != intent["delivery_sha256"]
                             or previous.get("source_sha") != fresh_ref_sha
-                            or previous.get("ref") != intent["source_ref"]):
+                            or previous.get("ref") != intent["source_ref"]
+                            or previous.get("event") != event_name
+                            or previous.get("intent_identity_sha256") !=
+                            intent["intent_identity_sha256"]):
                         raise Hold("same_delivery_identity_with_changed_signed_payload")
                 existing = db.execute(
                     "SELECT id,ref,state FROM jobs WHERE repo=? AND sha=? "
@@ -147,9 +156,10 @@ def claim_existing_fleet_delivery(
                          intent["source_ref"], now, now))
                     admission = "queued"
                 # Existing observations table: no new ledger/table or payload dump.
-                key = "direct-local:" + intent["intent_identity_sha256"]
                 summary = {
                     "source_sha": fresh_ref_sha, "ref": intent["source_ref"],
+                    "event": event_name,
+                    "intent_identity_sha256": intent["intent_identity_sha256"],
                     "suite": SUITE, "job_id": job_id, "state": admission,
                     "job_intents": [x["job"] for x in intent["intents"]],
                     "delivery_sha256": intent["delivery_sha256"],
