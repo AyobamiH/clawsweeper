@@ -748,11 +748,72 @@ test("dashboard health revalidates and evicts stale phantom queued runs", async 
   }
 });
 
+test("workflow run eviction refuses an observation newer than the verification fence", async () => {
+  const storage = new MemoryDurableStorage();
+  const store = new GithubWebhookReadModelStore(storage);
+  store.ensureSchemaSync();
+  const base = Date.now();
+  const staleAt = new Date(base - 5000).toISOString();
+  const freshAt = new Date(base - 1000).toISOString();
+  const run = (status: string, updatedAt: string) => ({
+    id: 9919,
+    name: "Review",
+    status,
+    created_at: staleAt,
+    updated_at: updatedAt,
+  });
+  store.ingest(
+    requiredDelivery("workflow_run", "before-get", staleAt, {
+      action: "requested",
+      repository,
+      workflow_run: run("queued", staleAt),
+    }),
+    base - 5000,
+  );
+  const verificationStartedAt = new Date(base - 3000).toISOString();
+  store.ingest(
+    requiredDelivery("workflow_run", "after-get", freshAt, {
+      action: "in_progress",
+      repository,
+      workflow_run: run("in_progress", freshAt),
+    }),
+    base - 1000,
+  );
+  const repair = store.repair(
+    {
+      repository: "openclaw/openclaw",
+      repair_kind: "workflows",
+      workflow_run_verification_started_at: verificationStartedAt,
+      evict_workflow_run_ids: [9919],
+      objects: [],
+    },
+    base,
+  );
+  assert.equal(repair.evicted_workflow_runs, 0, "a newer webhook run cannot be evicted");
+  const snapshot = await store.readWorkflows({ repository: "openclaw/openclaw" }, base);
+  const observedRuns = snapshot.runs as Array<Record<string, unknown>>;
+  assert.equal(observedRuns.length, 1);
+  assert.equal(observedRuns[0].status, "in_progress");
+});
+
 test("dashboard health caps stale queued-run revalidation and drains oldest rows first", async () => {
   const storage = new MemoryDurableStorage();
   const store = new GithubWebhookReadModelStore(storage);
   store.ensureSchemaSync();
   const queue = new ExactReviewQueue({ storage }, {});
+  const evictionRepairBatches: number[] = [];
+  const originalQueueFetch = queue.fetch.bind(queue);
+  queue.fetch = async (request) => {
+    if (new URL(request.url).pathname === "/github-read-model/repair") {
+      const body = (await request.clone().json()) as Record<string, unknown>;
+      if (body.workflow_run_verification_started_at !== undefined) {
+        evictionRepairBatches.push(
+          Array.isArray(body.evict_workflow_run_ids) ? body.evict_workflow_run_ids.length : 0,
+        );
+      }
+    }
+    return originalQueueFetch(request);
+  };
   const observedAtMs = Date.now() - GITHUB_WEBHOOK_READ_MODEL_WORKFLOW_TTL_MS - 60_000;
   const observedAt = new Date(observedAtMs).toISOString();
   const staleRunCount = 205;
@@ -848,6 +909,13 @@ test("dashboard health caps stale queued-run revalidation and drains oldest rows
     }
 
     assert.equal(refreshes, Math.ceil(staleRunCount / expectedBatchSize));
+    assert.equal(evictionRepairBatches.length, refreshes, "one transactional repair per batch");
+    assert.equal(
+      evictionRepairBatches.reduce((total, size) => total + size, 0),
+      staleRunCount,
+      "all 205 stale runs are evicted without per-run repair writes",
+    );
+    assert.ok(evictionRepairBatches.every((size) => size > 0 && size <= expectedBatchSize));
     assert.deepEqual(
       exactRunRequests.slice(0, expectedBatchSize).toSorted((left, right) => left - right),
       runIds.slice(-expectedBatchSize),

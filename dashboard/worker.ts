@@ -4115,66 +4115,85 @@ async function revalidateStaleWorkflowHealthRuns({
     }),
   );
 
-  const outcomes = await mapWithConcurrency(
+  type RecheckResult = {
+    runId: number;
+    error?: string;
+    liveRun?: Record<string, unknown>;
+    repairObject?: Record<string, unknown>;
+    evictReason?: string;
+    snapshotRun?: Record<string, unknown>;
+    evicted?: boolean;
+  };
+  // Fence all evictions to the time BEFORE the first remote GET. A newer
+  // webhook observation cannot be deleted by the later batched repair.
+  const verificationStartedAt = new Date().toISOString();
+  const rawOutcomes = await mapWithConcurrency(
     recheckBatch,
     STALE_WORKFLOW_HEALTH_RECHECK_BATCH_SIZE,
-    async (value) => {
+    async (value): Promise<RecheckResult> => {
       const snapshotRun = objectValue(value);
       const runId = Number(snapshotRun.id);
       if (!Number.isSafeInteger(runId) || runId <= 0) {
         return { runId, error: "snapshot run has no valid id" };
       }
-      const verificationStartedAt = new Date().toISOString();
       try {
-        const liveRun = objectValue(await github(`/repos/${repo}/actions/runs/${runId}`));
+        const liveRun = objectValue(await github("/repos/" + repo + "/actions/runs/" + runId));
         if (Number(liveRun.id) !== runId) {
           return { runId, error: "live workflow response id mismatch" };
         }
         if (isActiveWorkflowRun(liveRun)) {
-          const object = githubWebhookReadModelWorkflowObject(repo, "workflow_run", liveRun);
-          if (object) {
-            await githubWebhookReadModelQueuePost(env, "repair", {
-              repository: repo,
-              repair_kind: "workflows",
-              objects: [object],
-            }).catch(() => null);
-          }
-          return { runId, liveRun };
+          const repairObject = githubWebhookReadModelWorkflowObject(repo, "workflow_run", liveRun);
+          return { runId, liveRun, repairObject: repairObject ?? undefined };
         }
-        const repair = await githubWebhookReadModelQueuePost(env, "repair", {
-          repository: repo,
-          repair_kind: "workflows",
-          workflow_run_verification_started_at: verificationStartedAt,
-          evict_workflow_run_ids: [runId],
-          objects: [],
-        }).catch(() => null);
-        const verdict = String(liveRun.status || "completed");
-        reportGithubReadModelWorkflowRunEvicted({
-          snapshotRun,
-          verdict,
-          evicted: Number(repair?.evicted_workflow_runs || 0) > 0,
-        });
-        return { runId, evicted: true };
+        return { runId, snapshotRun, evictReason: String(liveRun.status || "completed") };
       } catch (error) {
         if (/GitHub 404 for /.test(String(error instanceof Error ? error.message : error))) {
-          const repair = await githubWebhookReadModelQueuePost(env, "repair", {
-            repository: repo,
-            repair_kind: "workflows",
-            workflow_run_verification_started_at: verificationStartedAt,
-            evict_workflow_run_ids: [runId],
-            objects: [],
-          }).catch(() => null);
-          reportGithubReadModelWorkflowRunEvicted({
-            snapshotRun,
-            verdict: "absent",
-            evicted: Number(repair?.evicted_workflow_runs || 0) > 0,
-          });
-          return { runId, evicted: true };
+          return { runId, snapshotRun, evictReason: "absent" };
         }
         return { runId, error: error instanceof Error ? error.message : String(error) };
       }
     },
   );
+  // Perform one bounded, transactional read-model repair for the entire
+  // verified batch, not one Durable Object write per GitHub GET.
+  const evictIds = rawOutcomes
+    .filter((outcome) => outcome.evictReason)
+    .map((outcome) => outcome.runId);
+  const repairObjects = rawOutcomes.flatMap((outcome) =>
+    outcome.repairObject ? [outcome.repairObject] : [],
+  );
+  const repair =
+    evictIds.length || repairObjects.length
+      ? await githubWebhookReadModelQueuePost(env, "repair", {
+          repository: repo,
+          repair_kind: "workflows",
+          workflow_run_verification_started_at: verificationStartedAt,
+          evict_workflow_run_ids: evictIds,
+          objects: repairObjects,
+        }).catch(() => null)
+      : null;
+  const repairAccepted = repair?.accepted === true;
+  // The existing repair API returns an aggregate count, not exact IDs.
+  // Treat partial or failed eviction as UNCERTAIN for the whole batch;
+  // never assert that a specific newer observation was removed.
+  const evictionsVerified =
+    repairAccepted && Number(repair?.evicted_workflow_runs) === evictIds.length;
+  const outcomes: RecheckResult[] = rawOutcomes.map((outcome) => {
+    if (outcome.evictReason) {
+      reportGithubReadModelWorkflowRunEvicted({
+        snapshotRun: outcome.snapshotRun,
+        verdict: outcome.evictReason,
+        evicted: evictionsVerified,
+      });
+      return evictionsVerified
+        ? { runId: outcome.runId, evicted: true }
+        : { runId: outcome.runId, error: "workflow_run_eviction_unverified" };
+    }
+    if (outcome.repairObject && !repairAccepted) {
+      return { ...outcome, error: "workflow_run_materialisation_unverified" };
+    }
+    return outcome;
+  });
   const byRunId = new Map(outcomes.map((outcome) => [outcome.runId, outcome]));
   return {
     runs: runs.flatMap((value) => {

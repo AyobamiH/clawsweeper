@@ -34,6 +34,15 @@ class Hold(RuntimeError):
     """Observed failure is not evidence of a healthy CI environment."""
 
 
+class GithubReadFailure(Hold):
+    """Allowlisted GET failure metadata only, never provider stderr/credentials."""
+
+    def __init__(self, failure_class, attempts):
+        super().__init__("github_read_unavailable")
+        self.failure_class = failure_class
+        self.attempts = attempts
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -95,7 +104,11 @@ def _bounded_stdout(argv, *, max_bytes, timeout_seconds, cwd=None):
 
 
 def github_get(path):
-    """Fixed GET-only GitHub CLI; never accept a caller-provided method."""
+    """Allowlisted GET only; retry one transient CLI read within fixed budgets.
+
+    No POST, raw stderr, credentials or attacker-provided path can enter this
+    observer. Oversized/invalid responses fail closed without retrying.
+    """
     allowed = {
         f"repos/{REPOSITORY}/git/ref/heads/main",
         f"repos/{REPOSITORY}/git/ref/heads/{SOURCE_BRANCH}",
@@ -104,19 +117,37 @@ def github_get(path):
     }
     if path not in allowed:
         raise Hold("unapproved_github_endpoint")
-    try:
-        # 30 runs in any one response; 4MiB is deliberately generous yet safe.
-        output = _bounded_stdout(
-            ["gh", "api", "--method", "GET", path],
-            max_bytes=4 * 1024 * 1024, timeout_seconds=18)
-        value = json.loads(output)
+    argv = ["gh", "api", "--method", "GET", path]
+    categories = {
+        "bounded_process_failed": "cli_nonzero_unclassified",
+        "bounded_process_timeout": "cli_timeout",
+        "bounded_process_unavailable": "cli_spawn_or_io_unavailable",
+        "bounded_process_oversize": "response_oversize",
+    }
+    retryable = frozenset(("bounded_process_failed", "bounded_process_timeout",
+                           "bounded_process_unavailable"))
+    for attempt, timeout in ((1, 18), (2, 8)):
+        try:
+            output = _bounded_stdout(
+                argv, max_bytes=4 * 1024 * 1024,
+                timeout_seconds=timeout)
+        except Hold as exc:
+            code = str(exc)
+            if attempt == 1 and code in retryable:
+                # An idempotent GET can be retried; never infer that a prior
+                # request did not execute, and never retry any provider POST.
+                time.sleep(0.2)
+                continue
+            raise GithubReadFailure(
+                categories.get(code, "bounded_read_refused"), attempt) from exc
+        try:
+            value = json.loads(output)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise GithubReadFailure("invalid_json", attempt) from exc
         if not isinstance(value, dict):
-            raise Hold("github_response_invalid")
+            raise GithubReadFailure("invalid_response_shape", attempt)
         return value
-    except (Hold, UnicodeError, json.JSONDecodeError) as exc:
-        raise Hold("github_read_unavailable") from exc
-
-
+    raise GithubReadFailure("bounded_read_refused", 2)
 
 
 def _safe_source_bytes(path):
@@ -510,6 +541,10 @@ def observe(checkout, state=DEFAULT_STATE, reader=github_get, now=None):
             code = str(exc) if isinstance(exc, Hold) else "observation_failed_" + type(exc).__name__
             outcome = {"state": "unverified", "at": timestamp.isoformat(),
                        "reason": code, "effect_count": 0}
+            if isinstance(exc, GithubReadFailure):
+                # Fixed enum and integer only; no URL, stderr or token leakage.
+                outcome["github_failure_class"] = exc.failure_class
+                outcome["github_get_attempts"] = exc.attempts
             _atomic(state / "last-attempt.json", outcome)
             _atomic(state / "latest.json", outcome)
             return outcome

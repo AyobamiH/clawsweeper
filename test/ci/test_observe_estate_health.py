@@ -571,5 +571,67 @@ class BoundedReadRegression(unittest.TestCase):
 
 
 
+class GithubReadRetryRegression(unittest.TestCase):
+    """No-provider, no-Docker, no-GitHub GET retry and fail-closed regression."""
+
+    def test_one_bounded_get_retry_succeeds(self):
+        path = f"repos/{observer.REPOSITORY}/git/ref/heads/main"
+        with patch.object(observer, "_bounded_stdout", side_effect=[
+                observer.Hold("bounded_process_failed"),
+                b'{"object":{"sha":"valid"}}']) as bounded:
+            result = observer.github_get(path)
+        self.assertEqual(result["object"]["sha"], "valid")
+        self.assertEqual(bounded.call_count, 2)
+        self.assertEqual(
+            [c.kwargs["timeout_seconds"] for c in bounded.call_args_list], [18, 8])
+        for call in bounded.call_args_list:
+            self.assertEqual(call.args[0][:4], ["gh", "api", "--method", "GET"])
+
+    def test_oversize_and_malformed_response_never_retry(self):
+        path = f"repos/{observer.REPOSITORY}/git/ref/heads/main"
+        with patch.object(observer, "_bounded_stdout",
+                          side_effect=observer.Hold("bounded_process_oversize")) as bounded:
+            with self.assertRaises(observer.GithubReadFailure) as result:
+                observer.github_get(path)
+            self.assertEqual(result.exception.failure_class, "response_oversize")
+            self.assertEqual(result.exception.attempts, 1)
+            bounded.assert_called_once()
+        with patch.object(observer, "_bounded_stdout", return_value=b'not-json') as bounded:
+            with self.assertRaises(observer.GithubReadFailure) as result:
+                observer.github_get(path)
+            self.assertEqual(result.exception.failure_class, "invalid_json")
+            bounded.assert_called_once()
+
+    def test_second_get_failure_keeps_fail_closed_allowlisted_diagnostics(self):
+        path = f"repos/{observer.REPOSITORY}/git/ref/heads/main"
+        with patch.object(observer, "_bounded_stdout", side_effect=[
+                observer.Hold("bounded_process_failed"),
+                observer.Hold("bounded_process_timeout")]) as bounded:
+            with self.assertRaisesRegex(observer.GithubReadFailure,
+                                        "^github_read_unavailable$") as result:
+                observer.github_get(path)
+            self.assertEqual(result.exception.failure_class, "cli_timeout")
+            self.assertEqual(result.exception.attempts, 2)
+            self.assertEqual(bounded.call_count, 2)
+
+    def test_observer_invalidates_health_with_only_typed_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state"
+            timestamp = dt.datetime(2026, 11, 12, 17, 0, tzinfo=dt.timezone.utc)
+            with patch.object(observer, "snapshot",
+                              side_effect=observer.GithubReadFailure("cli_timeout", 2)):
+                result = observer.observe(Path(directory), state,
+                                          reader=lambda _: {}, now=timestamp)
+            self.assertEqual(result["state"], "unverified")
+            self.assertEqual(result["reason"], "github_read_unavailable")
+            self.assertEqual(result["github_failure_class"], "cli_timeout")
+            self.assertEqual(result["github_get_attempts"], 2)
+            self.assertEqual(json.loads((state / "latest.json").read_text()), result)
+            self.assertEqual(json.loads((state / "last-attempt.json").read_text()), result)
+            self.assertNotIn("gh api", json.dumps(result))
+            self.assertEqual(result["effect_count"], 0)
+
+
+
 if __name__ == "__main__":
     unittest.main()
