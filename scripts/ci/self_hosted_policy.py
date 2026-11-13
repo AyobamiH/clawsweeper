@@ -56,7 +56,7 @@ WORKFLOWS = {
 # default-branch workflow hash, regardless of who submitted the event payload.
 EVENTS = {
     ("validation", "check"): frozenset(("push", "pull_request", "workflow_dispatch")),
-    ("validation", "sparse"): frozenset(("pull_request",)),
+    ("validation", "sparse"): frozenset(("pull_request", "workflow_dispatch")),
     ("security", "actions"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
     ("security", "javascript-typescript"): frozenset(("push", "pull_request", "schedule", "workflow_dispatch")),
     ("ops", "dispatch"): frozenset(("issues", "issue_comment", "pull_request_target")),
@@ -161,9 +161,12 @@ def classify(run, job):
                 # only the PR's actual immutable merge source is trusted.
                 raise AdmissionHold("validation_pr_base_unverified")
             trusted_base_sha = base["sha"]
-        elif branch != "main" or (run.get("event") == "workflow_dispatch" and actor != "AyobamiH"):
-            # A signed main push from an approved bot may run the same CI;
-            # manual dispatch is owner-only and every workflow byte is pinned.
+        elif run.get("event") == "workflow_dispatch":
+            # An explicit owner-requested *private* develop preview is eligible
+            # for separate exact-run controls. It is not blanket branch trust.
+            if branch not in ("main", "develop") or actor != "AyobamiH":
+                raise AdmissionHold("validation_default_branch_owner_unverified")
+        elif branch != "main":
             raise AdmissionHold("validation_default_branch_owner_unverified")
     if (role == "ops" and run.get("event") == "workflow_dispatch"
             and slot not in ("provision", "cleanup") and actor != "AyobamiH"):
@@ -344,6 +347,19 @@ def category_enabled(candidate, controls):
         if controls.get("validation_candidate_sha256") is not None:
             if not isinstance(scoped_runs, list) or candidate.run_id not in scoped_runs:
                 raise AdmissionHold("validation_candidate_not_run_pinned")
+        if candidate.branch == "develop":
+            preview = controls.get("validation_private_preview")
+            if (candidate.event != "workflow_dispatch"
+                    or not isinstance(preview, dict)
+                    or preview.get("accepted") is not True
+                    or preview.get("branch") != "develop"
+                    or preview.get("head_sha") != candidate.sha
+                    or not SHA.fullmatch(str(preview.get("head_sha", "")))
+                    or not re.fullmatch(r"[a-f0-9]{64}", str(preview.get("workflow_sha256", "")))
+                    or preview.get("workflow_sha256") != controls.get("validation_candidate_sha256")
+                    or enabled != ["validation"] or controls.get("operations_accepted") is True
+                    or not isinstance(scoped_runs, list) or scoped_runs != [candidate.run_id]):
+                raise AdmissionHold("validation_private_preview_not_accepted")
     elif candidate.role == "ops":
         if candidate.event in ("pull_request", "pull_request_review",
                                "pull_request_review_comment"):
