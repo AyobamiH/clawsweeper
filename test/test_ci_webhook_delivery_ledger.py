@@ -160,4 +160,70 @@ class ReceiverTests(unittest.TestCase):
                 self.assertEqual(self.request(),503)
                 self.assertEqual(run.call_count,1)
 
+    def test_released_direct_local_claim_precedes_ledger_and_wake(self):
+        calls = []
+        original = self.ledger.claim
+        def ledger_claim(*args, **kwargs):
+            calls.append('ledger')
+            return original(*args, **kwargs)
+        def local_claim(**kwargs):
+            calls.append('local')
+            self.assertEqual(kwargs['secret'], self.secret)
+            self.assertEqual(kwargs['event_name'], 'push')
+            return {'fresh_provider_source_verified': True,
+                    'suite': 'linux-node24', 'admission': 'queued'}
+        def wake(*args, **kwargs):
+            calls.append('wake')
+            return SimpleNamespace(returncode=0)
+        self.server.direct_local_claim = local_claim
+        with patch.object(self.ledger,'claim',side_effect=ledger_claim):
+            with patch.object(server_module.subprocess,'run',side_effect=wake):
+                self.assertEqual(self.request(),202)
+        self.assertEqual(calls,['local','ledger','wake'])
+
+    def test_malformed_delivery_never_reaches_local_queue_claim(self):
+        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError('malformed webhook identifier reached queue'))
+        with patch.object(server_module.subprocess,'run') as wake:
+            self.assertEqual(self.request(delivery='-' * 36),403)
+            wake.assert_not_called()
+
+    def test_direct_local_hold_never_marks_webhook_accepted_or_wakes(self):
+        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError('stale protected source'))
+        with patch.object(self.ledger,'claim') as ledger_claim:
+            with patch.object(server_module.subprocess,'run') as wake:
+                self.assertEqual(self.request(),503)
+                ledger_claim.assert_not_called()
+                wake.assert_not_called()
+
+    def test_direct_local_claim_survives_uncertain_wake_without_replay(self):
+        calls = []
+        def local_claim(**kwargs):
+            calls.append(kwargs['delivery_id'])
+            return {'fresh_provider_source_verified': True,
+                    'suite': 'linux-node24', 'admission': 'already_admitted'}
+        self.server.direct_local_claim = local_claim
+        with patch.object(server_module.subprocess,'run',side_effect=TimeoutError('wake uncertain')) as wake:
+            self.assertEqual(self.request(),503)
+            self.assertEqual(self.request(),503)
+            self.assertEqual(wake.call_count,1)
+        self.assertEqual(calls,[UUID,UUID])
+
+    def test_invalid_local_claim_proof_refuses_acceptance(self):
+        self.server.direct_local_claim = lambda **kwargs: {
+            'fresh_provider_source_verified': False, 'suite': 'linux-node24',
+            'admission': 'queued'}
+        with patch.object(server_module.subprocess,'run') as wake:
+            self.assertEqual(self.request(),503)
+            wake.assert_not_called()
+
+    def test_other_enrolled_repositories_use_existing_path(self):
+        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError('wrong repository direct-local claim'))
+        other = self.payload.replace(b'AyobamiH/clawsweeper',b'AyobamiH/opstruth')
+        with patch.object(server_module.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as wake:
+            self.assertEqual(self.request(payload=other),202)
+            wake.assert_called_once()
+
 if __name__=='__main__':unittest.main()

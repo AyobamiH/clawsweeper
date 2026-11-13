@@ -18,7 +18,7 @@ REQUIRED_STEPS = {
 }
 ORDINARY = frozenset(REQUIRED_STEPS)
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
-GUID = re.compile(r"[0-9a-fA-F-]{36}\Z")
+GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\Z")
 SIG = re.compile(r"sha256=[0-9a-f]{64}\Z")
 
 

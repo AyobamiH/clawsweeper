@@ -84,7 +84,8 @@ class SignedLocalEventTests(unittest.TestCase):
 
     def test_invalid_signature_and_malformed_delivery_are_held(self):
         for kwargs in ({"signature": "sha256=" + "0" * 64},
-                       {"delivery": "bad"}, {"secret": b"short"}):
+                       {"delivery": "bad"}, {"delivery": "-" * 36},
+                       {"delivery": "a" * 36}, {"secret": b"short"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(Hold):
                 self.route(**kwargs)
 
