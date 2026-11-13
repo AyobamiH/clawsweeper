@@ -104,6 +104,11 @@
       "banner": "This is a guarded self-hosted CI migration candidate, not accepted production runner coverage or merge authorisation."
     },
     {
+      "path": "direct-local-workflow-migration.md",
+      "lifecycle": "proposed",
+      "banner": "This is a source-only direct-local routing plan. It does not admit, execute or operationally accept any of the 88 jobs."
+    },
+    {
       "path": "CI-EXECUTION-POLICY.md",
       "lifecycle": "proposed",
       "banner": "CircleCI fallback is not active until provider, free-budget, exact-SHA and recovery acceptance are verified."

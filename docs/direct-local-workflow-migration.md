@@ -1,0 +1,94 @@
+# ClawSweeper: billing-independent, direct-local workflow migration
+
+- Status: **proposed** (source-only bridge; not an installed runner)
+- Owner: ClawSweeper / existing `web` local-CI fleet
+- Source of truth: `scripts/ci/direct_local_workflow.py`, `config/ci-workflow-estate.json`, existing installed `fleet-policy.json`
+- Last verified: signed candidate `ed87c135d6ee21b0c7a28ef7d5113d8fbe130152` on 13 November 2026
+- Update when: the candidate is integrated, fleet policy is changed, jobs change, or direct-local acceptance advances
+
+ClawSweeper has **41 workflow sources and 88 job definitions** in its signed release
+candidate. Merely replacing `ubuntu-latest` with `self-hosted` does **not**
+make GitHub Actions independent: GitHub currently refuses jobs before runner
+allocation. The owner will **not pay** to clear the account restriction. Do not
+make payment, hosted runners or GitHub Actions admission an operational prerequisite.
+
+The target is one fleet on `web` that owns event ingestion, durable job admission,
+dependency order, isolated execution, recovery and exact-source receipt publication.
+Use GitHub for source readback, PRs and optional independently verified commit
+statuses. Never label an independent local result as a GitHub Actions/CodeQL check.
+
+## Current source mapping
+
+`scripts/ci/direct_local_workflow.py` is a **read-only, no-remote-effects**
+migration bridge. It enumerates the existing exact 41/88 manifest, verifies every
+workflow's source SHA-256, validates dependency edges and classes, and refuses to
+claim execution. It must not become a second CI scheduler.
+
+| Job classes | Count | Direct-local disposition |
+| --- | ---: | --- |
+| Ordinary validation | 2 | Reuse the **existing** `local-ci` fleet `linux-node24` suite after policy pins the exact released CI workflow source and commit |
+| Review | 5 | Hold until isolated review/inference adapter preserves budget and secrets |
+| E2E | 2 | Hold until rootless network-isolated local harness and durable evidence are accepted |
+| CodeQL | 1 | Hold for independently verified local scanner, SARIF and protected-check policy |
+| Native Windows | 1 | Hold for a genuine legally provisioned isolated Windows worker; WSL is not native Windows |
+| Privileged / event-driven | 77 | Hold until event-specific, least-privilege local adapters with durable effect ledgers are accepted |
+
+The 77 privileged include an existing external Crabbox-owned runner boundary:
+do not transfer that lifecycle into a generic worker merely to inflate counts.
+The two ordinary jobs are `.github/workflows/ci.yml#check` and
+`.github/workflows/ci.yml#sparse-repair-builds`. The existing local fleet
+suite already includes their commands, respectively `pnpm run check` and
+`pnpm run test:workflow-sparse-checkout`, **in one bounded execution**.
+A successful aggregate suite alone does not establish independent job-level
+acceptance without exact receipt and command-level evidence.
+
+The planner checks that the existing fleet has the exact CI workflow SHA-256,
+the exact enrolled source commit, the correct host, Node 24, an immutable
+container image and both expected step commands. A mismatch holds ordinary
+jobs. It never rewrites the owner-installed policy or starts a new worker.
+
+### Read-only proof on `web`
+
+```sh
+cd /home/johnh/.local/share/agent-worktrees/clawsweeper/estate-safe-operating-mode-20261113
+PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/direct_local_workflow.py \
+  --fleet-policy /home/johnh/.local/share/local-ci/fleet-policy.json
+PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover \
+  -s test/ci -p test_direct_local_workflow.py -v
+pnpm run check:workflow-estate
+```
+
+An output of `mapped_to_existing_fleet=0` on the **unreleased candidate**
+is correct while the installed fleet still pins the old `main` workflow.
+It is not a failed test and must not be "fixed" by ignoring source identity.
+An output of `mapped_to_existing_fleet=2` means a source-pinned **route**
+is eligible; it is explicitly **not** proof that either job executed.
+
+## Real cutover gates (no GitHub Actions requirement)
+
+1. Integrate only reviewed, signed, tested source onto the authorised ref.
+   Preserve PR #101 ancestry, unmerged worktrees and existing immutable receipts.
+2. Verify the exact installed local-fleet code and policy. Bind the released
+   workflow digest and exact SHA with an authorised, recoverable update, never
+   mutate a shared fleet's controls from an unreviewed PR.
+3. Prove a genuine authenticated push/PR webhook and polling fallback, the
+   existing SQLite queue's unique job admission, one source-pinned isolated
+   execution, individual command results, exact-SHA commit-status readback,
+   duplicate delivery handling and restart recovery.
+4. Extend the same **single** fleet to per-event job declarations, DAG needs,
+   `if`/matrix semantics and output contracts. Treat expressions, workflows
+   with secrets and mutable effects as untrusted until mapped to audited
+   local adapter types; never evaluate arbitrary YAML shell commands on the host.
+5. Activate protected classes incrementally using existing rootless evidence,
+   secret segregation, retries, effect fences and native Windows acceptance.
+6. Only when real local equivalents are proven, transition GitHub event
+   entrypoints away from Actions without removing product workflows or
+   silently weakening CodeQL/security branch protection. Billing-locked
+   Actions runs may still fail until this source cutover; local progress must
+   not wait for them.
+
+Status is **source-planned**, not integrated or operationally accepted. The
+installed ordinary local CI route is already live for the older approved
+`main` source, but it is not proof of all 88 migrated jobs on the candidate.
+Do not create duplicate runners, queue controllers, automations, PRs, or
+"successful" status contexts without independently verified exact receipts.

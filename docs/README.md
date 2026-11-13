@@ -85,6 +85,8 @@ everything else requires human comparison with current main.
   procedures, trust checks, gates, and token boundaries
 - [Local ClawSweeper skill](local-clawsweeper-skill.md) — active; read-only
   local exact-item or committed-range review
+- [Direct-local workflow migration](direct-local-workflow-migration.md) — proposed;
+  exact-source 41-workflow/88-job local-fleet cutover gates
 
 ## Dashboards and observability
 
