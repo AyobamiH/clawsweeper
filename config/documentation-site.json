@@ -94,6 +94,11 @@
       "banner": "This proof records the commercial bootstrap behavior at its stated revision and does not establish completed customer delivery."
     },
     {
+      "path": "ci-operational-readiness.md",
+      "lifecycle": "proposed",
+      "banner": "This source-only operating-mode candidate is not a protected release or installed controller; live scheduled JIT work still requires exact-source approval and provider readback."
+    },
+    {
       "path": "self-hosted-workflow-migration.md",
       "lifecycle": "proposed",
       "banner": "This is a guarded self-hosted CI migration candidate, not accepted production runner coverage or merge authorisation."
