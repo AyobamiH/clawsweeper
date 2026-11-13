@@ -50,11 +50,32 @@ class WindowsNativeGuestPreflightTests(unittest.TestCase):
         if not runner:
             return None
         converted = cls._windows_script_path(SCRIPT, native_windows=os.name == "nt")
-        return subprocess.run(
+        result = subprocess.run(
             [runner, "-NoLogo", "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-File", converted, "-Mode", mode],
             capture_output=True, text=True, timeout=35,
         )
+        # A failed WSL-to-Windows transport proves neither a source failure nor
+        # native Windows guest acceptance. Record it as an explicit skipped
+        # environmental probe; all other PowerShell failures remain failures.
+        if (os.name != "nt" and result.returncode == 1
+                and not result.stdout.strip()
+                and result.stderr.startswith("<3>WSL ")
+                and "UtilAcceptVsock:" in result.stderr
+                and "accept4 failed 110" in result.stderr):
+            raise unittest.SkipTest(
+                "WSL PowerShell interop transport unavailable; native Windows "
+                "guest execution remains unverified")
+        return result
+
+    def test_non_transport_powershell_failure_is_not_hidden(self):
+        from unittest.mock import patch
+        failure = subprocess.CompletedProcess([], 1, "", "Access denied")
+        with (patch.object(shutil, "which", return_value="powershell.exe"),
+              patch.object(self, "_windows_script_path", return_value="C:/mock.ps1"),
+              patch.object(subprocess, "run", return_value=failure)):
+            result = self._run_mode("Inspect")
+            self.assertEqual(result.returncode, 1)
 
     def test_native_windows_does_not_require_wslpath(self):
         self.assertEqual(self._windows_script_path(SCRIPT, native_windows=True), str(SCRIPT))
