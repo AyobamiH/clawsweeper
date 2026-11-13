@@ -149,3 +149,24 @@ This code is not installed; genuine acceptance still requires an authorised
 exact-source policy pin, natural HMAC delivery, durable queue admission,
 isolated execution and independent receipt readback. GitHub application-owned
 CodeQL required checks remain separate.
+
+
+### Event-bound ordinary job receipts (source-only, no provider effect)
+
+`scripts/ci/direct_local_job_receipts.py` is the read-only job-level
+acceptance boundary for a completed run of the existing `linux-node24`
+suite. It requires an authenticated direct-local delivery observation linked
+to the exact fleet job ID, SHA, ref and pinned policy; a completed successful
+existing SQLite queue row; an owner-held, non-symlinked terminal receipt;
+successful exact checkout, semantic validation, dependency install and both
+ordinary commands in the defined order; container cleanup; and a matching
+bounded SHA-256 execution log. For a genuine main push it attributes only
+`ci.yml#check`; for an eligible owner PR it attributes both ordinary jobs
+only when both real commands passed. Historical aggregate successes lacking
+an authenticated event claim are deliberately held, not grandfathered in.
+
+It never changes the queue, claims a new job, publishes a GitHub check or
+claims that an app-owned CodeQL requirement has been satisfied. A verified
+local receipt is distinct from current GitHub provider check acceptance; that
+requires a separate authorised readback. The module is not installed in the
+fleet and does not by itself advance the 88-definition operational ledger.
