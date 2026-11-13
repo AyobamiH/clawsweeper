@@ -129,3 +129,23 @@ Existing protected CodeQL checks remain independent and unaltered.
 
 The no-provider tests use temporary owner-marked SQLite WAL databases and
 never write to the installed fleet queue.
+
+### Fresh GitHub ref readback before SQLite claim (source-only)
+
+The direct_local_provider_ref.py module closes the gap between an HMAC-signed
+but potentially stale webhook and the actual current remote source identity.
+The existing authorised receiver/poller may call
+claim_with_fresh_provider_readback after the owner releases the exact
+workflow source/policy. It authenticates bounded payload bytes BEFORE any
+read-only GitHub request, permits only a main-ref GET or a numbered PR GET,
+checks the current SHA and PR trust metadata, then passes the verified SHA to
+the existing direct_local_fleet_claim module under the fleet exclusive lock.
+Unavailable or changed GET readback is a HOLD. An invalid HMAC, duplicate JSON
+key, moved PR head or draft transition cannot enqueue a job. It does not create
+a webhook service, dispatch Actions, change fleet policy or execute CI.
+
+The new provider_ref tests use injected GET fixtures, NOT live provider proof.
+This code is not installed; genuine acceptance still requires an authorised
+exact-source policy pin, natural HMAC delivery, durable queue admission,
+isolated execution and independent receipt readback. GitHub application-owned
+CodeQL required checks remain separate.
