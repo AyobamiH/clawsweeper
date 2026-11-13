@@ -12,10 +12,11 @@ import re
 from estate_policy import Hold
 
 REPO = "AyobamiH/clawsweeper"
-ORDINARY = frozenset({
-    ".github/workflows/ci.yml#check",
-    ".github/workflows/ci.yml#sparse-repair-builds",
-})
+REQUIRED_STEPS = {
+    ".github/workflows/ci.yml#check": "pnpm run check",
+    ".github/workflows/ci.yml#sparse-repair-builds": "pnpm run test:workflow-sparse-checkout",
+}
+ORDINARY = frozenset(REQUIRED_STEPS)
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 GUID = re.compile(r"[0-9a-fA-F-]{36}\Z")
 SIG = re.compile(r"sha256=[0-9a-f]{64}\Z")
@@ -109,13 +110,13 @@ def verified_ordinary_intents(plan, *, body, event_name, signature,
                 or job.get("route") != "existing-local-fleet"
                 or job.get("suite") != "linux-node24"
                 or job.get("execution_observed") is not False
-                or job.get("required_step") not in (
-                    "pnpm run check", "pnpm run test:workflow-sparse-checkout")):
+                or job.get("required_step") != REQUIRED_STEPS[job["key"]]):
             raise Hold("ordinary_job_not_source_pinned")
         selected.append({"job": job["key"], "suite": job["suite"],
                          "required_step": job["required_step"]})
-    if {j["job"] for j in selected} != eligible:
-        raise Hold("missing_or_unreviewed_ordinary_route")
+    if (len(selected) != len(eligible)
+            or {j["job"] for j in selected} != eligible):
+        raise Hold("missing_or_duplicate_ordinary_route")
     identity = hashlib.sha256(
         (REPO + "\n" + delivery_id.lower() + "\n" + event_name
          + "\n" + ref + "\n" + sha).encode("ascii")

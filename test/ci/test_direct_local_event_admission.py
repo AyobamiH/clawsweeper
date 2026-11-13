@@ -122,6 +122,20 @@ class SignedLocalEventTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(Hold):
                 self.route(event="pull_request", payload=payload)
 
+    def test_step_swapping_and_duplicate_job_identity_are_held(self):
+        plan = copy.deepcopy(self.plan)
+        check = next(x for x in plan["jobs"]
+                     if x["key"] == ".github/workflows/ci.yml#check")
+        check["required_step"] = "pnpm run test:workflow-sparse-checkout"
+        with self.assertRaises(Hold):
+            self.route(plan=plan)
+        plan = copy.deepcopy(self.plan)
+        check = next(x for x in plan["jobs"]
+                     if x["key"] == ".github/workflows/ci.yml#check")
+        plan["jobs"][0] = copy.deepcopy(check)
+        with self.assertRaises(Hold):
+            self.route(plan=plan)
+
     def test_workflow_dispatch_foreign_repo_or_oversize_is_held(self):
         with self.assertRaises(Hold):
             self.route(event="workflow_dispatch")
