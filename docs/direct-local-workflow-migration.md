@@ -92,3 +92,18 @@ installed ordinary local CI route is already live for the older approved
 `main` source, but it is not proof of all 88 migrated jobs on the candidate.
 Do not create duplicate runners, queue controllers, automations, PRs, or
 "successful" status contexts without independently verified exact receipts.
+
+### Signed event preflight (source only)
+
+The direct-local-event-admission module derives exact ordinary job intents from
+a bounded, HMAC-SHA256 verified GitHub delivery. It rejects JSON duplicate
+keys, stale SHA, forced main pushes, forks, non-owner PRs, draft PRs and all
+unrecognised events. The ordinary main push is eligible for check only; an
+eligible owner PR is eligible for check and sparse. Workflow dispatch needs
+separate actor authority and is held, not silently converted to a push.
+
+This adapter neither creates another queue nor admits or executes a job.
+The existing local fleet webhook delivery ledger, SQLite queue, shared lock
+and source-pinned runner must perform the durable claim, fresh provider ref
+readback, idempotent admission, isolation and actual execution. Its output
+is a potential intent, never a GitHub required status or job success receipt.
