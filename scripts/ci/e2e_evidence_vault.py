@@ -66,10 +66,29 @@ def create_vault(receipt_dir):
     return vault
 
 
-def mount_args(vault):
-    if _directory(vault).st_uid != os.getuid() or stat.S_IMODE(vault.stat().st_mode) != 0o1777:
-        raise EvidenceHold("e2e_mount_untrusted")
-    return ["--mount", "type=bind,src=" + str(vault) + ",dst=/e2e-evidence"]
+# The runner must never write directly to the host's unbounded evidence tree.
+# A Docker-local tmpfs VOLUME with kernel size/inode quotas is kept mounted by
+# a trusted, read-only holder until the untrusted worker exits and the owner
+# copies evidence back. MAX_TOTAL_BYTES is still checked after that transfer.
+VOLUME_BYTES = MAX_TOTAL_BYTES
+VOLUME_INODES = 13_000
+VOLUME_OPTIONS = f"size={VOLUME_BYTES},mode=1777,nr_inodes={VOLUME_INODES}"
+VOLUME_PREFIX = "csw-e2e-vault-"
+RUNNER_NAME = re.compile(r"csw-ci-[0-9]+-[0-9]+-[0-9]+(?:-replacement-[0-9]+)?\Z")
+
+
+def volume_name(runner_name):
+    if not isinstance(runner_name, str) or not RUNNER_NAME.fullmatch(runner_name):
+        raise EvidenceHold("e2e_volume_runner_identity_invalid")
+    return VOLUME_PREFIX + runner_name
+
+
+def mount_args(volume):
+    if (not isinstance(volume, str) or not volume.startswith(VOLUME_PREFIX)
+            or not RUNNER_NAME.fullmatch(volume[len(VOLUME_PREFIX):])):
+        raise EvidenceHold("e2e_bounded_volume_required")
+    return ["--mount", "type=volume,src=" + volume
+            + ",dst=/e2e-evidence,volume-nocopy"]
 
 
 def _regular(path):

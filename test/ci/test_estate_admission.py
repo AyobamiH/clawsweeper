@@ -31,6 +31,9 @@ def runner(path, job_id, *, event="workflow_dispatch", branch="main", run_id=543
     if cls == "codeql":
         job_name = "Analyze (actions)"
         label = f"clawsweeper-ci-security-{run_id}-actions"
+    if path == ".github/workflows/automerge-e2e.yml" and job_id == "automerge-e2e":
+        # Preserve the live source-defined isolation/e2e label, not a generic alias.
+        label = f"clawsweeper-ci-isolation-{run_id}-e2e"
     job = {"id": 34567, "run_id": run_id, "name": job_name,
            "status": "queued", "labels": ["self-hosted", "Linux", "X64", label]}
     return item, run, job

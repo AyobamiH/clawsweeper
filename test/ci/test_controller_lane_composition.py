@@ -77,6 +77,13 @@ class ControllerLaneCompositionTests(unittest.TestCase):
             stack.enter_context(patch.object(executor, "gh", side_effect=remote))
             stack.enter_context(patch.object(executor, "approved_job_image", return_value=IMAGE))
             stack.enter_context(patch.object(executor, "prepare_network"))
+            # Real Docker-volume calls are covered by a separate kernel quota
+            # fixture; preserve lifecycle proof without contacting a daemon.
+            prepare = stack.enter_context(patch.object(
+                executor, "prepare_isolation_volume",
+                return_value=("csw-e2e-vault-" + name, name + "-vault-holder")))
+            export = stack.enter_context(patch.object(executor, "export_isolation_volume"))
+            cleanup = stack.enter_context(patch.object(executor, "cleanup_isolation_volume"))
             stack.enter_context(patch.object(executor.subprocess, "Popen", side_effect=start))
             stack.enter_context(patch.object(executor, "stop_owned"))
             stack.enter_context(patch.object(executor, "lookup_owned_runner", return_value=None))
@@ -102,11 +109,26 @@ class ControllerLaneCompositionTests(unittest.TestCase):
             self.assertEqual(vault.call_count, int(role == "isolation"))
             self.assertEqual(proof.call_count, int(role == "isolation"))
             if role == "isolation":
-                self.assertIn("type=bind,src=" + str(target / "e2e-evidence") + ",dst=/e2e-evidence", cmd)
+                self.assertEqual(cmd[0], "/usr/bin/prlimit")
+                self.assertIn(
+                    "type=volume,src=csw-e2e-vault-" + name
+                    + ",dst=/e2e-evidence,volume-nocopy", cmd)
+                self.assertNotIn("type=bind", " ".join(cmd))
+                self.assertIn("--read-only", cmd)
+                self.assertIn("type=volume,src="
+                              + executor.isolation_home_volume_name(name)
+                              + ",dst=/home/runner", cmd)
+                self.assertEqual(sum(arg == "--tmpfs" for arg in cmd), 3)
+                self.assertEqual(prepare.call_count, 1)
+                self.assertEqual(export.call_count, 1)
+                self.assertEqual(cleanup.call_count, 1)
                 self.assertEqual(proof.call_args.kwargs["checkout_sha"], MERGE)
                 self.assertEqual(proof.call_args.kwargs["source_head"], HEAD)
             else:
                 self.assertNotIn("--mount", cmd)
+                prepare.assert_not_called()
+                export.assert_not_called()
+                cleanup.assert_not_called()
             receipt = json.loads((target / "receipt.json").read_text())
             self.assertEqual(receipt["runner_name"], name)
             if replacement:

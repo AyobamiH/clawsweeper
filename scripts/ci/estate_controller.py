@@ -359,13 +359,19 @@ def preflight_runtime_inventory(ledger, *, api=git_api, list_containers=None,
             "known_active_attempts": len(expected)}
 
 def native_driver(candidate, controls):
-    """Admit only CodeQL on the existing separately pinned security JIT image.
+    """Strictly separate the accepted CodeQL path from one rootless E2E driver.
 
-    No generic "ops" alias is authorised here: privileged GitHub mutations,
-    source review, native Windows, nested container E2E, and ordinary CI each
-    require separate proven runtimes and per-class external-effect evidence.
-    This refusal happens BEFORE any JIT registration or Docker execution.
+    The E2E path stays default-off without exact run/attempt, PR source,
+    executable harness, pinned image and independent 28-case readback.
+    Privileged, inference/review, native Windows and delegated ordinary jobs
+    remain rejected BEFORE any JIT registration or Docker execution.
     """
+    if candidate.job_class == "e2e":
+        # Only the exact automerge-e2e workflow has a dedicated rootless,
+        # owner-run/attempt-pinned implementation. The other E2E workflow
+        # provisions privileged Cloudflare compute and is still denied.
+        from estate_e2e_driver import execute
+        return execute(candidate, controls)
     if candidate.job_class != "codeql":
         raise Hold("dedicated_class_driver_not_accepted")
     from types import SimpleNamespace
@@ -479,9 +485,11 @@ def _cycle_under_shared_lock(manifest, controls, ledger, *, api, worker):
             # The installed driver can execute only CodeQL. Do not reserve a
             # durable one-shot attempt for another class and then poison its
             # slot with a guaranteed pre-registration driver rejection.
-            if worker is native_driver and c.job_class != "codeql":
+            if worker is native_driver and c.job_class not in ("codeql", "e2e"):
                 raise Hold("dedicated_class_driver_not_accepted")
-            if c.job_class in ("e2e", "windows"):
+            if c.job_class == "e2e" and c.job_key != ".github/workflows/automerge-e2e.yml#automerge-e2e":
+                raise Hold("dedicated_driver_not_proven")
+            if c.job_class == "windows":
                 raise Hold("dedicated_driver_not_proven")
             options.append(item)
         except Hold:

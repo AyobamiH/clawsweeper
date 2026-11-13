@@ -36,8 +36,8 @@ def config(digest="b" * 64):
 
 
 class P1DriverBoundary(unittest.TestCase):
-    def test_no_generic_ops_executor_for_any_non_codeql_class(self):
-        for role in ("privileged", "review", "ordinary", "windows", "e2e"):
+    def test_no_generic_ops_executor_for_any_non_codeql_or_isolated_e2e_class(self):
+        for role in ("privileged", "review", "ordinary", "windows"):
             with (
                 self.subTest(role=role),
                 patch.object(ctl.existing, "runner_job") as registration,

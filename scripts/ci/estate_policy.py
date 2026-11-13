@@ -189,6 +189,11 @@ def classify(manifest, run, job):
             raise Hold("unsupported_codeql_language")
         # Preserve existing approved run-bound CodeQL labels, not a new alias.
         label = "clawsweeper-ci-security-" + str(run_id) + "-" + language
+    elif (workflow == ".github/workflows/automerge-e2e.yml"
+          and entry["id"] == "automerge-e2e" and cls == "e2e"):
+        # The source uses the existing *isolation/e2e* JIT label, not the
+        # generic estate class/id alias. Do not route it through CodeQL.
+        label = f"clawsweeper-ci-isolation-{run_id}-e2e"
     elif (workflow == ".github/workflows/repair-issue-implementation-intake.yml"
           and entry["id"] == "intake"):
         # The owner-configured workflow guard pins BOTH the run and attempt.
