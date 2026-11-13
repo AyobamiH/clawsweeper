@@ -1,4 +1,5 @@
 {
+  "operating_mode": "manual_exact_run_only",
   "enabled": false,
   "allow_live_mutations": false,
   "repo": "AyobamiH/clawsweeper",

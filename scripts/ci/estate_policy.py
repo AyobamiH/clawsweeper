@@ -21,6 +21,59 @@ CLASSES = frozenset(("ordinary", "privileged", "review", "codeql", "e2e", "windo
 # accidentally treated as a read-only reviewer because the name says "review".
 # These two already have an independently reviewed and guarded validation
 # controller. The estate may audit them, but MUST NOT register a second runner.
+# Natural scheduled CodeQL is the one provider-accepted, nonprivileged estate
+# class that can operate without a fresh owner grant for EVERY weekly run.
+# The owner must still explicitly install an exact-source safe-auto policy.
+AUTO_CODEQL_JOB = ".github/workflows/codeql.yml#analyze"
+SAFE_AUTO_MODE = "trusted-main-codeql-schedule-v1"
+
+
+def standing_codeql_profile_configured(controls, approved, source_digest):
+    """Pure source-pinned policy check; not a live signing or provider proof."""
+    main = controls.get("trusted_main_sha")
+    image = approved.get("image_sha256")
+    return (
+        controls.get("repo") == REPO
+        and controls.get("operating_mode") == SAFE_AUTO_MODE
+        and controls.get("enabled") is True
+        and controls.get("allow_live_mutations") is True
+        and isinstance(main, str) and HEX40.fullmatch(main) is not None
+        and controls.get("enabled_classes") == ["codeql"]
+        and controls.get("operations_accepted") is False
+        and controls.get("model_inference_permitted") is False
+        and controls.get("codeql_sarif_accepted") is True
+        and approved.get("class") == "codeql"
+        and approved.get("source_sha256") == source_digest
+        and isinstance(image, str) and HEX64.fullmatch(image) is not None
+        and controls.get("security_image_sha256") == "sha256:" + image
+        and approved.get("standing_schedule") == {
+            "accepted": True,
+            "main_sha": main,
+            "source_sha256": source_digest,
+            "image_sha256": image,
+            "languages": ["actions", "javascript-typescript"],
+        }
+    )
+
+
+def scheduled_codeql_auto_grant(candidate, approved, controls, expected_digest):
+    """A vetted weekly schedule may use standing exact-main CodeQL authority.
+
+    A real scheduled job still requires fresh GitHub signing verification
+    before durable reservation/JIT. Other events and sensitive classes retain
+    exact run, job and attempt approval with no automatic retries.
+    """
+    return (
+        candidate.job_class == "codeql"
+        and candidate.job_key == AUTO_CODEQL_JOB
+        and candidate.event == "schedule"
+        and candidate.branch == "main"
+        and candidate.sha == controls.get("trusted_main_sha")
+        and candidate.attempt == 1
+        and standing_codeql_profile_configured(controls, approved, expected_digest)
+    )
+
+
 DELEGATED_VALIDATION = {
     ".github/workflows/ci.yml#check": "check",
     ".github/workflows/ci.yml#sparse-repair-builds": "sparse",
@@ -265,38 +318,44 @@ def admit(candidate, manifest, controls, *, source_sha256, host_platform="linux"
                 approved.get("tokens") != "read-only"):
             raise Hold("untrusted_permissions_not_bounded")
     else:
-        allowed_runs = approved.get("run_ids")
-        if not isinstance(allowed_runs, list) or candidate.run_id not in allowed_runs:
-            raise Hold("sensitive_run_not_explicitly_pinned")
-        allowed_shas = approved.get("head_shas")
-        if not isinstance(allowed_shas, list) or candidate.sha not in allowed_shas:
-            raise Hold("sensitive_head_not_pinned")
-        # Approval is an exact *tuple*, not the unsafe cross-product of a
-        # run list and a head-SHA list. Reject retries/new job IDs or a changed
-        # matrix shard even when their workflow and source bytes are identical.
-        attempts = approved.get("approved_attempts")
-        if not isinstance(attempts, list) or not attempts:
-            raise Hold("sensitive_attempt_not_explicitly_pinned")
-        required = {"run_id", "job_id", "attempt", "head_sha", "job_name"}
-        actual = (candidate.run_id, candidate.job_id, candidate.attempt,
-                  candidate.sha, candidate.name)
-        recognised = set()
-        for record in attempts:
-            if (not isinstance(record, dict) or set(record) != required
-                    or any(type(record[k]) is not int or record[k] <= 0
-                           for k in ("run_id", "job_id", "attempt"))
-                    or not isinstance(record["head_sha"], str)
-                    or not HEX40.fullmatch(record["head_sha"])
-                    or not isinstance(record["job_name"], str)
-                    or not record["job_name"] or len(record["job_name"]) > 280):
-                raise Hold("invalid_sensitive_attempt_approval")
-            item = (record["run_id"], record["job_id"], record["attempt"],
-                    record["head_sha"], record["job_name"])
-            if item in recognised:
-                raise Hold("duplicate_sensitive_attempt_approval")
-            recognised.add(item)
-        if actual not in recognised:
-            raise Hold("sensitive_attempt_not_explicitly_pinned")
+        # The ordinary branch still delegates to the accepted validation
+        # controller. For CodeQL alone, signed protected-main scheduled runs
+        # may reuse an explicit standing grant. No other class, event or
+        # changed SHA can bypass exact run/job/attempt approval.
+        auto_codeql = scheduled_codeql_auto_grant(candidate, approved, controls, expected)
+        if not auto_codeql:
+            allowed_runs = approved.get("run_ids")
+            if not isinstance(allowed_runs, list) or candidate.run_id not in allowed_runs:
+                raise Hold("sensitive_run_not_explicitly_pinned")
+            allowed_shas = approved.get("head_shas")
+            if not isinstance(allowed_shas, list) or candidate.sha not in allowed_shas:
+                raise Hold("sensitive_head_not_pinned")
+            # Approval is an exact *tuple*, not the unsafe cross-product of a
+            # run list and a head-SHA list. Reject retries/new job IDs or a changed
+            # matrix shard even when their workflow and source bytes are identical.
+            attempts = approved.get("approved_attempts")
+            if not isinstance(attempts, list) or not attempts:
+                raise Hold("sensitive_attempt_not_explicitly_pinned")
+            required = {"run_id", "job_id", "attempt", "head_sha", "job_name"}
+            actual = (candidate.run_id, candidate.job_id, candidate.attempt,
+                      candidate.sha, candidate.name)
+            recognised = set()
+            for record in attempts:
+                if (not isinstance(record, dict) or set(record) != required
+                        or any(type(record[k]) is not int or record[k] <= 0
+                               for k in ("run_id", "job_id", "attempt"))
+                        or not isinstance(record["head_sha"], str)
+                        or not HEX40.fullmatch(record["head_sha"])
+                        or not isinstance(record["job_name"], str)
+                        or not record["job_name"] or len(record["job_name"]) > 280):
+                    raise Hold("invalid_sensitive_attempt_approval")
+                item = (record["run_id"], record["job_id"], record["attempt"],
+                        record["head_sha"], record["job_name"])
+                if item in recognised:
+                    raise Hold("duplicate_sensitive_attempt_approval")
+                recognised.add(item)
+            if actual not in recognised:
+                raise Hold("sensitive_attempt_not_explicitly_pinned")
 
     if candidate.job_class == "privileged":
         if host_platform != "linux" or not controls.get("operations_accepted"):

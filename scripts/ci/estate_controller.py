@@ -15,7 +15,9 @@ import shutil
 import subprocess
 import sys
 
-from estate_policy import Hold, REPO, DELEGATED_VALIDATION, classify, admit, load_manifest, workflow_digest
+from estate_policy import (Hold, REPO, DELEGATED_VALIDATION, classify, admit, load_manifest,
+                           workflow_digest, scheduled_codeql_auto_grant,
+                           standing_codeql_profile_configured)
 from estate_slots import SlotLedger
 from estate_fleet_lock import shared_fleet_exclusive, legacy_executor_exclusive
 import self_hosted_executor as existing
@@ -228,10 +230,24 @@ def inspect(manifest=None, controls=None, ledger=None):
         from estate_policy import job_class
         klass = job_class(item)
         counts[klass] = counts.get(klass, 0) + 1
+    # A standing grant is configured, not independent provider acceptance.
+    from estate_policy import AUTO_CODEQL_JOB
+    codeql_entry = next((item for item in manifest["jobs"] if
+                         item["workflow"] + "#" + item["id"] == AUTO_CODEQL_JOB), None)
+    approvals = controls.get("approved_jobs", {})
+    grant = approvals.get(AUTO_CODEQL_JOB, {}) if isinstance(approvals, dict) else {}
+    standing_configured = bool(
+        isinstance(codeql_entry, dict) and isinstance(grant, dict)
+        and standing_codeql_profile_configured(
+            controls, grant, codeql_entry["source_sha256"])
+    )
     return {
         "repo": REPO,
         "controller_enabled": controls.get("enabled") is True,
         "live_mutations_enabled": controls.get("allow_live_mutations") is True,
+        "operating_mode": controls.get("operating_mode", "manual_exact_run_only"),
+        "standing_codeql_schedule_configured": standing_configured,
+        "standing_codeql_schedule_live_verified": False,
         "manifest_jobs": len(manifest["jobs"]),
         "delegated_existing_validation_jobs": sorted(DELEGATED_VALIDATION),
         "classes": counts,
@@ -443,6 +459,37 @@ def native_driver(candidate, controls):
     }
 
 
+def verify_automatic_codeql_source(candidate, entry, controls, *, api=git_api):
+    """Independently check the pinned signed main before automatic CodeQL JIT.
+
+    Standing authority never trusts an arbitrary scheduled actor or merely
+    the workflow metadata. This read happens before durable reservation/JIT.
+    Every unverified or changed protected revision refuses execution.
+    """
+    approved = controls.get("approved_jobs", {}).get(candidate.job_key, {})
+    if not isinstance(approved, dict):
+        raise Hold("automatic_codeql_approval_unverifiable")
+    if not scheduled_codeql_auto_grant(candidate, approved, controls,
+                                      entry["source_sha256"]):
+        return False
+    try:
+        current_main = api(f"repos/{REPO}/git/ref/heads/main")
+        if (not isinstance(current_main, dict)
+                or current_main.get("object", {}).get("sha") != candidate.sha):
+            raise Hold("automatic_codeql_protected_main_drift")
+        commit = api(f"repos/{REPO}/commits/{candidate.sha}")
+        if (not isinstance(commit, dict)
+                or commit.get("sha") != candidate.sha
+                or commit.get("commit", {}).get("verification", {}).get("verified") is not True
+                or commit.get("commit", {}).get("verification", {}).get("reason") != "valid"):
+            raise Hold("automatic_codeql_main_signature_unverified")
+    except (RuntimeError, OSError, KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, Hold):
+            raise
+        raise Hold("automatic_codeql_main_signature_unavailable") from exc
+    return True
+
+
 def cycle(manifest=None, controls=None, ledger=None, *, api=git_api, worker=native_driver):
     controls = controls if controls is not None else get_controls()
     if controls.get("enabled") is not True or controls.get("allow_live_mutations") is not True:
@@ -482,6 +529,13 @@ def _cycle_under_shared_lock(manifest, controls, ledger, *, api, worker):
         try:
             digest = fetch_workflow_digest(run, main, api)
             admit(c, manifest, controls, source_sha256=digest, host_platform="linux")
+            # A standing scheduled CodeQL grant additionally requires fresh
+            # GitHub-confirmed owner signing, not only a pinned YAML digest.
+            entry = next((job for job in manifest["jobs"] if
+                          job["workflow"] + "#" + job["id"] == c.job_key), None)
+            if entry is None:
+                raise Hold("automatic_codeql_entry_missing")
+            verify_automatic_codeql_source(c, entry, controls, api=api)
             # The installed driver can execute only CodeQL. Do not reserve a
             # durable one-shot attempt for another class and then poison its
             # slot with a guaranteed pre-registration driver rejection.
