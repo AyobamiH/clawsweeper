@@ -102,8 +102,30 @@ unrecognised events. The ordinary main push is eligible for check only; an
 eligible owner PR is eligible for check and sparse. Workflow dispatch needs
 separate actor authority and is held, not silently converted to a push.
 
-This adapter neither creates another queue nor admits or executes a job.
-The existing local fleet webhook delivery ledger, SQLite queue, shared lock
-and source-pinned runner must perform the durable claim, fresh provider ref
-readback, idempotent admission, isolation and actual execution. Its output
-is a potential intent, never a GitHub required status or job success receipt.
+The event adapter never executes work or publishes a GitHub required check.
+It produces authenticated, source-pinned job intents only.
+
+### Existing-fleet SQLite claim, source-only
+
+`scripts/ci/direct_local_fleet_claim.py` provides the next integration boundary:
+an authenticated, exact-SHA ordinary intent can atomically enter the **existing**
+`fleet.sqlite3.jobs` table under its **existing** `control.lock`, with
+identity-only evidence in its existing `observations` table. It refuses a
+foreign owner, missing fleet, unknown queue schema, unpinned revision, changed
+signed delivery payload, competing lock, cross-ref suite collision, or
+cancelled job replay. An uncertain response is reconciled through the same
+unique `(repo, sha, suite, policy)` row. The receiver's own delivery ledger
+continues to own webhook receipt deduplication. No new scheduler, queue,
+container or credential store is created.
+
+**Not yet installed or accepted:** the caller still needs fresh GitHub ref
+readback, an authorised exact-source fleet-policy pin and integration with
+the existing webhook/polling controller. Only the fleet controller may execute
+the queued job, reconcile interruptions and publish its separately labelled
+local CI result. A single suite may represent both ordinary jobs only where
+individual required-command execution and successful step receipts are verified;
+the suite's aggregate success must not be misreported as two accepted jobs.
+Existing protected CodeQL checks remain independent and unaltered.
+
+The no-provider tests use temporary owner-marked SQLite WAL databases and
+never write to the installed fleet queue.
