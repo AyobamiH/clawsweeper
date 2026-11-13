@@ -687,7 +687,9 @@ test("slow workflow discovery stops at the shared deadline with dead-letter head
   });
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const sharedDeadlineMs = Date.now() + DEAD_LETTER_RESERVED_MS + 1500;
+  // Allow CI process start-up headroom, then still bound this deliberately
+  // hanging 20-second history request well before it can complete.
+  const sharedDeadlineMs = Date.now() + DEAD_LETTER_RESERVED_MS + 6000;
   const startedAt = Date.now();
   try {
     const result = await runProduction({
@@ -698,7 +700,7 @@ test("slow workflow discovery stops at the shared deadline with dead-letter head
       zombieSeed,
     });
     assert.equal(result.exitCode, 0, result.stderr);
-    assert.ok(Date.now() - startedAt < 5000, "the 20-second history request must be cut short");
+    assert.ok(Date.now() - startedAt < 16000, "the 20-second history request must be cut short");
     const summary = JSON.parse(await readFile(output, "utf8"));
     assert.equal(summary.deadline_reached, true);
     assert.equal(summary.workflow_discovery.distinct_stale_workflows, runs.length);

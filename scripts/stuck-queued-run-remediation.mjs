@@ -250,6 +250,15 @@ export function remediationDeadlineReached(deadlineAtMs) {
   return Date.now() + DEADLINE_SETTLE_MS >= deadlineAtMs;
 }
 
+// AbortSignal can fire just before the wall-clock test sees the exact shared
+// deadline. Preserve the bounded budget's expected terminal disposition.
+class SharedDeadlineRequestAbort extends Error {
+  constructor() {
+    super("GitHub request stopped by the shared remediation deadline");
+    this.name = "SharedDeadlineRequestAbort";
+  }
+}
+
 export function selectWorkflowHistoriesForInspection(
   staleWorkflows,
   maxWorkflows = MAX_WORKFLOW_HISTORIES_PER_PASS,
@@ -306,7 +315,10 @@ Options:
       if (isGitHubThrottleFailure(error)) {
         recordGitHubThrottleSkip({ error, phase: "discovery", skipReasons, skipSamples });
         githubThrottleSkipped = true;
-      } else if (remediationDeadlineReached(deadline.deadline_ms)) {
+      } else if (
+        error instanceof SharedDeadlineRequestAbort ||
+        remediationDeadlineReached(deadline.deadline_ms)
+      ) {
         deadlineReached = true;
       } else {
         throw error;
@@ -354,7 +366,10 @@ Options:
         recordGitHubThrottleSkip({ error, phase: "discovery", skipReasons, skipSamples });
         githubThrottleSkipped = true;
         break;
-      } else if (remediationDeadlineReached(deadline.deadline_ms)) {
+      } else if (
+        error instanceof SharedDeadlineRequestAbort ||
+        remediationDeadlineReached(deadline.deadline_ms)
+      ) {
         deadlineReached = true;
         historyErrors.push({
           workflow_id: workflowId,
@@ -387,7 +402,10 @@ Options:
         if (isGitHubThrottleFailure(error)) {
           recordGitHubThrottleSkip({ error, phase: "remediation", skipReasons, skipSamples });
           githubThrottleSkipped = true;
-        } else if (remediationDeadlineReached(deadline.deadline_ms)) {
+        } else if (
+          error instanceof SharedDeadlineRequestAbort ||
+          remediationDeadlineReached(deadline.deadline_ms)
+        ) {
           deadlineReached = true;
         } else {
           throw error;
@@ -433,7 +451,10 @@ Options:
         if (isGitHubThrottleFailure(error)) {
           recordGitHubThrottleSkip({ error, phase: "remediation", skipReasons, skipSamples });
           githubThrottleSkipped = true;
-        } else if (remediationDeadlineReached(deadline.deadline_ms)) {
+        } else if (
+          error instanceof SharedDeadlineRequestAbort ||
+          remediationDeadlineReached(deadline.deadline_ms)
+        ) {
           deadlineReached = true;
         } else {
           throw error;
@@ -512,16 +533,26 @@ function githubApi({ repository, token, deadlineAtMs }) {
       throw new Error("stuck queued-run remediation deadline reached");
     }
     const remainingMs = Math.max(1, deadlineAtMs - Date.now());
-    const response = await fetch(`${root}${path}`, {
-      ...options,
-      signal: AbortSignal.timeout(Math.min(REQUEST_TIMEOUT_MS, remainingMs)),
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "x-github-api-version": "2022-11-28",
-        ...options.headers,
-      },
-    });
+    const sharedDeadlineIsBinding = remainingMs <= REQUEST_TIMEOUT_MS;
+    const signal = AbortSignal.timeout(Math.min(REQUEST_TIMEOUT_MS, remainingMs));
+    let response;
+    try {
+      response = await fetch(`${root}${path}`, {
+        ...options,
+        signal,
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "x-github-api-version": "2022-11-28",
+          ...options.headers,
+        },
+      });
+    } catch (error) {
+      if (sharedDeadlineIsBinding && signal.aborted) {
+        throw new SharedDeadlineRequestAbort();
+      }
+      throw error;
+    }
     return response;
   };
   const getJson = async (path) => {
