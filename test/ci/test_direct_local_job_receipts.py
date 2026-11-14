@@ -154,6 +154,47 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(Hold, "event_job_identity_mismatch"):
             self.prove()
 
+    def test_source_readback_proves_only_authenticated_main_job(self):
+        result = readback.verify_current_source_ordinary_jobs(
+            fleet_root=self.base, source_sha=self.sha, source_ref="main")
+        self.assertEqual(len(result["verified_local_job_steps"]), 1)
+        self.assertEqual(result["fleet_job_id"], self.job_id)
+
+    def test_source_readback_proves_two_distinct_pr_steps(self):
+        self.ref = "pr/113"
+        self.make_evidence()
+        result = readback.verify_current_source_ordinary_jobs(
+            fleet_root=self.base, source_sha=self.sha, source_ref="pr/113")
+        self.assertEqual(len(result["verified_local_job_steps"]), 2)
+        self.assertNotEqual(result["verified_local_job_steps"][0]["step"],
+                            result["verified_local_job_steps"][1]["step"])
+
+    def test_source_readback_does_not_relabel_legacy_success(self):
+        self.make_evidence(with_claim=False)
+        with self.assertRaisesRegex(Hold, "legacy_suite_has_no_authenticated"):
+            readback.verify_current_source_ordinary_jobs(
+                fleet_root=self.base, source_sha=self.sha, source_ref="main")
+
+    def test_source_readback_holds_ambiguous_verified_executions(self):
+        second_id = "local-fleet-abcdef123456"
+        second_path = self.base / "evidence" / "fleet" / (second_id + ".json")
+        second_log = self.base / "logs" / "fleet" / (second_id + ".log")
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO jobs SELECT ?,repo,sha,suite,policy,ref,"
+                       "state,outcome,attempt,? FROM jobs WHERE id=?",
+                       (second_id, str(second_path), self.job_id))
+            claim = json.loads(db.execute("SELECT value FROM observations").fetchone()[0])
+            claim["job_id"] = second_id
+            db.execute("INSERT INTO observations VALUES (?,?,?)",
+                       ("direct-local:another", json.dumps(claim), "today"))
+        receipt = dict(self.receipt)
+        receipt["id"] = second_id
+        second_path.write_text(json.dumps(receipt))
+        second_log.write_bytes(self.log)
+        with self.assertRaisesRegex(Hold, "ambiguous_multiple_authenticated"):
+            readback.verify_current_source_ordinary_jobs(
+                fleet_root=self.base, source_sha=self.sha, source_ref="main")
+
     def test_foreign_receipt_path_is_held(self):
         with sqlite3.connect(self.db) as db:
             db.execute("UPDATE jobs SET receipt=?", ("/tmp/forged.json",))

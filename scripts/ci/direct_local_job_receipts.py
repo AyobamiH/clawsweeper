@@ -56,6 +56,42 @@ def _object_bytes(value: bytes) -> dict:
     return doc
 
 
+def verify_current_source_ordinary_jobs(*, fleet_root: Path,
+                                        source_sha: str, source_ref: str) -> dict:
+    """Verify one real existing-fleet execution for an exact eligible event.
+
+    Read-only across the canonical queue and per-step receipts. Historical
+    aggregate jobs without authenticated event provenance are never accepted.
+    There is no new queue, worker, scheduler, webhook or provider effect.
+    """
+    if (not routing.HEX40.fullmatch(source_sha)
+            or not (source_ref == "main" or (
+                source_ref.startswith("pr/") and source_ref[3:].isdigit()
+                and not source_ref[3:].startswith("0")))):
+        raise Hold("invalid_source_for_existing_ordinary_readback")
+    root = claims.checked_fleet_root(fleet_root)
+    db_path = root / "fleet.sqlite3"
+    if (db_path.is_symlink() or not db_path.is_file()
+            or db_path.stat().st_uid != os.getuid()):
+        raise Hold("unsafe_existing_fleet_readback_queue")
+    with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=3) as db:
+        rows = db.execute(
+            "SELECT id FROM jobs WHERE repo=? AND sha=? AND ref=? AND suite=? "
+            "AND state='completed' AND outcome='success' "
+            "ORDER BY id DESC LIMIT 2",
+            (routing.REPO, source_sha, source_ref, claims.SUITE),
+        ).fetchall()
+    if not rows:
+        raise Hold("no_exact_authenticated_real_ordinary_execution")
+    if len(rows) != 1:
+        raise Hold("ambiguous_multiple_authenticated_ordinary_executions")
+    # Do not swallow a failed provenance or step check just because another
+    # historical fleet row happens to have completed successfully.
+    return verify_existing_ordinary_job_receipts(
+        fleet_root=root, fleet_job_id=rows[0][0],
+        source_sha=source_sha, source_ref=source_ref)
+
+
 def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str,
                                           source_sha: str, source_ref: str) -> dict:
     """Return per-definition local evidence, never GitHub-provider acceptance.
