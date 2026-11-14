@@ -99,6 +99,15 @@ class ExactFleetSourceTests(unittest.TestCase):
         self.assertIn("if _dl_hold else None", generated)
         self.assertIn("clawsweeper_worker_release_path_unverified", generated)
         self.assertIn("clawsweeper_worker_release_verifier_changed", generated)
+        self.assertIn("clawsweeper_existing_fleet_policy_pin_mismatch", generated)
+        self.assertIn("clawsweeper_worker_source_policy_pin_mismatch", generated)
+        self.assertIn("_dl_hold = a.mode in ('discover', 'cycle', 'work')", generated)
+        self.assertIn("_dl_hold = False", generated)
+        self.assertIn("_dl_release is not None", generated)
+        # Detached workers must check ClawSweeper identity even with no env var.
+        self.assertLess(generated.index("_dl_job = db.execute('SELECT repo FROM jobs"),
+                        generated.index("_dl_release = os.environ.get('FLEET_DIRECT_LOCAL",
+                                        generated.index("if a.mode=='execute-job':")))
         self.assertNotIn("error': str(_dl_error)", generated)
         self.assertEqual(generated.count("with core.lock():"), 1)
 
@@ -153,7 +162,7 @@ class ExactFleetSourceTests(unittest.TestCase):
                     return Result({"repo": self.worker_repo})
                 return Result()
 
-        def run(mode, worker_repo, invalid_release):
+        def run(mode, worker_repo, invalid_release, host="web"):
             db = FakeDB(worker_repo)
             events = []
             policy = {"repositories": {
@@ -169,7 +178,7 @@ class ExactFleetSourceTests(unittest.TestCase):
                 "setup": lambda: db,
                 "core": types.SimpleNamespace(lock=contextlib.nullcontext),
                 "ROOT": pathlib.Path("/nonexistent/fleet-test"),
-                "HOST": "web", "os": os, "pathlib": pathlib,
+                "HOST": host, "os": os, "pathlib": pathlib,
                 "hashlib": _hashlib, "time": time,
                 "discover": lambda _db, chosen, *_: events.append(
                     ("discover", set(chosen["repositories"]))),
@@ -184,11 +193,14 @@ class ExactFleetSourceTests(unittest.TestCase):
                         "/wrong/release.json"} if invalid_release else {})
             with patch.dict(os.environ, release, clear=True):
                 with contextlib.redirect_stdout(io.StringIO()) as printed:
-                    if mode == "execute-job" and invalid_release and (
+                    if mode == "execute-job" and (
                             worker_repo == "AyobamiH/clawsweeper"):
-                        with self.assertRaisesRegex(
-                                RuntimeError,
-                                "clawsweeper_worker_release_path_unverified"):
+                        # The separate systemd worker may have NO environment
+                        # inheritance. Both absent and mismatched releases HOLD.
+                        expected = ("clawsweeper_worker_release_path_unverified"
+                                    if invalid_release else
+                                    "clawsweeper_worker_release_verifier_untrusted")
+                        with self.assertRaisesRegex(RuntimeError, expected):
                             namespace["main"]()
                     else:
                         namespace["main"]()
@@ -217,8 +229,119 @@ class ExactFleetSourceTests(unittest.TestCase):
                          [("execute", "AyobamiH/opstruth-chatgpt-plugin")])
         events, queries, _, _ = run(
             "cycle", "AyobamiH/clawsweeper", False)
-        self.assertIn(("dispatch", set(policy["repositories"])), events)
-        self.assertFalse(any("AND repo!=?" in q[0] for q in queries))
+        self.assertIn(("dispatch", other), events)
+        self.assertTrue(any("AND repo!=?" in q[0] for q in queries))
+        # A recovery on the standby host must not admit ClawSweeper either.
+        events, queries, _, _ = run(
+            "cycle", "AyobamiH/clawsweeper", False, host="Ayobami-Dev")
+        self.assertIn(("dispatch", other), events)
+        self.assertTrue(any("AND repo!=?" in q[0] for q in queries))
+
+    def test_valid_released_cycle_and_detached_worker_without_inherited_env(self):
+        # Effect-free behavioural proof: one existing fleet controller and one
+        # detached worker check the fixed owner release in an isolated fixture.
+        import contextlib
+        import io
+        import json
+        import os
+        import pathlib
+        import tempfile
+        import time
+        import types
+        from unittest.mock import patch
+
+        ingress = (b"def reconcile_existing_fleet_ingress(**kwargs):\n"
+                   b"    return {'inspected': 0, 'consumed': 0, 'held': 0}\n")
+        verifier = (
+            b"import json\n"
+            b"def read_release(path):\n"
+            b"    return json.loads(path.read_text())\n"
+            b"def verify_release(doc):\n"
+            b"    if doc != {'verified': True, 'commit': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}:\n"
+            b"        raise RuntimeError('wrong_owner_release')\n"
+        )
+        generated = render(ingress=ingress, verifier=verifier)["content"]
+        with tempfile.TemporaryDirectory(prefix="clawsweeper-local-release-") as td:
+            root = pathlib.Path(td)
+            (root / "secrets").mkdir(mode=0o700)
+            bound = root / "secrets" / "clawsweeper-direct-local-release.json"
+            bound.write_text(json.dumps({"verified": True, "commit": "a" * 40}))
+            bound.chmod(0o600)
+            (root / "direct_local_ingress_reconcile.py").write_bytes(ingress)
+            (root / "direct_local_receiver_integration.py").write_bytes(verifier)
+
+            class Result:
+                def __init__(self, row=None):
+                    self.row = row
+                def fetchone(self):
+                    return self.row
+                def fetchall(self):
+                    return []
+
+            class DB:
+                def execute(self, sql, args):
+                    if sql.startswith("SELECT repo FROM jobs"):
+                        return Result({"repo": "AyobamiH/clawsweeper"})
+                    return Result()
+
+            for mode, env in (
+                    ("cycle", {"FLEET_DIRECT_LOCAL_CLAWSWEEPER_RELEASE": str(bound)}),
+                    ("execute-job", {})):
+                seen = []
+                repo_names = {"AyobamiH/clawsweeper",
+                              "AyobamiH/opstruth-chatgpt-plugin"}
+                policy = {"repositories": {key: {} for key in repo_names}}
+                policy["repositories"]["AyobamiH/clawsweeper"] = {
+                    "enrolled_head": "a" * 40}
+                args = types.SimpleNamespace(
+                    mode=mode, max_jobs=1, main_only=False, repo=None,
+                    job_id="local-fleet-123456789abc", claim_token="fixture")
+                namespace = {
+                    "p": types.SimpleNamespace(parse_args=lambda: args),
+                    "load_policy": lambda: policy,
+                    "setup": DB,
+                    "core": types.SimpleNamespace(lock=contextlib.nullcontext),
+                    "ROOT": root, "HOST": "web", "os": os,
+                    "pathlib": pathlib, "hashlib": hashlib, "time": time,
+                    "discover": lambda _db, chosen, *_: seen.append(
+                        ("discover", set(chosen["repositories"]))),
+                    "detached": types.SimpleNamespace(
+                        dispatch=lambda _db, chosen, _count: seen.append(
+                            ("dispatch", set(chosen["repositories"]))),
+                        execute=lambda *_: seen.append(("execute", True))),
+                }
+                exec(compile(generated, "<verified-local-release>", "exec"),
+                     namespace)
+                with patch.dict(os.environ, env, clear=True):
+                    with contextlib.redirect_stdout(io.StringIO()) as report:
+                        namespace["main"]()
+                if mode == "cycle":
+                    self.assertIn(("discover", repo_names), seen)
+                    self.assertIn(("dispatch", repo_names), seen)
+                    self.assertIn("clawsweeper_direct_local_prelock",
+                                  report.getvalue())
+                    self.assertNotIn("clawsweeper_direct_local_hold",
+                                     report.getvalue())
+                    policy["repositories"]["AyobamiH/clawsweeper"][
+                        "enrolled_head"] = "b" * 40
+                    seen.clear()
+                    with patch.dict(os.environ, env, clear=True):
+                        with contextlib.redirect_stdout(io.StringIO()) as rejected:
+                            namespace["main"]()
+                    self.assertIn("clawsweeper_direct_local_hold",
+                                  rejected.getvalue())
+                    self.assertIn(
+                        ("dispatch", {"AyobamiH/opstruth-chatgpt-plugin"}), seen)
+                else:
+                    # Simulates systemd-run not propagating manager environment.
+                    self.assertIn(("execute", True), seen)
+                    policy["repositories"]["AyobamiH/clawsweeper"][
+                        "enrolled_head"] = "b" * 40
+                    with patch.dict(os.environ, {}, clear=True):
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "clawsweeper_worker_source_policy_pin_mismatch"):
+                            namespace["main"]()
 
     def test_pins_are_per_exact_module_and_receipt_has_no_source(self):
         result = render()

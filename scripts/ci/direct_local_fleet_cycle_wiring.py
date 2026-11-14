@@ -48,7 +48,10 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
         raise RuntimeError("unrecognised_canonical_fleet_cycle_shape")
     ingress_hash, release_hash = sha(ingress_adapter), sha(release_verifier)
     hook = f'''    # Signed ClawSweeper pre-lock ingestion on the EXISTING local fleet.
-    _dl_hold = False
+    # The newly installed controller must never fall back to old ClawSweeper
+    # admission merely because a release environment variable is missing.
+    # No other repository changes its authorised route.
+    _dl_hold = a.mode in ('discover', 'cycle', 'work')
     if a.mode in ('discover', 'cycle', 'work') and HOST == 'web':
         _dl_release = os.environ.get('FLEET_DIRECT_LOCAL_CLAWSWEEPER_RELEASE')
         if _dl_release:
@@ -72,6 +75,22 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
                     if hashlib.sha256(_dl_data).hexdigest() != _dl_expected:
                         raise RuntimeError('installed_direct_local_module_drift')
                     _dl_bytes[_dl_file.name] = _dl_data
+                # The owner release, the installed candidate and the fleet
+                # suite's source pin must refer to the SAME immutable tree.
+                # Without this check a zero-event cycle could run old ClawSweeper
+                # jobs even though the new release source was never enrolled.
+                _dl_verifier_entry = ROOT / 'direct_local_receiver_integration.py'
+                _dl_verifier = _dl_types.ModuleType('verified_clawsweeper_release_pin')
+                _dl_verifier.__file__ = str(_dl_verifier_entry)
+                exec(compile(_dl_bytes[_dl_verifier_entry.name],
+                             str(_dl_verifier_entry), 'exec'),
+                     _dl_verifier.__dict__)
+                _dl_doc = _dl_verifier.read_release(_dl_bound)
+                _dl_verifier.verify_release(_dl_doc)
+                _dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')
+                if (not isinstance(_dl_cfg, dict)
+                        or _dl_cfg.get('enrolled_head') != _dl_doc.get('commit')):
+                    raise RuntimeError('clawsweeper_existing_fleet_policy_pin_mismatch')
                 _dl_entry = ROOT / 'direct_local_ingress_reconcile.py'
                 _dl_module = _dl_types.ModuleType('verified_clawsweeper_local_ingress')
                 _dl_module.__file__ = str(_dl_entry)
@@ -83,6 +102,7 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
                     secret_file=ROOT / 'secrets' / 'webhook-hmac')
                 print(json.dumps({{'clawsweeper_direct_local_prelock': _dl_receipt}},
                                  sort_keys=True), flush=True)
+                _dl_hold = False
             except Exception as _dl_error:
                 # Invalid ClawSweeper release must not starve other repositories.
                 # Never log provider errors, secrets or signed event payloads.
@@ -140,29 +160,35 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
         b"        result=detached.execute(db,policy,a.job_id or '',a.claim_token or '')"
     )
     worker_guard = f'''    if a.mode=='execute-job':
-        _dl_release = os.environ.get('FLEET_DIRECT_LOCAL_CLAWSWEEPER_RELEASE')
-        if _dl_release:
-            _dl_job = db.execute('SELECT repo FROM jobs WHERE id=?',
-                                 (a.job_id or '',)).fetchone()
-            if _dl_job and _dl_job['repo'] == 'AyobamiH/clawsweeper':
-                import stat as _dl_stat
-                import types as _dl_types
-                _dl_bound = ROOT / 'secrets' / 'clawsweeper-direct-local-release.json'
-                if pathlib.Path(_dl_release) != _dl_bound:
-                    raise RuntimeError('clawsweeper_worker_release_path_unverified')
-                _dl_file = ROOT / 'direct_local_receiver_integration.py'
-                if (_dl_file.is_symlink() or not _dl_file.is_file()
-                        or _dl_file.stat().st_uid != os.getuid()
-                        or _dl_file.stat().st_mode & (_dl_stat.S_IWGRP | _dl_stat.S_IWOTH)):
-                    raise RuntimeError('clawsweeper_worker_release_verifier_untrusted')
-                _dl_data = _dl_file.read_bytes()
-                if hashlib.sha256(_dl_data).hexdigest() != '{release_hash}':
-                    raise RuntimeError('clawsweeper_worker_release_verifier_changed')
-                _dl_mod = _dl_types.ModuleType('clawsweeper_worker_release_verifier')
-                _dl_mod.__file__ = str(_dl_file)
-                exec(compile(_dl_data, str(_dl_file), 'exec'), _dl_mod.__dict__)
-                _dl_doc = _dl_mod.read_release(_dl_bound)
-                _dl_mod.verify_release(_dl_doc)
+        _dl_job = db.execute('SELECT repo FROM jobs WHERE id=?',
+                             (a.job_id or '',)).fetchone()
+        if _dl_job and _dl_job['repo'] == 'AyobamiH/clawsweeper':
+            # systemd-run workers are separate processes. Their environment
+            # does not reliably inherit the timer's release variable. Always
+            # validate the owner-bound release at its fixed private path.
+            _dl_release = os.environ.get('FLEET_DIRECT_LOCAL_CLAWSWEEPER_RELEASE')
+            import stat as _dl_stat
+            import types as _dl_types
+            _dl_bound = ROOT / 'secrets' / 'clawsweeper-direct-local-release.json'
+            if _dl_release is not None and pathlib.Path(_dl_release) != _dl_bound:
+                raise RuntimeError('clawsweeper_worker_release_path_unverified')
+            _dl_file = ROOT / 'direct_local_receiver_integration.py'
+            if (_dl_file.is_symlink() or not _dl_file.is_file()
+                    or _dl_file.stat().st_uid != os.getuid()
+                    or _dl_file.stat().st_mode & (_dl_stat.S_IWGRP | _dl_stat.S_IWOTH)):
+                raise RuntimeError('clawsweeper_worker_release_verifier_untrusted')
+            _dl_data = _dl_file.read_bytes()
+            if hashlib.sha256(_dl_data).hexdigest() != '{release_hash}':
+                raise RuntimeError('clawsweeper_worker_release_verifier_changed')
+            _dl_mod = _dl_types.ModuleType('clawsweeper_worker_release_verifier')
+            _dl_mod.__file__ = str(_dl_file)
+            exec(compile(_dl_data, str(_dl_file), 'exec'), _dl_mod.__dict__)
+            _dl_doc = _dl_mod.read_release(_dl_bound)
+            _dl_mod.verify_release(_dl_doc)
+            _dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')
+            if (not isinstance(_dl_cfg, dict)
+                    or _dl_cfg.get('enrolled_head') != _dl_doc.get('commit')):
+                raise RuntimeError('clawsweeper_worker_source_policy_pin_mismatch')
         result=detached.execute(db,policy,a.job_id or '',a.claim_token or '')'''
     if current.count(worker_before) != 1:
         raise RuntimeError("unrecognised_local_fleet_worker_isolation_shape")

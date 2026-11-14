@@ -331,3 +331,25 @@ install the owner-bound receiver/fleet release and policy in one controlled
 transaction, verify its service sandbox, and prove a natural eligible
 webhook-to-ordinary-job receipt. This statement grants no protected-main,
 paid-runner or provider-effect authority.
+
+### Default-deny detached worker and no-release cutover (14 November)
+
+The proposed new fleet controller now holds ClawSweeper even when its release
+environment variable is missing, and always holds it on a non-web host. Other
+repositories retain the existing scheduler and admission path. For
+source-pinned ClawSweeper detached jobs, systemd-run --user may not pass the
+fleet-cycle environment into the worker. The worker therefore revalidates
+the exact 0600 owner release at its fixed existing-fleet path before executing,
+regardless of environment inheritance. An explicitly supplied alternate path
+is refused. A missing or revoked release cannot silently turn into legacy
+ClawSweeper execution. Rollback must restore the prior signed controller
+transaction, not remove the environment flag while leaving the new controller.
+
+This corrects source-only generated code, not the installed fleet. No source
+policy, provider, branch protection or product effect was changed.
+
+The release and fleet-policy enrolment SHA must also agree **before** ingress
+reconciliation or ClawSweeper discovery. A zero-event cycle must not silently
+fall back to the older main suite. Detached ClawSweeper workers independently
+check this pinned SHA in addition to verifying the fixed, owner-private release.
+A mismatch holds ClawSweeper without blocking the other repositories.
