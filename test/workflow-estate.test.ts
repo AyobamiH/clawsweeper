@@ -34,6 +34,29 @@ test("the entire workflow estate matches the review manifest", () => {
   );
 });
 
+test("ClawSweeper workflow estate cannot silently reintroduce billed GitHub-hosted runners", () => {
+  const observed = inspectEstate(root);
+  assert.ok(observed.summary.workflows >= 41, "do not drop audited workflows");
+  assert.ok(observed.summary.jobs >= 88, "do not drop audited job definitions");
+  assert.equal(
+    observed.summary.github_hosted,
+    0,
+    "GitHub-hosted runners must never be reintroduced as a billing fallback",
+  );
+  assert.equal(
+    observed.summary.dynamic_hosted_fallback,
+    0,
+    "dynamic runner expressions must not restore GitHub-hosted execution",
+  );
+  assert.deepEqual(
+    observed.jobs
+      .filter((job) => job.kind === "github_hosted" || job.kind === "dynamic_hosted_fallback")
+      .map((job) => job.workflow + "/" + job.id),
+    [],
+    "list every offending exact workflow/job identity",
+  );
+});
+
 test("hosted fallback and local labels are not conflated", () => {
   assert.equal(classifyRunner("ubuntu-latest"), "github_hosted");
   assert.equal(classifyRunner("ubuntu-24.04"), "github_hosted");
