@@ -2675,6 +2675,9 @@ test("dependency setup permits pnpm integrity strings containing double slashes"
 });
 
 test("dependency setup permits external funding metadata in npm lockfiles", () => {
+  // This fixture tests funding metadata, not setup timeouts. Other local CI
+  // suites can delay Node startup; retain a bounded fixture-only budget.
+  const fundingFixtureTimeoutMs = 45_000;
   for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
     const cwd = gitPackageFixture({ check: 'node -e ""' });
     fs.rmSync(path.join(cwd, "pnpm-lock.yaml"));
@@ -2733,8 +2736,8 @@ test("dependency setup permits external funding metadata in npm lockfiles", () =
           },
         }),
         installTargetDeps: true,
-        installTimeoutMs: FAKE_TOOLCHAIN_TIMEOUT_MS,
-        setupTimeoutMs: FAKE_TOOLCHAIN_TIMEOUT_MS,
+        installTimeoutMs: fundingFixtureTimeoutMs,
+        setupTimeoutMs: fundingFixtureTimeoutMs,
       }),
     );
   }
