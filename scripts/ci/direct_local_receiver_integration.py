@@ -138,3 +138,22 @@ def load_released_claim(file: Path, *, adapter=None):
             delivery_id=delivery_id, secret=secret,
         )
     return claim
+
+
+def load_released_ingress(file: Path):
+    """Verify the exact owner release without opening or writing the fleet.
+
+    The network receiver stores only a bounded HMAC-authenticated envelope in
+    its existing ledger. The separately released fleet cycle owns GitHub GET,
+    canonical lock, SQLite admission and eventual event consumption.
+    """
+    doc = read_release(file)
+    verify_release(doc)
+
+    def verify() -> bool:
+        if read_release(file) != doc:
+            raise RuntimeError('direct_local_release_revoked_or_changed')
+        verify_release(doc)
+        return True
+
+    return verify

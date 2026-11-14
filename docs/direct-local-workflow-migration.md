@@ -229,3 +229,39 @@ to the entire shared fleet: shift final executable admission to the existing
 protected fleet process after the bounded ingress journal is installed.
 No ordinary job or customer-facing release acceptance follows from this
 source-only preparation.
+
+
+### Owner-pinned receiver ingress (source-only, 14 November)
+
+The new receiver path calls `load_released_ingress` rather than the historical
+`load_released_claim` queue writer. For a potentially eligible ClawSweeper
+push/PR it checks duplicate JSON keys, a narrow effect-free event envelope
+and the exact owner-pinned source/revocation state, then atomically stages the
+signed body in the existing webhook-delivery ledger. The existing wake/poll
+service remains the only trigger. It never opens `fleet.sqlite3`,
+`control.lock` or a GitHub provider client in this network-facing process;
+OpsTruth, AgentProof, feature pushes and draft/fork PRs retain wake-only
+behaviour.
+
+The historical direct SQLite receiver integration remains in source only for
+provenance and MUST NOT be installed. Fleet-side drain/claim, exact-source
+policy authorisation, protected trigger migration, installation and two
+ordinary real-job receipts remain separate unaccepted gates.
+
+
+### Existing-fleet consumer adapter, source-only (14 November)
+
+`scripts/ci/direct_local_ingress_reconcile.py` provides a **callable**, bounded
+consumer for the original fleet cycle to invoke under its existing owner lease.
+It loads the same owner-private release verifier, checks the clean exact Git
+HEAD and 0600 HMAC secret, opens only the existing delivery ledger and passes
+at most eight staged envelopes to the already reviewed fresh-GitHub-GET plus
+SQLite fleet claim. An envelope is purged only after a verified queue result.
+Interrupted, stale or unavailable provider readback remains safely staged for
+the existing natural timer; results include aggregate held/consumed counts
+but never payloads, signatures, credentials or exception details.
+
+It has no command-line worker, new database, new systemd unit, no independent
+timer and cannot publish a GitHub Actions required check. A separate
+**source-bound integration into the installed fleet controller** and installer
+authority are still required before this is a real operational path.

@@ -44,6 +44,44 @@ def needs_direct_local_claim(event, data):
     return True
 
 
+def unique_payload_object(pairs):
+    """Do not let duplicate JSON keys change webhook trust classification."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('ambiguous_webhook_json')
+        result[key] = value
+    return result
+
+
+def eligible_ordinary_shape(event, data):
+    """Cheap fail-closed envelope check; fleet still owns provider GET/policy."""
+    if event == 'push':
+        return (data.get('ref') == 'refs/heads/main'
+                and data.get('deleted') is False
+                and data.get('forced') is False
+                and isinstance(data.get('after'), str)
+                and re.fullmatch(r'[0-9a-f]{40}', data['after']) is not None)
+    if event != 'pull_request':
+        return False
+    pr = data.get('pull_request')
+    if not isinstance(pr, dict) or data.get('action') not in (
+            'opened', 'reopened', 'synchronize', 'ready_for_review'):
+        return False
+    head, base, user = pr.get('head'), pr.get('base'), pr.get('user')
+    return (type(pr.get('number')) is int and 1 <= pr['number'] <= 999999999
+            and pr.get('state') == 'open' and pr.get('draft') is False
+            and isinstance(user, dict) and user.get('login') == 'AyobamiH'
+            and isinstance(head, dict) and isinstance(base, dict)
+            and isinstance(head.get('sha'), str)
+            and re.fullmatch(r'[0-9a-f]{40}', head['sha']) is not None
+            and isinstance(head.get('repo'), dict)
+            and head['repo'].get('full_name') == 'AyobamiH/clawsweeper'
+            and isinstance(base.get('repo'), dict)
+            and base['repo'].get('full_name') == 'AyobamiH/clawsweeper'
+            and base.get('ref') == 'main')
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # The random, non-authentication owner marker distinguishes a webhook
@@ -65,45 +103,36 @@ class Handler(BaseHTTPRequestHandler):
         if not verify(self.headers, payload, self.server.secret):
             self.send_error(403)
             return
-        # When a pinned direct-local release is installed, persist the
-        # authenticated, fresh-source ordinary suite in the EXISTING fleet
-        # before accepting the webhook delivery or requesting a wake.
-        # This preserves a queued job across interruption after admission.
-        local_claim = getattr(self.server, 'direct_local_claim', None)
-        if local_claim is not None:
+        # The network-facing receiver can write only to its existing private
+        # delivery journal. Never invoke the SQLite fleet claim from here:
+        # the canonical fleet controller owns fleet.sqlite3/control.lock.
+        ordinary_args = {}
+        verify_ingress = getattr(self.server, 'direct_local_ingress_verify', None)
+        if verify_ingress is not None:
             try:
-                data = json.loads(payload)
+                data = json.loads(payload, object_pairs_hook=unique_payload_object)
                 repository = data['repository']['full_name']
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError, UnicodeDecodeError):
                 self.send_error(403)
                 return
-            # A feature-branch push, draft/fork PR or unrelated base can
-            # legitimately wake the old poller; none may admit an ordinary
-            # ClawSweeper job. Keep their established ledger behaviour.
-            # Protected-main/eligible-owner metadata is still checked by the
-            # authenticated provider adapter, including fail-closed errors.
+            event_name = self.headers.get('X-GitHub-Event', '')
             if (repository == 'AyobamiH/clawsweeper'
-                    and needs_direct_local_claim(
-                        self.headers.get('X-GitHub-Event', ''), data)):
-                # Match the existing delivery ledger BEFORE any queue effect.
+                    and needs_direct_local_claim(event_name, data)):
                 delivery_id = self.headers.get('X-GitHub-Delivery', '')
-                if not ledger_module.DELIVERY_ID.fullmatch(delivery_id.lower()):
+                if (not ledger_module.DELIVERY_ID.fullmatch(delivery_id.lower())
+                        or not eligible_ordinary_shape(event_name, data)):
                     self.send_error(403)
                     return
                 try:
-                    claimed = local_claim(
-                        body=payload, event_name=self.headers.get('X-GitHub-Event', ''),
-                        signature=self.headers.get('X-Hub-Signature-256', ''),
-                        delivery_id=self.headers.get('X-GitHub-Delivery', ''),
-                        secret=self.server.secret)
-                    if (claimed.get('fresh_provider_source_verified') is not True
-                            or claimed.get('suite') != 'linux-node24'
-                            or claimed.get('admission') not in ('queued', 'already_admitted')):
-                        raise RuntimeError('unverified_direct_local_admission')
+                    if verify_ingress() is not True:
+                        raise RuntimeError('unverified_owner_ingress_release')
                 except Exception:
-                    # Never wake or mark a delivery accepted on failed admission.
                     self.send_error(503)
                     return
+                ordinary_args = {
+                    'ordinary_signature': self.headers.get('X-Hub-Signature-256', ''),
+                    'ordinary_secret': self.server.secret,
+                }
         # GitHub redelivers the same signed event with the same delivery UUID.
         # A durable owner-only claim must exist before requesting any effect.
         # Unknown outcomes remain pending; the independent CI poll timer
@@ -111,7 +140,8 @@ class Handler(BaseHTTPRequestHandler):
         delivery_id = self.headers.get('X-GitHub-Delivery', '')
         event = self.headers.get('X-GitHub-Event', '')
         try:
-            outcome = self.server.ledger.claim(delivery_id, event, payload)
+            outcome = self.server.ledger.claim(delivery_id, event, payload,
+                                               **ordinary_args)
         except Exception:
             self.send_error(503)
             return
@@ -157,5 +187,5 @@ if __name__ == '__main__':
                    if Path(__file__).name == 'fleet_webhook_server.py'
                    else Path(__file__).parent / 'ci' / 'direct_local_receiver_integration.py')
         bridge = SourceFileLoader('direct_local_receiver_integration', str(sidecar)).load_module()
-        server.direct_local_claim = bridge.load_released_claim(Path(release_file))
+        server.direct_local_ingress_verify = bridge.load_released_ingress(Path(release_file))
     server.serve_forever()

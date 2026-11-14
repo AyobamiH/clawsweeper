@@ -191,7 +191,7 @@ class ReceiverTests(unittest.TestCase):
         self.root = tempfile.TemporaryDirectory()
         self.addCleanup(self.root.cleanup)
         self.secret=b's'*40
-        self.payload=b'{"repository":{"full_name":"AyobamiH/clawsweeper"},"after":"'+b'a'*40+b'"}'
+        self.payload=b'{"repository":{"full_name":"AyobamiH/clawsweeper"},"ref":"refs/heads/main","forced":false,"deleted":false,"after":"'+b'a'*40+b'"}'
         self.ledger = ledger_module.DeliveryLedger(Path(self.root.name)/'ledger')
         self.server = server_module.ThreadingHTTPServer(('127.0.0.1',0),server_module.Handler)
         self.server.secret=self.secret
@@ -266,36 +266,40 @@ class ReceiverTests(unittest.TestCase):
                 self.assertEqual(self.request(),503)
                 self.assertEqual(run.call_count,1)
 
-    def test_released_direct_local_claim_precedes_ledger_and_wake(self):
+    def test_released_ingress_stages_before_wake_without_fleet_writes(self):
         calls = []
         original = self.ledger.claim
         def ledger_claim(*args, **kwargs):
             calls.append('ledger')
+            self.assertEqual(kwargs['ordinary_secret'], self.secret)
+            self.assertEqual(kwargs['ordinary_signature'][:7], 'sha256=')
             return original(*args, **kwargs)
-        def local_claim(**kwargs):
-            calls.append('local')
-            self.assertEqual(kwargs['secret'], self.secret)
-            self.assertEqual(kwargs['event_name'], 'push')
-            return {'fresh_provider_source_verified': True,
-                    'suite': 'linux-node24', 'admission': 'queued'}
+        def verify():
+            calls.append('release')
+            return True
         def wake(*args, **kwargs):
             calls.append('wake')
             return SimpleNamespace(returncode=0)
-        self.server.direct_local_claim = local_claim
+        self.server.direct_local_ingress_verify = verify
         with patch.object(self.ledger,'claim',side_effect=ledger_claim):
             with patch.object(server_module.subprocess,'run',side_effect=wake):
                 self.assertEqual(self.request(),202)
-        self.assertEqual(calls,['local','ledger','wake'])
+        self.assertEqual(calls,['release','ledger','wake'])
+        staged = ledger_module.DeliveryLedger(self.ledger.directory).staged_ordinary()
+        self.assertEqual(len(staged),1)
+        self.assertEqual(staged[0]['delivery_id'],UUID)
+        self.assertEqual(staged[0]['body'],self.payload)
+        self.assertEqual(staged[0]['event'],'push')
 
-    def test_malformed_delivery_never_reaches_local_queue_claim(self):
-        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError('malformed webhook identifier reached queue'))
+    def test_malformed_delivery_never_reaches_ingress_or_queue(self):
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
+            AssertionError('malformed webhook identifier reached ingress'))
         with patch.object(server_module.subprocess,'run') as wake:
             self.assertEqual(self.request(delivery='-' * 36),403)
             wake.assert_not_called()
 
-    def test_direct_local_hold_never_marks_webhook_accepted_or_wakes(self):
-        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
+    def test_revoked_ingress_release_never_marks_webhook_accepted_or_wakes(self):
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
             RuntimeError('stale protected source'))
         with patch.object(self.ledger,'claim') as ledger_claim:
             with patch.object(server_module.subprocess,'run') as wake:
@@ -303,19 +307,20 @@ class ReceiverTests(unittest.TestCase):
                 ledger_claim.assert_not_called()
                 wake.assert_not_called()
 
-    def test_feature_push_keeps_legacy_wake_without_ordinary_job_claim(self):
-        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
-            AssertionError('feature push must never enter ordinary admission'))
+    def test_feature_push_keeps_legacy_wake_without_staged_ordinary(self):
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
+            AssertionError('feature push must never stage ordinary ingress'))
         event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
                  b'"ref":"refs/heads/feature-safe","after":"'+b'b'*40+b'"}')
         with patch.object(server_module.subprocess, 'run',
                           return_value=SimpleNamespace(returncode=0)) as wake:
             self.assertEqual(self.request(payload=event), 202)
             wake.assert_called_once()
+        self.assertEqual(self.ledger.staged_ordinary(),[])
 
-    def test_draft_or_fork_pr_keeps_legacy_wake_without_ordinary_claim(self):
-        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
-            AssertionError('ineligible PR must never enter ordinary admission'))
+    def test_draft_or_fork_pr_keeps_legacy_wake_without_ordinary_ingress(self):
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
+            AssertionError('ineligible PR must never enter ordinary ingress'))
         for payload, delivery in [
             ({'draft': True, 'user': {'login': 'AyobamiH'},
               'head': {'repo': {'full_name': 'AyobamiH/clawsweeper'}},
@@ -336,53 +341,81 @@ class ReceiverTests(unittest.TestCase):
                 self.assertEqual(self.request(
                     delivery=delivery, payload=body, event='pull_request'), 202)
                 wake.assert_called_once()
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+
+    def test_closed_pr_still_rejected_by_existing_authorisation(self):
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
+            AssertionError('unsupported event must not enter new ingress'))
+        import json
+        pr = {'number': 77, 'state': 'closed', 'draft': False,
+              'user': {'login': 'AyobamiH'},
+              'head': {'sha': 'a'*40,
+                       'repo': {'full_name': 'AyobamiH/clawsweeper'}},
+              'base': {'ref': 'main',
+                       'repo': {'full_name': 'AyobamiH/clawsweeper'}}}
+        body = json.dumps({'repository': {'full_name': 'AyobamiH/clawsweeper'},
+                           'action': 'closed', 'pull_request': pr}).encode()
+        with patch.object(server_module.subprocess, 'run') as wake:
+            self.assertEqual(self.request(delivery='a2b2ed01-9726-48fc-a119-7a50cd3bcc29',
+                                          payload=body, event='pull_request'), 403)
+            wake.assert_not_called()
+        self.assertEqual(self.ledger.staged_ordinary(), [])
 
     def test_incomplete_source_identity_stays_fail_closed(self):
-        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
-            RuntimeError('missing source identity is not a safe branch exception'))
+        self.server.direct_local_ingress_verify = lambda: True
         event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
                  b'"after":"'+b'b'*40+b'"}')
         with patch.object(self.ledger, 'claim') as claim:
             with patch.object(server_module.subprocess, 'run') as wake:
-                self.assertEqual(self.request(payload=event), 503)
+                self.assertEqual(self.request(payload=event), 403)
                 claim.assert_not_called()
                 wake.assert_not_called()
 
-    def test_forced_main_push_still_fails_closed_in_direct_local_claim(self):
-        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
-            RuntimeError('forced protected-main push is untrusted'))
+    def test_forced_main_push_still_fails_closed_before_ingress(self):
+        self.server.direct_local_ingress_verify = lambda: True
         event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
                  b'"ref":"refs/heads/main","forced":true,"after":"'+b'b'*40+b'"}')
         with patch.object(self.ledger, 'claim') as claim:
             with patch.object(server_module.subprocess, 'run') as wake:
-                self.assertEqual(self.request(payload=event), 503)
+                self.assertEqual(self.request(payload=event), 403)
                 claim.assert_not_called()
                 wake.assert_not_called()
 
-    def test_direct_local_claim_survives_uncertain_wake_without_replay(self):
-        calls = []
-        def local_claim(**kwargs):
-            calls.append(kwargs['delivery_id'])
-            return {'fresh_provider_source_verified': True,
-                    'suite': 'linux-node24', 'admission': 'already_admitted'}
-        self.server.direct_local_claim = local_claim
+    def test_ordinary_ingress_survives_uncertain_wake_without_replay(self):
+        calls=[]
+        def verify():
+            calls.append('verify')
+            return True
+        self.server.direct_local_ingress_verify=verify
         with patch.object(server_module.subprocess,'run',side_effect=TimeoutError('wake uncertain')) as wake:
             self.assertEqual(self.request(),503)
             self.assertEqual(self.request(),503)
             self.assertEqual(wake.call_count,1)
-        self.assertEqual(calls,[UUID,UUID])
+        self.assertEqual(calls,['verify','verify'])
+        staged=ledger_module.DeliveryLedger(self.ledger.directory).staged_ordinary()
+        self.assertEqual(len(staged),1)
+        self.assertEqual(staged[0]['delivery_id'],UUID)
 
-    def test_invalid_local_claim_proof_refuses_acceptance(self):
-        self.server.direct_local_claim = lambda **kwargs: {
-            'fresh_provider_source_verified': False, 'suite': 'linux-node24',
-            'admission': 'queued'}
+    def test_invalid_ingress_release_refuses_acceptance(self):
+        self.server.direct_local_ingress_verify = lambda: False
         with patch.object(server_module.subprocess,'run') as wake:
             self.assertEqual(self.request(),503)
             wake.assert_not_called()
 
+    def test_duplicate_webhook_keys_cannot_stage_ingress(self):
+        self.server.direct_local_ingress_verify=lambda:True
+        event=(b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
+               b'"repository":{"full_name":"AyobamiH/clawsweeper"},'
+               b'"ref":"refs/heads/main","deleted":false,"forced":false,'
+               b'"after":"'+b'a'*40+b'"}')
+        with patch.object(server_module.subprocess,'run') as wake:
+            self.assertEqual(self.request(payload=event),403)
+            wake.assert_not_called()
+        self.assertEqual(self.ledger.staged_ordinary(),[])
+
     def test_other_enrolled_repositories_use_existing_path(self):
-        self.server.direct_local_claim = lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError('wrong repository direct-local claim'))
+        self.server.direct_local_ingress_verify = lambda: (_ for _ in ()).throw(
+            AssertionError('wrong repository direct-local ingress'))
         other = self.payload.replace(b'AyobamiH/clawsweeper',b'AyobamiH/opstruth')
         with patch.object(server_module.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as wake:
             self.assertEqual(self.request(payload=other),202)

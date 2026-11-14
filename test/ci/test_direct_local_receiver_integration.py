@@ -67,6 +67,21 @@ class OwnerReleaseTests(unittest.TestCase):
         self.assertEqual(calls[0]["checkout"],self.root)
         self.assertEqual(calls[0]["fleet_root"],self.fleet)
 
+    def test_source_bound_ingress_only_verifies_no_fleet_claim(self):
+        hook = module.load_released_ingress(self.release)
+        self.assertIs(hook(), True)
+        self.assertEqual(list(self.fleet.iterdir()), [])
+        (self.moddir / "direct_local_provider_ref.py").write_text("changed")
+        with self.assertRaisesRegex(RuntimeError, "module_drift"):
+            hook()
+
+    def test_revoked_ingress_release_holds_without_replaying(self):
+        hook = module.load_released_ingress(self.release)
+        self.doc["commit"] = "a" * 40
+        self.save()
+        with self.assertRaisesRegex(RuntimeError, "revoked_or_changed"):
+            hook()
+
     def test_mutated_module_after_startup_refuses_call(self):
         calls = []
         hook = module.load_released_claim(
