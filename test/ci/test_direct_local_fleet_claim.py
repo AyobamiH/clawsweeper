@@ -131,6 +131,34 @@ class ExistingFleetAdmissionTests(unittest.TestCase):
         with sqlite3.connect(self.base / "fleet.sqlite3") as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM observations").fetchone()[0], 2)
 
+    def test_legacy_suite_same_sha_cannot_be_relabelled_as_event_bound(self):
+        # A polling CI job with the same ref/SHA/policy is real execution,
+        # but lacks this delivery's authenticated event identity.
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            db.execute(
+                "INSERT INTO jobs(id,repo,sha,suite,policy,ref,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                ("local-fleet-111111111111", router.REPO, self.head,
+                 claims.SUITE, claims.reviewed_policy_hash(self.policy),
+                 "main", "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"))
+        with self.assertRaisesRegex(Hold, "existing_suite_has_no_authenticated_claim"):
+            self.claim()
+        self.assertEqual(len(self.rows()), 1)
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM observations").fetchone()[0], 0)
+
+    def test_corrupt_prior_event_claim_cannot_relabel_existing_suite(self):
+        self.claim()
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            key, raw = db.execute("SELECT key,value FROM observations").fetchone()
+            record = json.loads(raw)
+            record["job_intents"] = [".github/workflows/ci.yml#sparse-repair-builds"]
+            db.execute("UPDATE observations SET value=? WHERE key=?",
+                       (json.dumps(record), key))
+        with self.assertRaisesRegex(Hold, "existing_suite_claim_provenance_mismatch"):
+            self.claim()
+        self.assertEqual(len(self.rows()), 1)
+
     def test_pr_two_intents_but_one_existing_suite(self):
         pr = {
             "repository": {"full_name": router.REPO}, "action": "synchronize",

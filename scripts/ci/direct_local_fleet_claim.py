@@ -143,6 +143,40 @@ def claim_existing_fleet_delivery(
                         raise Hold("existing_suite_queued_under_different_event_ref")
                     if existing["state"] not in ("queued", "running", "completed"):
                         raise Hold("existing_suite_terminal_state_not_replayable")
+                    # A legacy poller may have admitted the same SHA/suite
+                    # without an authenticated event. Never attach a new
+                    # delivery to that job: it would falsely convert old CI
+                    # execution into event-bound per-definition evidence.
+                    observations = db.execute(
+                        "SELECT value FROM observations "
+                        "WHERE key LIKE 'direct-local:%' LIMIT 2049"
+                    ).fetchall()
+                    if len(observations) > 2048:
+                        raise Hold("unbounded_existing_delivery_provenance")
+                    authenticated = False
+                    for observed in observations:
+                        try:
+                            evidence = json.loads(observed["value"])
+                        except (ValueError, TypeError) as exc:
+                            raise Hold("unreadable_existing_delivery_provenance") from exc
+                        if not isinstance(evidence, dict):
+                            raise Hold("unreadable_existing_delivery_provenance")
+                        if evidence.get("job_id") != existing["id"]:
+                            continue
+                        if (evidence.get("source_sha") != fresh_ref_sha
+                                or evidence.get("ref") != intent["source_ref"]
+                                or evidence.get("suite") != SUITE
+                                or evidence.get("event") != event_name
+                                or evidence.get("proof_kind") !=
+                                "authenticated_queue_admission_not_execution"
+                                or evidence.get("job_intents") !=
+                                [x["job"] for x in intent["intents"]]
+                                or not isinstance(evidence.get("delivery_sha256"), str)
+                                or not routing.HEX64.fullmatch(evidence["delivery_sha256"])):
+                            raise Hold("existing_suite_claim_provenance_mismatch")
+                        authenticated = True
+                    if not authenticated:
+                        raise Hold("existing_suite_has_no_authenticated_claim")
                     job_id, admission = existing["id"], "already_admitted"
                 else:
                     job_id = "local-fleet-" + uuid.uuid4().hex[:12]
