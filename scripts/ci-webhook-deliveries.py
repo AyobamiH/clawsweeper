@@ -4,6 +4,7 @@ An interrupted claim is deliberately held, not automatically replayed. The
 existing fleet poll timer reconciles missed events independently from GitHub.
 """
 import hashlib
+import hmac
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,8 @@ import time
 DELIVERY_ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 RETENTION_SECONDS = 30 * 86400
 MAX_RECORDS = 20000
+MAX_STAGED_ORDINARY = 128
+MAX_ORDINARY_BYTES = 65536
 
 
 class DeliveryLedger:
@@ -50,8 +53,28 @@ class DeliveryLedger:
                     fingerprint TEXT NOT NULL,
                     state TEXT NOT NULL CHECK(state IN ('pending','accepted')),
                     created_at INTEGER NOT NULL,
-                    accepted_at INTEGER
+                    accepted_at INTEGER,
+                    ordinary_event TEXT,
+                    ordinary_body BLOB,
+                    ordinary_signature TEXT,
+                    ordinary_state TEXT NOT NULL DEFAULT 'none'
+                        CHECK(ordinary_state IN ('none','staged','consumed'))
                 )''')
+                # Add optional ingress fields to an older owner ledger only
+                # during an explicitly installed receiver release. SQLite DDL
+                # is idempotent and retains existing immutable delivery rows.
+                existing = {row[1] for row in connection.execute(
+                    'PRAGMA table_info(deliveries)')}
+                for name, definition in (
+                    ('ordinary_event', 'TEXT'),
+                    ('ordinary_body', 'BLOB'),
+                    ('ordinary_signature', 'TEXT'),
+                    ('ordinary_state', "TEXT NOT NULL DEFAULT 'none'"),
+                ):
+                    if name not in existing:
+                        connection.execute(
+                            'ALTER TABLE deliveries ADD COLUMN ' + name +
+                            ' ' + definition)
         finally:
             os.umask(previous)
 
@@ -63,8 +86,27 @@ class DeliveryLedger:
         h.update(payload)
         return h.hexdigest()
 
-    def claim(self, delivery_id, event, payload, now=None):
+    @staticmethod
+    def _checked_ordinary_signature(event, payload, signature, secret):
+        # Keep the network-facing receiver limited to an authenticated,
+        # bounded ingress JOURNAL; the fleet alone owns executable admission.
+        if (event not in ('push', 'pull_request')
+                or not isinstance(payload, bytes)
+                or not 0 < len(payload) <= MAX_ORDINARY_BYTES
+                or not isinstance(signature, str)
+                or not isinstance(secret, bytes) or len(secret) < 32
+                or len(signature) != 71 or not signature.startswith('sha256=')):
+            return False
+        expected = 'sha256=' + hmac.new(secret, payload, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    def claim(self, delivery_id, event, payload, now=None, *,
+              ordinary_signature=None, ordinary_secret=None):
         if not isinstance(delivery_id, str) or not DELIVERY_ID.fullmatch(delivery_id.lower()):
+            return 'invalid'
+        ordinary = ordinary_signature is not None or ordinary_secret is not None
+        if ordinary and not self._checked_ordinary_signature(
+                event, payload, ordinary_signature, ordinary_secret):
             return 'invalid'
         delivery_id = delivery_id.lower()
         fingerprint = self.fingerprint(event, payload)
@@ -74,7 +116,8 @@ class DeliveryLedger:
             try:
                 connection.execute('''DELETE FROM deliveries WHERE id IN (
                     SELECT id FROM deliveries WHERE state='accepted'
-                    AND accepted_at < ? ORDER BY accepted_at LIMIT 128
+                    AND accepted_at < ? AND ordinary_state!='staged'
+                    ORDER BY accepted_at LIMIT 128
                 )''', (when - RETENTION_SECONDS,))
                 existing = connection.execute('SELECT fingerprint,state FROM deliveries WHERE id=?',
                                               (delivery_id,)).fetchone()
@@ -85,12 +128,66 @@ class DeliveryLedger:
                     count = connection.execute('SELECT count(*) FROM deliveries').fetchone()[0]
                     if count >= MAX_RECORDS:
                         result = 'capacity_held'
+                    elif ordinary and connection.execute(
+                            "SELECT count(*) FROM deliveries "
+                            "WHERE ordinary_state='staged'").fetchone()[0] >= MAX_STAGED_ORDINARY:
+                        result = 'ordinary_capacity_held'
                     else:
-                        connection.execute('INSERT INTO deliveries VALUES (?,?,?, ?,NULL)',
-                                           (delivery_id, fingerprint, 'pending', when))
+                        connection.execute('''INSERT INTO deliveries
+                            (id,fingerprint,state,created_at,accepted_at,
+                             ordinary_event,ordinary_body,ordinary_signature,
+                             ordinary_state)
+                            VALUES (?,?,?,?,NULL,?,?,?,?)''',
+                            (delivery_id, fingerprint, 'pending', when,
+                             event if ordinary else None,
+                             payload if ordinary else None,
+                             ordinary_signature if ordinary else None,
+                             'staged' if ordinary else 'none'))
                         result = 'claimed'
                 connection.execute('COMMIT')
                 return result
+            except BaseException:
+                connection.execute('ROLLBACK')
+                raise
+
+    def staged_ordinary(self, limit=16):
+        """Read bounded, already-authenticated ingress; never execute here.
+
+        The existing fleet's independently released controller must perform
+        fresh GitHub GET and source-bound SQLite admission before consuming.
+        Values include signed delivery bytes: they are private, NEVER logs.
+        """
+        if not isinstance(limit, int) or not 1 <= limit <= 32:
+            raise RuntimeError('unsafe_ordinary_ingress_limit')
+        with self._connect() as connection:
+            return [
+                {'delivery_id': row[0], 'fingerprint': row[1],
+                 'event': row[2], 'body': bytes(row[3]),
+                 'signature': row[4]}
+                for row in connection.execute(
+                    """SELECT id,fingerprint,ordinary_event,ordinary_body,
+                              ordinary_signature FROM deliveries
+                       WHERE ordinary_state='staged'
+                       ORDER BY created_at,id LIMIT ?""", (limit,))
+            ]
+
+    def consume_ordinary(self, delivery_id, fingerprint):
+        """CAS and purge a staged envelope ONLY after a verified queue claim."""
+        if not isinstance(delivery_id, str) or not DELIVERY_ID.fullmatch(
+                delivery_id.lower()) or not isinstance(fingerprint, str):
+            raise RuntimeError('unsafe_ordinary_ingress_ack_identity')
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            try:
+                result = connection.execute(
+                    """UPDATE deliveries
+                       SET ordinary_body=NULL,ordinary_signature=NULL,
+                           ordinary_state='consumed'
+                       WHERE id=? AND fingerprint=?
+                         AND ordinary_state='staged'""",
+                    (delivery_id.lower(), fingerprint))
+                connection.execute('COMMIT')
+                return result.rowcount == 1
             except BaseException:
                 connection.execute('ROLLBACK')
                 raise

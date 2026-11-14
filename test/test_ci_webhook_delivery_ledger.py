@@ -2,6 +2,7 @@ import concurrent.futures
 from http.client import HTTPConnection
 import hashlib
 import hmac
+import sqlite3
 import importlib.util
 from pathlib import Path
 import os
@@ -69,6 +70,111 @@ class DeliveryLedgerTests(unittest.TestCase):
         os.chmod(self.path/'deliveries.sqlite3',0o644)
         with self.assertRaisesRegex(RuntimeError,'unsafe_delivery_database_permissions'):
             self.ledger.claim(UUID,'push',b'payload')
+
+    def test_schema_upgrade_preserves_legacy_claims(self):
+        old = Path(self.root.name) / 'old-delivery-ledger'
+        old.mkdir(mode=0o700)
+        db_path = old / 'deliveries.sqlite3'
+        with sqlite3.connect(db_path) as db:
+            db.execute("""CREATE TABLE deliveries (
+                id TEXT PRIMARY KEY NOT NULL, fingerprint TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('pending','accepted')),
+                created_at INTEGER NOT NULL, accepted_at INTEGER)""")
+            body = b'old'
+            db.execute(
+                'INSERT INTO deliveries VALUES (?,?,?,?,?)',
+                (UUID, ledger_module.DeliveryLedger.fingerprint(
+                    'push', body), 'accepted', 10, 11))
+        db_path.chmod(0o600)
+        migrated = ledger_module.DeliveryLedger(old)
+        self.assertEqual(migrated.claim(UUID, 'push', b'old', now=12), 'duplicate')
+        self.assertEqual(migrated.claim(UUID, 'push', b'changed', now=12), 'mismatch')
+        self.assertEqual(migrated.staged_ordinary(), [])
+        with sqlite3.connect(db_path) as db:
+            row = db.execute(
+                'SELECT id,state,ordinary_state FROM deliveries'
+            ).fetchone()
+        self.assertEqual(row, (UUID, 'accepted', 'none'))
+
+    def test_staged_ordinary_delivery_retained_after_receiver_restart(self):
+        body = b'{"repository":{"full_name":"AyobamiH/clawsweeper"},' + (
+            b'"ref":"refs/heads/main","after":"' + b'a' * 40 + b'"}')
+        secret = b's' * 40
+        signature = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
+        self.assertEqual(self.ledger.claim(
+            UUID, 'push', body, ordinary_signature=signature,
+            ordinary_secret=secret, now=1), 'claimed')
+        self.ledger.accept(UUID, 'push', body, now=2)
+        restarted = ledger_module.DeliveryLedger(self.path)
+        self.assertEqual(restarted.claim(
+            UUID, 'push', body, ordinary_signature=signature,
+            ordinary_secret=secret, now=ledger_module.RETENTION_SECONDS * 10),
+            'duplicate')
+        staged = restarted.staged_ordinary()
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(staged[0]['delivery_id'], UUID)
+        self.assertEqual(staged[0]['event'], 'push')
+        self.assertEqual(staged[0]['body'], body)
+        self.assertEqual(staged[0]['signature'], signature)
+        self.assertFalse(restarted.consume_ordinary(UUID, '0' * 64))
+        self.assertTrue(restarted.consume_ordinary(UUID, staged[0]['fingerprint']))
+        self.assertFalse(restarted.consume_ordinary(UUID, staged[0]['fingerprint']))
+        self.assertEqual(restarted.staged_ordinary(), [])
+        with sqlite3.connect(restarted.db) as db:
+            state, payload, saved_signature = db.execute(
+                'SELECT ordinary_state, ordinary_body, ordinary_signature '
+                'FROM deliveries WHERE id=?', (UUID,)).fetchone()
+        self.assertEqual(state, 'consumed')
+        self.assertIsNone(payload)
+        self.assertIsNone(saved_signature)
+
+    def test_bad_hmac_or_wrong_event_cannot_persist_ordinary_payload(self):
+        secret = b's' * 40
+        body = b'{"repository":{"full_name":"AyobamiH/clawsweeper"}}'
+        sig = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
+        self.assertEqual(self.ledger.claim(
+            UUID, 'push', body, ordinary_signature='sha256=' + '0' * 64,
+            ordinary_secret=secret), 'invalid')
+        self.assertEqual(self.ledger.claim(
+            UUID, 'issues', body, ordinary_signature=sig,
+            ordinary_secret=secret), 'invalid')
+        self.assertEqual(self.ledger.claim(
+            UUID, 'push', body + b' ', ordinary_signature=sig,
+            ordinary_secret=secret), 'invalid')
+        self.assertEqual(self.ledger.claim(
+            UUID, 'push', b'x' * (ledger_module.MAX_ORDINARY_BYTES + 1),
+            ordinary_signature=sig, ordinary_secret=secret), 'invalid')
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+        with sqlite3.connect(self.ledger.db) as db:
+            self.assertEqual(db.execute(
+                'SELECT count(*) FROM deliveries').fetchone()[0], 0)
+
+    def test_staged_ordinary_capacity_holds_without_dropping_existing(self):
+        secret = b's' * 40
+        body = b'{}'
+        sig = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
+        with patch.object(ledger_module, 'MAX_STAGED_ORDINARY', 1):
+            self.assertEqual(self.ledger.claim(
+                UUID, 'push', body, ordinary_signature=sig,
+                ordinary_secret=secret), 'claimed')
+            other = '72b2ed01-9726-48fc-a119-7a50cd3bcc29'
+            self.assertEqual(self.ledger.claim(
+                other, 'push', body, ordinary_signature=sig,
+                ordinary_secret=secret), 'ordinary_capacity_held')
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+        self.assertEqual(self.ledger.claim(UUID, 'push', b'changed'), 'mismatch')
+        with self.assertRaisesRegex(RuntimeError, 'unsafe_ordinary_ingress_limit'):
+            self.ledger.staged_ordinary(1000)
+
+    def test_legacy_delivery_does_not_create_ordinary_payload(self):
+        self.assertEqual(self.ledger.claim(UUID, 'push', b'{}'), 'claimed')
+        self.ledger.accept(UUID, 'push', b'{}')
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+        with sqlite3.connect(self.ledger.db) as db:
+            state, body = db.execute(
+                'SELECT ordinary_state,ordinary_body FROM deliveries '
+                'WHERE id=?', (UUID,)).fetchone()
+        self.assertEqual((state, body), ('none', None))
 
     def test_refuses_symlinked_database(self):
         external=Path(self.root.name)/'external'

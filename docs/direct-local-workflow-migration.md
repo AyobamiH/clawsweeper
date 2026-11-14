@@ -193,3 +193,39 @@ At startup and before every admitted ClawSweeper event, the sidecar checks relea
 The webhook delivery UUID is now validated against the existing canonical UUID-format ledger before an event can enter the queue. This prevents accepting arbitrary 36-character strings as job identifiers ahead of the delivery-ledger check. Tests cover changed code after startup, a mismatched release SHA, unsafe config permissions, malformed release documents, call ordering, failed admission, uncertain wake and unchanged handling for other enrolled repositories.
 
 **Release boundary remains open:** exact source is not integrated into protected main or installed on `web`; local ordinary jobs are not yet accepted. Preserve draft PR #114 and its historical `pull_request_target` failures. Do not create another PR, edit protected triggers, or relax CodeQL requirements just to install this work.
+
+### Crash-durable ingress in the existing delivery ledger (source only)
+
+The owned \`scripts/ci-webhook-deliveries.py\` source now supports an **optional**
+bounded \`ordinary_signature\` + \`ordinary_secret\` argument on its existing
+delivery \`claim\`. A valid HMAC, original delivery UUID, original event type and
+no more than 64 KiB of event bytes may be atomically stored in the **same**
+\`webhook-deliveries/deliveries.sqlite3\` row as the existing webhook claim.
+Only 128 staged ClawSweeper ordinary intents may be retained. Staged entries
+survive restarts and the ordinary 30-day accepted-delivery pruning; an
+idempotent compare-and-swap consumption clears the private payload and
+signature **only after** the fleet has independently verified a durable claim.
+The source includes a conservative, idempotent schema upgrade preserving old
+delivery identities and untouched legacy wake-only behaviour.
+
+This is an **ingress journal, not a second runnable queue**. It has no worker,
+timer, GitHub provider action, or authority to execute a job. The code does
+not install itself and is not yet called from the live receiver or fleet. Its
+private staged event bodies must never appear in diagnostics or published
+receipts. A full staged ingress requires owner-bound release installation and
+the existing fleet cycle to re-read the exact GitHub source, atomically claim
+\`fleet.sqlite3\` under \`control.lock\`, and consume the original delivery only
+after a verified queue receipt. A missing provider GET or unverified source
+must leave the ingress held and replay-safe.
+
+**Verified cutover constraint (14 November):** the installed
+\`local-ci-webhook.service\` uses \`ProtectHome=read-only\`,
+\`ProtectSystem=strict\` and restricts writes to
+\`~/.local/share/local-ci/webhook-deliveries\`. The older proposed
+\`direct_local_receiver_integration.py\` path tries to open \`fleet.sqlite3\`
+and \`control.lock\` directly in the network-facing receiver; that call must
+**not** be installed as-is. Do not broaden the receiver's \`ReadWritePaths\`
+to the entire shared fleet: shift final executable admission to the existing
+protected fleet process after the bounded ingress journal is installed.
+No ordinary job or customer-facing release acceptance follows from this
+source-only preparation.
