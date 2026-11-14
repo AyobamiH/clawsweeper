@@ -303,3 +303,31 @@ reviewed frozen fleet manifest, restricted unit environment for the existing
 controller and receiver, controlled policy pin, failure rollback, natural
 webhook, durable job receipt and fresh provider readback. Do not copy the
 rendered code to the installed 2026.11.11-r1 controller as a manual shortcut.
+
+
+### Source-only shared-fleet isolation after release revocation (14 November)
+
+The exact-tree direct_local_fleet_cycle_wiring.py renderer now confines a
+ClawSweeper-only invalid/revoked ingress release to a structured, allowlisted
+**ClawSweeper hold**, rather than failing the entire shared fleet cycle. It
+excludes ClawSweeper from ordinary discovery, detached admission, inline and
+parallel job selection without editing the installed policy or existing queued
+records. The detached worker entrypoint independently verifies the same
+owner-pinned release for ClawSweeper jobs; unrelated repository workers do
+not acquire ClawSweeper credentials, release dependencies or failure modes.
+No release-path exception text or authenticated event body is printed.
+
+This is a **source-only proposed renderer**, not an installation. It verifies
+an exact previous fleet_ci.py SHA and every substitution anchor before
+producing executable Python. A drifted controller is a hold. Runtime
+no-provider tests cover revoked release, non-ClawSweeper continuation,
+queued selection and detached-worker isolation. The source renderer does
+not create a worker, queue, provider action or status check.
+
+The original signed ingress, intact webhook ledger, source-pinned SQLite
+claim and eight-stage suite receipt remain preserved separately. Before a
+real cutover, review/sign the new exact source, run the changed-tree suite,
+install the owner-bound receiver/fleet release and policy in one controlled
+transaction, verify its service sandbox, and prove a natural eligible
+webhook-to-ordinary-job receipt. This statement grants no protected-main,
+paid-runner or provider-effect authority.
