@@ -287,3 +287,19 @@ jobs, and dispatch through the unchanged capacity-limited execution path.
 The ingress adapter's consumed count means a verified SQLite **admission**,
 not a passing test or GitHub Actions check. This source is not installed;
 no live fleet policy, timer, protected branch or webhook behaviour was changed.
+
+### Exact frozen fleet-cycle wiring (source-only, 14 November)
+
+The direct_local_fleet_cycle_wiring.py helper produces a deterministic
+in-memory proposal for the EXISTING fleet_ci.py cycle. It requires the exact
+frozen-controller digest; the hook executes only on web for discovery/cycle,
+after setup() and before the canonical core.lock(). It remains OFF without
+the owner's bound direct-local release environment, and checks the exact
+installed ingress/verifier module digests before executing their bytes.
+It does not install, replace or restart any fleet process.
+
+A real release still requires source-specific authorisation, a signed and
+reviewed frozen fleet manifest, restricted unit environment for the existing
+controller and receiver, controlled policy pin, failure rollback, natural
+webhook, durable job receipt and fresh provider readback. Do not copy the
+rendered code to the installed 2026.11.11-r1 controller as a manual shortcut.
