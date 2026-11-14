@@ -178,6 +178,16 @@ The reviewed receiver source `scripts/ci-webhook-server.py` now has an **OFF-by-
 
 Activation is deliberately separate from committing this source. The existing fleet owner must install the exact reviewed receiver code and the pinned sidecar `scripts/ci/direct_local_receiver_integration.py` (installed sibling name `fleet_direct_local_receiver_integration.py`), then supply the **0600 owner-only** JSON file via `FLEET_DIRECT_LOCAL_CLAWSWEEPER_RELEASE` to the existing service. Its schema `clawsweeper.direct-local-owner-release.v1` requires `repo`, `checkout`, `commit`, `fleet_root`, and exactly five SHA-256 module entries for `scripts/ci/direct_local_provider_ref.py`, `direct_local_fleet_claim.py`, `direct_local_event_admission.py`, `direct_local_workflow.py`, and `estate_policy.py`. The owner must separately establish signed-source release authority and confirm the release file is bound to the installed receiver; the JSON does not grant its own authorisation.
 
+The original receiver's wake-only handling remains intact for provably
+ineligible ClawSweeper feature-branch pushes, draft/fork PRs and PRs against
+other bases; these events **never** enter the new ordinary-job claim. This
+avoids turning legitimate existing webhook deliveries into repeated 503s
+after the opt-in release. A protected-main push or potentially eligible PR
+with missing/malformed trust metadata still enters the authenticated
+admission boundary and fails closed: it cannot silently become a wake-only
+event. Focused HTTP tests cover the two paths and preserve the existing
+deduplication ledger semantics.
+
 At startup and before every admitted ClawSweeper event, the sidecar checks release-file revocation/replacement, module hashes, file ownership, exact clean Git HEAD and the already-selected fleet path. Missing, drifted or untrusted source **holds** the event and refuses the wake; it never silently falls back to legacy ClawSweeper behaviour while activated. A queue claim may safely survive a failed delivery-ledger commit or uncertain systemd wake, but that outcome remains a local queue admission, **not** a passing workflow job. The existing timed fleet poll can independently discover eligible work. Do not enable the hook while the installed source-policy pin is still the older main revision; that must be authorised and reconciled first.
 
 The webhook delivery UUID is now validated against the existing canonical UUID-format ledger before an event can enter the queue. This prevents accepting arbitrary 36-character strings as job identifiers ahead of the delivery-ledger check. Tests cover changed code after startup, a mismatched release SHA, unsafe config permissions, malformed release documents, call ordering, failed admission, uncertain wake and unchanged handling for other enrolled repositories.

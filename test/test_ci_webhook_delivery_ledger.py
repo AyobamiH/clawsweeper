@@ -95,11 +95,11 @@ class ReceiverTests(unittest.TestCase):
         self.addCleanup(lambda:(self.server.shutdown(),thread.join(timeout=3),self.server.server_close()))
         self.port=self.server.server_port
 
-    def request(self, delivery=UUID, payload=None, signature=None):
+    def request(self, delivery=UUID, payload=None, signature=None, event='push'):
         body=self.payload if payload is None else payload
         signature=signature or 'sha256='+hmac.new(self.secret,body,hashlib.sha256).hexdigest()
         con=HTTPConnection('127.0.0.1',self.port,timeout=3)
-        con.request('POST','/github',body=body,headers={'X-GitHub-Event':'push','X-GitHub-Delivery':delivery,
+        con.request('POST','/github',body=body,headers={'X-GitHub-Event':event,'X-GitHub-Delivery':delivery,
                          'X-Hub-Signature-256':signature,'Content-Type':'application/json'})
         out=con.getresponse()
         status=out.status
@@ -195,6 +195,62 @@ class ReceiverTests(unittest.TestCase):
             with patch.object(server_module.subprocess,'run') as wake:
                 self.assertEqual(self.request(),503)
                 ledger_claim.assert_not_called()
+                wake.assert_not_called()
+
+    def test_feature_push_keeps_legacy_wake_without_ordinary_job_claim(self):
+        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
+            AssertionError('feature push must never enter ordinary admission'))
+        event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
+                 b'"ref":"refs/heads/feature-safe","after":"'+b'b'*40+b'"}')
+        with patch.object(server_module.subprocess, 'run',
+                          return_value=SimpleNamespace(returncode=0)) as wake:
+            self.assertEqual(self.request(payload=event), 202)
+            wake.assert_called_once()
+
+    def test_draft_or_fork_pr_keeps_legacy_wake_without_ordinary_claim(self):
+        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
+            AssertionError('ineligible PR must never enter ordinary admission'))
+        for payload, delivery in [
+            ({'draft': True, 'user': {'login': 'AyobamiH'},
+              'head': {'repo': {'full_name': 'AyobamiH/clawsweeper'}},
+              'base': {'ref': 'main'}},
+             '72b2ed01-9726-48fc-a119-7a50cd3bcc29'),
+            ({'draft': False, 'user': {'login': 'another-owner'},
+              'head': {'repo': {'full_name': 'another-owner/clawsweeper'}},
+              'base': {'ref': 'main'}},
+             '82b2ed01-9726-48fc-a119-7a50cd3bcc29'),
+        ]:
+            import json
+            body = json.dumps({
+                'repository': {'full_name': 'AyobamiH/clawsweeper'},
+                'action': 'opened', 'pull_request': payload,
+            }).encode()
+            with patch.object(server_module.subprocess, 'run',
+                              return_value=SimpleNamespace(returncode=0)) as wake:
+                self.assertEqual(self.request(
+                    delivery=delivery, payload=body, event='pull_request'), 202)
+                wake.assert_called_once()
+
+    def test_incomplete_source_identity_stays_fail_closed(self):
+        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
+            RuntimeError('missing source identity is not a safe branch exception'))
+        event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
+                 b'"after":"'+b'b'*40+b'"}')
+        with patch.object(self.ledger, 'claim') as claim:
+            with patch.object(server_module.subprocess, 'run') as wake:
+                self.assertEqual(self.request(payload=event), 503)
+                claim.assert_not_called()
+                wake.assert_not_called()
+
+    def test_forced_main_push_still_fails_closed_in_direct_local_claim(self):
+        self.server.direct_local_claim = lambda **_: (_ for _ in ()).throw(
+            RuntimeError('forced protected-main push is untrusted'))
+        event = (b'{"repository":{"full_name":"AyobamiH/clawsweeper"},'
+                 b'"ref":"refs/heads/main","forced":true,"after":"'+b'b'*40+b'"}')
+        with patch.object(self.ledger, 'claim') as claim:
+            with patch.object(server_module.subprocess, 'run') as wake:
+                self.assertEqual(self.request(payload=event), 503)
+                claim.assert_not_called()
                 wake.assert_not_called()
 
     def test_direct_local_claim_survives_uncertain_wake_without_replay(self):

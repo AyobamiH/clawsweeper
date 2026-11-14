@@ -15,6 +15,35 @@ wakeup = SourceFileLoader('wakeup', str(Path(__file__).with_name('fleet_webhook_
 verify = wakeup.authorised
 ledger_module = SourceFileLoader('ci_webhook_deliveries', str(Path(__file__).with_name('ci-webhook-deliveries.py'))).load_module()
 
+def needs_direct_local_claim(event, data):
+    """Keep historical wake-only events out of ordinary-job admission.
+
+    Only *provably ineligible* events bypass the direct-local path. Missing or
+    malformed identity on a possibly eligible event must still fail closed in
+    the authenticated provider/queue adapter, not silently become a wake.
+    """
+    if event == 'push':
+        ref = data.get('ref')
+        return not isinstance(ref, str) or ref == 'refs/heads/main'
+    if event != 'pull_request':
+        return False
+    pr = data.get('pull_request')
+    if not isinstance(pr, dict):
+        return True
+    if pr.get('draft') is True:
+        return False
+    for value, expected in (
+        (pr.get('user', {}).get('login') if isinstance(pr.get('user'), dict) else None, 'AyobamiH'),
+        (pr.get('head', {}).get('repo', {}).get('full_name')
+         if isinstance(pr.get('head'), dict) and
+         isinstance(pr['head'].get('repo'), dict) else None, 'AyobamiH/clawsweeper'),
+        (pr.get('base', {}).get('ref') if isinstance(pr.get('base'), dict) else None, 'main'),
+    ):
+        if isinstance(value, str) and value != expected:
+            return False
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # The random, non-authentication owner marker distinguishes a webhook
@@ -43,11 +72,19 @@ class Handler(BaseHTTPRequestHandler):
         local_claim = getattr(self.server, 'direct_local_claim', None)
         if local_claim is not None:
             try:
-                repository = json.loads(payload)['repository']['full_name']
+                data = json.loads(payload)
+                repository = data['repository']['full_name']
             except (KeyError, TypeError, ValueError):
                 self.send_error(403)
                 return
-            if repository == 'AyobamiH/clawsweeper':
+            # A feature-branch push, draft/fork PR or unrelated base can
+            # legitimately wake the old poller; none may admit an ordinary
+            # ClawSweeper job. Keep their established ledger behaviour.
+            # Protected-main/eligible-owner metadata is still checked by the
+            # authenticated provider adapter, including fail-closed errors.
+            if (repository == 'AyobamiH/clawsweeper'
+                    and needs_direct_local_claim(
+                        self.headers.get('X-GitHub-Event', ''), data)):
                 # Match the existing delivery ledger BEFORE any queue effect.
                 delivery_id = self.headers.get('X-GitHub-Delivery', '')
                 if not ledger_module.DELIVERY_ID.fullmatch(delivery_id.lower()):
