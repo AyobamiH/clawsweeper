@@ -769,7 +769,7 @@ test(
         assert.deepEqual(matches, []);
         for (const pid of backgroundPids) {
           assert.equal(Number.isSafeInteger(pid), true);
-          assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+          assertTerminatedOrZombie(pid);
         }
       }
     } finally {
@@ -897,7 +897,7 @@ test(
         matches = processesContaining(processToken);
       }
       assert.deepEqual(matches, []);
-      assert.throws(() => process.kill(backgroundPid, 0), { code: "ESRCH" });
+      assertTerminatedOrZombie(backgroundPid);
     } finally {
       if (backgroundPid === undefined && existsSync(join(root, pidPath))) {
         backgroundPid = Number.parseInt(readFileSync(join(root, pidPath), "utf8"), 10);
@@ -1139,8 +1139,8 @@ test(
         matches = processesContaining(processToken);
       }
       assert.deepEqual(matches, []);
-      assert.throws(() => process.kill(originalPid, 0), { code: "ESRCH" });
-      assert.throws(() => process.kill(diversionPid, 0), { code: "ESRCH" });
+      assertTerminatedOrZombie(originalPid);
+      assertTerminatedOrZombie(diversionPid);
       assert.notEqual(
         mediaProofCommandRunner("tmux", ["has-session", "-t", terminalSession], {
           cwd: root,
@@ -1479,6 +1479,43 @@ process.exit(process.argv.includes('fail') ? 7 : 0);
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
+
+/**
+ * Linux may retain an already-killed, orphaned child as a zombie until its
+ * parent reaps it (notably under WSL init). kill(pid, 0) still succeeds for a
+ * zombie, but the process has no executable state or live descriptors.
+ * Refuse running, stopped, permission-denied or reused PIDs; elsewhere keep
+ * the original strict ESRCH requirement. A zombie is NOT a passed cleanup
+ * receipt unless the caller has separately proved the token/lease is gone.
+ */
+function assertTerminatedOrZombie(pid: number): void {
+  assert.equal(Number.isSafeInteger(pid) && pid > 0, true);
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+    return;
+  }
+  if (process.platform === "linux") {
+    let procStat: string;
+    try {
+      procStat = readFileSync("/proc/" + pid + "/stat", "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    const closingParen = procStat.lastIndexOf(") ");
+    assert.ok(closingParen > 0, "unrecognised process stat record");
+    const state = procStat[closingParen + 2];
+    assert.ok(state === "Z" || state === "X", "process still alive: " + pid);
+    return;
+  }
+  assert.fail("process still exists after cleanup: " + pid);
+}
+
+test("terminal cleanup assertion refuses an actually running PID", () => {
+  assert.throws(() => assertTerminatedOrZombie(process.pid), /process still alive:/);
+});
 
 function processesContaining(fragment: string): string[] {
   // Filter before capture so unrelated long command lines cannot overflow the test buffer.
