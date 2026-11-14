@@ -265,3 +265,25 @@ It has no command-line worker, new database, new systemd unit, no independent
 timer and cannot publish a GitHub Actions required check. A separate
 **source-bound integration into the installed fleet controller** and installer
 authority are still required before this is a real operational path.
+
+### Exact existing fleet-cycle lock placement (14 November)
+
+The direct_local_ingress_reconcile.py module is the **existing fleet's pre-lock
+admission hook**, not a second worker. Integrate the reviewed, source-bound
+call in the installed fleet_ci.py cycle **before** the existing core.lock()
+section, and only after the authorised receiver/release
+and policy source pin exist. core.lock() holds the canonical exclusive
+control.lock; the ordinary SQLite claim takes this same lock itself.
+Calling reconciliation **inside** that owner section attempts a second
+exclusive flock on another descriptor, which blocks even within the same
+process. The new exact-source preflight refuses that incorrect placement
+before reading staged envelopes or making a provider GET. An unavailable,
+unowned, changed or competing lock is a hold; no new queue is created and no
+effectful retry is permitted.
+
+When the pre-lock hook returns, the existing fleet cycle must still acquire
+its original lock, reconcile existing owners and receipts, discover eligible
+jobs, and dispatch through the unchanged capacity-limited execution path.
+The ingress adapter's consumed count means a verified SQLite **admission**,
+not a passing test or GitHub Actions check. This source is not installed;
+no live fleet policy, timer, protected branch or webhook behaviour was changed.

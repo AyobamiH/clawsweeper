@@ -1,4 +1,5 @@
 """No-provider source-only proof that the existing fleet drains its ingress."""
+import fcntl
 import hashlib
 import hmac
 import importlib.util
@@ -50,6 +51,7 @@ class ExistingFleetIngressTests(unittest.TestCase):
                         "commit", "-qm", "source"], check=True)
         self.fleet = self.root / "fleet"
         self.fleet.mkdir()
+        (self.fleet / "control.lock").touch(mode=0o600)
         self.release_file = self.root / "release.json"
         cfg = {"schema": release.SCHEMA, "repo": "AyobamiH/clawsweeper",
                "checkout": str(self.checkout), "fleet_root": str(self.fleet),
@@ -157,6 +159,46 @@ class ExistingFleetIngressTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "missing_existing_webhook_ingress_ledger"):
             self.drain(self.accepted)
         self.assertFalse((self.ledger_dir / "deliveries.sqlite3").exists())
+
+    def test_canonical_fleet_lock_must_not_be_nested_in_the_same_cycle(self):
+        self.stage()
+        lock_path = self.fleet / "control.lock"
+        calls = []
+        def fake_claim(**kwargs):
+            calls.append(kwargs)
+            return self.accepted()
+        fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(
+                RuntimeError, "ingress_must_run_before_canonical_fleet_lock"
+            ):
+                self.drain(fake_claim)
+            self.assertEqual(calls, [])
+            self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        result = self.drain(fake_claim)
+        self.assertEqual(result["consumed"], 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+
+    def test_absent_or_symlinked_fleet_lock_holds_before_queue_claim(self):
+        self.stage()
+        path = self.fleet / "control.lock"
+        seen = []
+        path.unlink()
+        with self.assertRaisesRegex(RuntimeError, "missing_or_untrusted_canonical_fleet_lock"):
+            self.drain(lambda **kw: seen.append(kw))
+        self.assertEqual(seen, [])
+        target = self.root / "foreign-lock"
+        target.write_text("")
+        path.symlink_to(target)
+        with self.assertRaisesRegex(RuntimeError, "missing_or_untrusted_canonical_fleet_lock"):
+            self.drain(lambda **kw: seen.append(kw))
+        self.assertEqual(seen, [])
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
 
     def test_batch_limit_must_be_small_and_no_separate_scheduler(self):
         with self.assertRaisesRegex(RuntimeError, "reconciliation_batch"):

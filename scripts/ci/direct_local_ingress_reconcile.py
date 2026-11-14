@@ -8,6 +8,7 @@ Do not install a separate service or run it as a standalone job driver.
 """
 from __future__ import annotations
 
+import fcntl
 import importlib.util
 import os
 from pathlib import Path
@@ -16,6 +17,45 @@ import sys
 
 MAX_BATCH = 8
 SCHEMA = "clawsweeper.existing-fleet-ingress-reconcile.v1"
+
+
+def _require_prelock_fleet_phase(root: Path) -> None:
+    """Do not deadlock the existing fleet cycle's non-reentrant control.lock.
+
+    The fleet's core.lock() already owns an exclusive flock while discovery
+    and execution run. The ordinary SQLite claim independently acquires that
+    same lock. Therefore ingress reconciliation belongs in the existing
+    fleet_ci.py cycle BEFORE core.lock(), never inside it. An active
+    different owner also causes a fail-closed hold, not competing admission.
+    This probe does not create or permanently retain a lock or queue.
+    """
+    path = Path(root) / "control.lock"
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("missing_or_untrusted_canonical_fleet_lock")
+    info = path.stat()
+    if (info.st_uid != os.getuid()
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise RuntimeError("untrusted_canonical_fleet_lock")
+    fd = None
+    acquired = False
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+        current = os.fstat(fd)
+        if (current.st_ino, current.st_dev) != (info.st_ino, info.st_dev):
+            raise RuntimeError("canonical_fleet_lock_changed")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("ingress_must_run_before_canonical_fleet_lock") from exc
+        acquired = True
+    except OSError as exc:
+        raise RuntimeError("canonical_fleet_lock_unavailable") from exc
+    finally:
+        if fd is not None:
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
 
 def _private_secret(path: Path) -> bytes:
@@ -74,6 +114,9 @@ def reconcile_existing_fleet_ingress(
     if (Path(ledger_dir).absolute() != expected_ledger
             or Path(secret_file).absolute() != expected_secret):
         raise RuntimeError("unrecognised_existing_fleet_ingress_paths")
+    # The claim's canonical flock is not re-entrant. Validate the existing
+    # fleet's pre-lock phase before inspecting staged bytes or making a GET.
+    _require_prelock_fleet_phase(fleet_root)
     if (expected_ledger.is_symlink() or not expected_ledger.is_dir()
             or (expected_ledger / "deliveries.sqlite3").is_symlink()
             or not (expected_ledger / "deliveries.sqlite3").is_file()):
