@@ -64,6 +64,7 @@ function staticImports(code: string): string[] {
   // rather than silently omit executable modules from the integrity closure.
   // Reject multiple declarations on one line for the same reason.
   if (
+    /^\s*(?:import|export)\s*$/m.test(code) ||
     /\bimport(?=\/[/*]|["'{*])|\bexport(?=\/[/*]|[*{])/.test(code) ||
     /[;}][ \t]*(?:import[ \t]+(?:["'{*])|export[ \t]+(?:[*{]))/.test(code)
   ) {

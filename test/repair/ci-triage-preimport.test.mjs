@@ -98,6 +98,8 @@ test("both closure scanners reject valid but unparsed static ESM import forms",(
    "import/*gap*/\"./unlisted.js\";",
    "import\"./unlisted.js\";",
    "export*from\"./unlisted.js\";",
+   'import\n"./unlisted.js";',
+   'export\n*from"./unlisted.js";',
    'const x=1;import "./unlisted.js";',
    'const x=1;export * from "./unlisted.js";',
   ];
