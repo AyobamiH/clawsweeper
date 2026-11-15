@@ -97,12 +97,8 @@ try {
   if (git("merge-base", values[1], values[2]) !== values[1])
     throw new Error("base is not an ancestor");
   // Load the reviewer only after the exact-head and clean-tree gates pass.
-  const {
-    assertLiveReleaseReviewBudget,
-    prepareSourceReview,
-    reviewSource,
-    sourceBundle,
-  } = await import("./commercial/source-review.mjs");
+  const { assertLiveReleaseReviewBudget, prepareSourceReview, reviewSource, sourceBundle } =
+    await import("./commercial/source-review.mjs");
   const bundle = await sourceBundle(root, values[1], false);
   if (bundle.head !== values[2]) throw new Error("bundle head mismatch");
   // This entrypoint only reviews committed source. Untracked non-generated files
