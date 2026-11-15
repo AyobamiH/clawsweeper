@@ -27,12 +27,12 @@ function imports(code){
  }
  return out;
 }
-function hashes(){
- const dist=join(root,"dist"),pending=[...roots],seen=new Set(),files={};
+export function runtimeDigests(targetRoot=root){
+ const dist=join(targetRoot,"dist"),pending=[...roots],seen=new Set(),files={};
  while(pending.length){
   const name=pending.pop();if(seen.has(name))continue;
   if(seen.size>=96)fail("closure_limit");
-  const full=resolve(root,name);
+  const full=resolve(targetRoot,name);
   if(!full.startsWith(dist+sep)||!name.endsWith(".js"))fail("path");
   const st=lstatSync(full);
   if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||st.size>1048576||realpathSync(full)!==full)fail("file");
@@ -42,7 +42,7 @@ function hashes(){
    if(dep.startsWith("node:")&&isBuiltin(dep))continue;
    if(!/^\.\.?\//.test(dep)||!dep.endsWith(".js"))fail("package");
    const next=resolve(dirname(full),dep);if(!next.startsWith(dist+sep))fail("traversal");
-   const rel=relative(root,next).split(sep).join("/");if(!seen.has(rel))pending.push(rel);
+   const rel=relative(targetRoot,next).split(sep).join("/");if(!seen.has(rel))pending.push(rel);
   }
  }
  return Object.fromEntries(Object.entries(files).sort(([a],[b])=>a.localeCompare(b)));
@@ -65,7 +65,7 @@ function verify(){
  if(current!==sha||manifest?.schema!=="clawsweeper.ci-triage-runtime.v3"||
     manifest?.implementationSha!==sha)fail("source_mismatch");
  if(!manifest.files||typeof manifest.files!=="object"||Array.isArray(manifest.files))fail("files");
- const actual=hashes(),names=Object.keys(actual);
+ const actual=runtimeDigests(),names=Object.keys(actual);
  const build=manifest.sourceBuild;
  if(build?.schema!=="clawsweeper.ci-triage-build.v1"||build.sourceSha!==sha||
     build.runtimeFilesSha256!==createHash("sha256").update(JSON.stringify(actual)).digest("hex")||
@@ -85,5 +85,7 @@ async function run(){
  if(mode==="observer")await app.runCiTriageObserverCli(process.argv.slice(3));
  else await app.runCiTriageNotifierCli(process.argv.slice(3));
 }
-run().catch(e=>{const reason=/^preimport_[a-z_]+$/.test(e?.message??"")?e.message:"preimport_unavailable";
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ run().catch(e=>{const reason=/^preimport_[a-z_]+$/.test(e?.message??"")?e.message:"preimport_unavailable";
  console.error(JSON.stringify({state:"held",reason}));process.exitCode=1;});
+}

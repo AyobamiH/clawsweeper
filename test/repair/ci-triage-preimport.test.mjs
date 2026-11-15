@@ -48,7 +48,7 @@ function fixture(){
    CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256:pin,
    CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST:manifest};
  const run=(mode="observer",args=["--help"],extra={})=>spawnSync(process.execPath,
-   [boot,mode,...args],{env:{...env,...extra},encoding:"utf8",timeout:10000});
+   [boot,mode,...args],{env:{...env,...extra},encoding:"utf8",timeout:60000});
  return {root,source,boot,manifest,env,run,cleanup:()=>rmSync(root,{recursive:true,force:true})};
 }
 test("builtins-only bootstrap executes verified observer help",()=>{

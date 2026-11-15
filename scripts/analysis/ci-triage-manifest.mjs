@@ -9,12 +9,10 @@ import {
   writeFileSync,
   lstatSync,
   realpathSync,
-  readFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, resolve, join } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { sourceBoundBuild, assertBuildOutput } from "./ci-triage-source-build.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -34,19 +32,10 @@ try {
     throw new Error("private_parent_required");
   // Rebuild the exact committed source offline before importing any application code.
   const proof = sourceBoundBuild(root);
-  const verifierInputs = ["dist/repair/ci-triage-runtime.js", "dist/repair/ci-triage-evidence.js"];
-  const verifiedInputs = Object.fromEntries(
-    verifierInputs.map((name) => [
-      name,
-      createHash("sha256")
-        .update(readFileSync(join(root, name)))
-        .digest("hex"),
-    ]),
-  );
-  assertBuildOutput(proof, root, verifiedInputs);
-  const { runtimeDigests } = await import(
-    pathToFileURL(join(root, "dist/repair/ci-triage-runtime.js")).href
-  );
+  // Imported helper uses Node built-ins only, and has no CLI side effects.
+  // The source-bound rebuild above checks the signed source before this import;
+  // compiled application modules are never imported by the manifest issuer.
+  const { runtimeDigests } = await import("./ci-triage-preimport.mjs");
   const files = runtimeDigests(root);
   const sourceBuild = assertBuildOutput(proof, root, files);
   const sha = proof.sourceSha;

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -179,6 +180,66 @@ test("native compiler must have an independently supplied exact trusted digest",
       /source_build_native_toolchain_untrusted/,
     );
     assert.equal(trustedBuild(f.root).sourceSha, f.git("rev-parse", "HEAD"));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("manifest issuance does not execute compiled application ESM before closure verification", () => {
+  const f = fixture();
+  try {
+    const entrypoints = [
+      "ci-triage-runtime", "ci-triage-evidence", "ci-triage-ledger",
+      "ci-triage", "notify-github-activity", "observe-ci-triage", "openclaw-hook",
+    ];
+    for (const name of entrypoints) {
+      writeFileSync(
+        join(f.root, "src/repair", name + ".ts"),
+        name === "ci-triage-runtime"
+          ? 'export const trusted = true;\nthrow new Error("UNTRUSTED_RUNTIME_EXECUTED");\n'
+          : "export const stub = true;\n",
+      );
+    }
+    const scripts = join(f.root, "scripts/analysis");
+    mkdirSync(scripts, { recursive: true });
+    for (const name of ["ci-triage-manifest.mjs", "ci-triage-preimport.mjs", "ci-triage-source-build.mjs"]) {
+      copyFileSync(join(project, "scripts/analysis", name), join(scripts, name));
+    }
+    f.git("add", ".");
+    f.git(
+      "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+      "-c", "commit.gpgsign=false", "commit", "-qm", "issuer-import-order-fixture",
+    );
+    execFileSync(
+      process.execPath,
+      [resolve(toolchain, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.repair.json"],
+      { cwd: f.root, timeout: 30000 },
+    );
+    assert.match(
+      readFileSync(join(f.root, "dist/repair/ci-triage-runtime.js"), "utf8"),
+      /UNTRUSTED_RUNTIME_EXECUTED/,
+    );
+    const privateDir = join(f.root, "private");
+    mkdirSync(privateDir, { mode: 0o700 });
+    const output = join(privateDir, "runtime.json");
+    const issued = spawnSync(
+      process.execPath,
+      [join(scripts, "ci-triage-manifest.mjs"), output],
+      {
+        cwd: f.root,
+        encoding: "utf8",
+        timeout: 120000,
+        env: {
+          ...process.env,
+          CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT: toolchain,
+          CLAWSWEEPER_CI_TRIAGE_NATIVE_COMPILER_SHA256: trustedNativeCompilerSha256,
+        },
+      },
+    );
+    assert.equal(issued.status, 0, issued.stderr);
+    const manifest = JSON.parse(readFileSync(output, "utf8"));
+    assert.equal(manifest.implementationSha, f.git("rev-parse", "HEAD"));
+    assert.equal(Object.keys(manifest.files).length, entrypoints.length);
   } finally {
     f.cleanup();
   }
