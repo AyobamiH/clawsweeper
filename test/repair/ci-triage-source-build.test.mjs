@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -14,6 +22,19 @@ import {
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const toolchain = process.env.CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT || project;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const nativeCompilerPath = realpathSync(
+  join(
+    dirname(realpathSync(join(toolchain, "node_modules/typescript"))),
+    "@typescript",
+    "typescript-" + process.platform + "-" + process.arch,
+    "lib",
+    process.platform === "win32" ? "tsc.exe" : "tsc",
+  ),
+);
+// Test harness models an externally approved compiler pin. The production
+// source is the separately signed release policy, not this mutable checkout.
+const trustedNativeCompilerSha256 = hash(readFileSync(nativeCompilerPath));
+const trustedBuild = (root) => sourceBoundBuild(root, toolchain, trustedNativeCompilerSha256);
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "ci-triage-source-build-test-"));
@@ -77,7 +98,7 @@ function fixture() {
 test("offline reproducible compiler binds compiled JavaScript to exact committed source", () => {
   const f = fixture();
   try {
-    const proof = sourceBoundBuild(f.root, toolchain);
+    const proof = trustedBuild(f.root);
     const runtimeFiles = Object.fromEntries(
       ["config", "entry"].map((name) => {
         const file = "dist/repair/" + name + ".js";
@@ -102,7 +123,7 @@ test("offline reproducible compiler binds compiled JavaScript to exact committed
       () => assertBuildOutput(proof, f.root, changed),
       /source_build_compiled_output_mismatch/,
     );
-    const independentProof = sourceBoundBuild(f.root, toolchain);
+    const independentProof = trustedBuild(f.root);
     assert.throws(
       () => assertBuildOutput(independentProof, f.root, changed),
       /source_build_compiled_output_mismatch/,
@@ -116,7 +137,7 @@ test("offline build rejects stale dist after clean HEAD changes and dirty tracke
   const f = fixture();
   try {
     writeFileSync(join(f.root, "src/repair/config.ts"), "export const value = 2;\n");
-    assert.throws(() => sourceBoundBuild(f.root, toolchain), /source_build_source_dirty/);
+    assert.throws(() => trustedBuild(f.root), /source_build_source_dirty/);
     f.git("add", "src/repair/config.ts");
     f.git(
       "-c",
@@ -129,7 +150,7 @@ test("offline build rejects stale dist after clean HEAD changes and dirty tracke
       "-qm",
       "second-fixture-source",
     );
-    const proof = sourceBoundBuild(f.root, toolchain);
+    const proof = trustedBuild(f.root);
     assert.throws(
       () =>
         assertBuildOutput(proof, f.root, {
@@ -137,6 +158,27 @@ test("offline build rejects stale dist after clean HEAD changes and dirty tracke
         }),
       /source_build_compiled_output_mismatch/,
     );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("native compiler must have an independently supplied exact trusted digest", () => {
+  const f = fixture();
+  try {
+    assert.throws(
+      () => sourceBoundBuild(f.root, toolchain, ""),
+      /source_build_native_toolchain_untrusted/,
+    );
+    assert.throws(
+      () => sourceBoundBuild(f.root, toolchain, "0".repeat(64)),
+      /source_build_native_toolchain_untrusted/,
+    );
+    assert.throws(
+      () => sourceBoundBuild(f.root, toolchain, "not-a-digest"),
+      /source_build_native_toolchain_untrusted/,
+    );
+    assert.equal(trustedBuild(f.root).sourceSha, f.git("rev-parse", "HEAD"));
   } finally {
     f.cleanup();
   }

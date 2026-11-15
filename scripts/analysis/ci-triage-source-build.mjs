@@ -67,6 +67,7 @@ function outputHashes(dir) {
 export function sourceBoundBuild(
   root,
   toolchainRoot = process.env.CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT || root,
+  trustedNativeCompilerSha256 = process.env.CLAWSWEEPER_CI_TRIAGE_NATIVE_COMPILER_SHA256,
 ) {
   root = resolve(root);
   if (!isAbsolute(toolchainRoot)) refuse("toolchain_absolute");
@@ -98,6 +99,15 @@ export function sourceBoundBuild(
   );
   const compilerHash = digest(readFileSync(compiler));
   const nativeCompilerHash = digest(readFileSync(nativeCompiler));
+  // The expected digest belongs to the signed, external release/toolchain policy.
+  // A digest measured from whichever binary is installed is NOT a trust anchor.
+  // Refuse before invoking an untrusted native compiler or issuing an attestation.
+  if (
+    typeof trustedNativeCompilerSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(trustedNativeCompilerSha256) ||
+    nativeCompilerHash !== trustedNativeCompilerSha256
+  )
+    refuse("native_toolchain_untrusted");
   const temp = mkdtempSync(join(tmpdir(), "clawsweeper-ci-triage-build-"));
   try {
     const archive = execFileSync("git", ["-C", root, "archive", "--format=tar", sha], {
