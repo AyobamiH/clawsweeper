@@ -27,10 +27,19 @@ export CLAWSWEEPER_CI_TRIAGE_ENABLED=1
 
 The existing notification workflow uses its approved `GH_TOKEN`/`GITHUB_TOKEN` for read-only GitHub API calls. Existing OpenClaw hook configuration is unchanged and remains necessary for uncertain cases; do not introduce a new provider or expose credentials in reports. Without a configured hook, an uncertain event is durably held and reports failure, not completion. Restoring the existing hook can resume only a hold with **zero dispatch attempts**.
 
+The triage-enabled notifier and observer now have a dedicated builtins-only
+pre-import bootstrap. The trusted release launcher must independently pin its
+CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256 and signed source revision; computing
+that value from a mutable checkout at startup is not a trust guarantee.
+The bootstrap refuses missing/stale manifests and checks every compiled ESM
+dependency before importing notifier/observer application code. The generic
+notification route with triage disabled is preserved unchanged. This remains
+source-only until independent build provenance and operator release approval.
+
 The optional owner-local observer uses existing authenticated `gh api` GET access and invokes the **same notifier**, rather than selecting a skill or inventing an independent classifier:
 
 ```bash
-node dist/repair/observe-ci-triage.js --watch-seconds 300 --interval-seconds 30
+node scripts/analysis/ci-triage-preimport.mjs observer --watch-seconds 300 --interval-seconds 30
 ```
 
 Transient authenticated GET transport failures receive at most one immediate read retry. A timed observation continues after a held collection-read cycle, without retrying any agent POST. Source, policy, manifest and storage faults still stop immediately. A window ending with an unresolved read failure exits nonzero; the summary counts held cycles explicitly.

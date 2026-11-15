@@ -277,8 +277,7 @@ export async function runObservationLoop(options: {
   return { cycles, heldReadCycles, endedWithReadFailure };
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+export async function runCiTriageObserverCli(args: string[] = process.argv.slice(2)): Promise<void> {
   const numberOption = (name: string, fallback: number) => {
     const index = args.indexOf(name);
     return index === -1 ? fallback : Number(args[index + 1]);
@@ -322,15 +321,8 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ schema: "clawsweeper.ci-triage-watch-summary.v1", ...summary }));
   if (summary.endedWithReadFailure) process.exitCode = 1;
 }
+// Direct CLI invocation is not the trusted pre-import entrypoint.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error: unknown) => {
-    const reason =
-      error instanceof CiEvidenceError
-        ? error.reason
-        : error instanceof Error && /^[a-z_]{1,80}$/.test(error.message)
-          ? error.message
-          : "observer_unexpected_error";
-    console.error(JSON.stringify({ state: "held", reason }));
-    process.exitCode = 1;
-  });
+  console.error(JSON.stringify({state:"held",reason:"preimport_required"}));
+  process.exitCode = 1;
 }
