@@ -125,6 +125,59 @@ def _manual_proof_subprocess(job, start=False):
     return proof
 
 
+def _verified_manual_success_receipt(job, receipt):
+    # A local-only success must not become reported=1 before the actual
+    # command list and log are checked. The separate read-only verifier
+    # remains the operational acceptance authority.
+    import stat
+    if (receipt.get("mode") != "local-scheduler-not-github-actions"
+            or receipt.get("controller_sha256") != CONTROLLER_SHA
+            or type(receipt.get("attempt")) is not int
+            or receipt["attempt"] < 1
+            or not isinstance(receipt.get("started_at"), str)
+            or not isinstance(receipt.get("finished_at"), str)
+            or receipt.get("cleanup_error") is not None
+            or receipt.get("container_state", {}).get("OOMKilled") is True):
+        raise RuntimeError("manual_success_execution_metadata_incomplete")
+    policy = load_policy()
+    if policy_hash(policy, job["repo"], job["suite"]) != job["policy"]:
+        raise RuntimeError("manual_success_execution_policy_moved")
+    cfg = policy["repositories"][job["repo"]]["suites"][job["suite"]]
+    required = [("Exact commit checkout", None)] + [
+        (step["name"], step["command"]) for step in cfg["steps"]]
+    steps = receipt.get("steps")
+    if not isinstance(steps, list) or len(steps) != len(required):
+        raise RuntimeError("manual_success_missing_command_receipts")
+    for step, (name, command) in zip(steps, required):
+        if (not isinstance(step, dict) or step.get("name") != name
+                or type(step.get("exit_code")) is not int
+                or step["exit_code"] != 0
+                or not isinstance(step.get("started_at"), str)
+                or not isinstance(step.get("finished_at"), str)
+                or not isinstance(step.get("command"), str)
+                or (command is not None and step["command"] != command)):
+            raise RuntimeError("manual_success_failed_or_relabelled_command")
+    initial = steps[0]["command"]
+    if (not initial.startswith("git init -q; ")
+            or "git checkout --quiet --detach FETCH_HEAD" not in initial
+            or "git rev-parse HEAD" not in initial
+            or "GITHUB_SHA" not in initial
+            or "https://github.com/" + job["repo"] + ".git" not in initial):
+        raise RuntimeError("manual_success_source_checkout_unverified")
+    path = LOGS / (job["id"] + ".log")
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("manual_success_log_missing_or_untrusted")
+    info = path.stat()
+    if (info.st_uid != os.getuid()
+            or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not 0 < info.st_size <= 16777216
+            or receipt.get("log_bytes") != info.st_size
+            or hashlib.sha256(path.read_bytes()).hexdigest()
+               != receipt.get("log_sha256")):
+        raise RuntimeError("manual_success_log_integrity_mismatch")
+    return True
+
+
 def _verified_manual_claim(job):
     return _manual_proof_subprocess(job)
 
@@ -204,6 +257,8 @@ def _signed_manual_claim_entry(request_file, signature_file):
                 or not isinstance(receipt.get("cleanup"), dict)
                 or receipt["cleanup"].get("container_absent") is not True):
             raise RuntimeError("manual_final_receipt_requires_exact_cleaned_execution")
+        if state == "success":
+            _verified_manual_success_receipt(job, receipt)
         receipt["origin"] = "owner-signed-local-manual"
         receipt["provider_status"] = "suppressed-local-manual"
         receipt["manual_request_sha256"] = proof["request_sha256"]

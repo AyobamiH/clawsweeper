@@ -4,6 +4,9 @@ No live queue, controller, webhook, runner, PR or GitHub Actions changes.
 """
 import ast
 import hashlib
+import json
+import os
+import tempfile
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -64,6 +67,7 @@ class ReleaseCandidateTests(unittest.TestCase):
                 {"request_sha256": REQUEST, "source_sha": SHA, "ref": "local-manual"}),
             "_verified_manual_start": lambda job: {
                 "request_sha256": REQUEST, "source_sha": SHA, "ref": "local-manual"},
+            "_verified_manual_success_receipt": lambda job, receipt: True,
         }
         exec(compile(self._functions(*funcs), "<in-memory-controller>", "exec"), glob)
         return glob, writes
@@ -138,6 +142,69 @@ class ReleaseCandidateTests(unittest.TestCase):
             env["publish"](db, self._job(), "success", "bogus", receipt)
         self.assertFalse(writes)
         self.assertFalse(db.statements)
+
+    def test_success_receipt_requires_genuine_steps_and_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_dir = Path(directory)
+            job = self._job()
+            content = b"Exact local CI command output\\n"
+            (log_dir / (job["id"] + ".log")).write_bytes(content)
+            profile = json.loads((Path.home() / ".local/share/local-ci/fleet-policy.json").read_text())
+            commands = profile["repositories"][REPO]["suites"]["linux-node24"]["steps"]
+            steps = [{
+                "name": "Exact commit checkout",
+                "command": "git init -q; git remote add origin https://github.com/"
+                           + REPO + ".git; git checkout --quiet --detach FETCH_HEAD; "
+                           + "test $(git rev-parse HEAD) = $GITHUB_SHA",
+                "exit_code": 0, "started_at": "start", "finished_at": "end",
+            }] + [{
+                "name": step["name"], "command": step["command"],
+                "exit_code": 0, "started_at": "start", "finished_at": "end",
+            } for step in commands]
+            receipt = self._receipt()
+            receipt.update({
+                "mode": "local-scheduler-not-github-actions",
+                "controller_sha256": "controller-hash",
+                "attempt": 1,
+                "started_at": "start", "finished_at": "end",
+                "steps": steps,
+                "log_bytes": len(content),
+                "log_sha256": hashlib.sha256(content).hexdigest(),
+                "container_state": {"OOMKilled": False},
+            })
+            env = {
+                "CONTROLLER_SHA": "controller-hash",
+                "LOGS": log_dir,
+                "os": os,
+                "hashlib": hashlib,
+                "load_policy": lambda: profile,
+                "policy_hash": lambda _p, _r, _s: job["policy"],
+            }
+            exec(compile(self._functions("_verified_manual_success_receipt"),
+                         "<checked-generated-manual-controller>", "exec"), env)
+            check = env["_verified_manual_success_receipt"]
+            self.assertTrue(check(job, receipt))
+            self.assertIn("_verified_manual_success_receipt(job, receipt)",
+                          ast.unparse(self._functions("publish")))
+            receipt["steps"] = steps[:-1]
+            with self.assertRaisesRegex(RuntimeError, "missing_command_receipts"):
+                check(job, receipt)
+            receipt["steps"] = steps
+            steps[3]["exit_code"] = 1
+            with self.assertRaisesRegex(RuntimeError, "failed_or_relabelled"):
+                check(job, receipt)
+            steps[3]["exit_code"] = 0
+            steps[4]["command"] = "echo bypass"
+            with self.assertRaisesRegex(RuntimeError, "failed_or_relabelled"):
+                check(job, receipt)
+            steps[4]["command"] = commands[3]["command"]
+            receipt["log_sha256"] = "0" * 64
+            with self.assertRaisesRegex(RuntimeError, "log_integrity"):
+                check(job, receipt)
+            receipt["log_sha256"] = hashlib.sha256(content).hexdigest()
+            env["policy_hash"] = lambda _p, _r, _s: "unexpected"
+            with self.assertRaisesRegex(RuntimeError, "policy_moved"):
+                check(job, receipt)
 
     def test_nonmanual_github_status_route_not_removed(self):
         names = {n.name: n for n in self.tree.body if isinstance(n, ast.FunctionDef)}
