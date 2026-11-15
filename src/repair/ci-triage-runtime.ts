@@ -58,6 +58,17 @@ function staticImports(code: string): string[] {
   if (/\bimport(?:\s|\/\*[\s\S]{0,64}?\*\/)*\(/.test(code) || /\bcreateRequire\s*\(/.test(code)) {
     throw new CiEvidenceError("implementation_runtime_dynamic_import", true);
   }
+  // Node accepts comment-separated and adjacent-token static ESM imports
+  // and exports. These are valid static dependencies but
+  // not represented by our deliberately bounded one-line grammar. Refuse them
+  // rather than silently omit executable modules from the integrity closure.
+  // Reject multiple declarations on one line for the same reason.
+  if (
+    /\bimport(?=\/[/*]|["'{*])|\bexport(?=\/[/*]|[*{])/.test(code) ||
+    /[;}][ \t]*(?:import[ \t]+(?:["'{*])|export[ \t]+(?:[*{]))/.test(code)
+  ) {
+    throw new CiEvidenceError("implementation_runtime_import_unsupported", true);
+  }
   const specifiers: string[] = [];
   for (const line of code.split("\n")) {
     if (/^\s*import\s+/.test(line)) {

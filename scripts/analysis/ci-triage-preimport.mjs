@@ -15,6 +15,10 @@ const importRe=/^\s*import\s+(?:(?:[A-Za-z0-9_$*{},\s]+)\s+from\s+)?["']([^"']+)
 const exportRe=/^\s*export\s+(?:\*|\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\})\s+from\s+["']([^"']+)["']\s*;\s*$/;
 function imports(code){
  if(/\bimport(?:\s|\/\*[\s\S]{0,64}?\*\/)*\(/.test(code)||/\bcreateRequire\s*\(/.test(code))fail("dynamic_import");
+ // Valid noncanonical static ESM (including import/*comment*/"./x.js"
+ // and export*from"./x.js") must never escape the bounded closure parser.
+ if(/\bimport(?=\/[/*]|["'{*])|\bexport(?=\/[/*]|[*{])/.test(code)||
+    /[;}][ \t]*(?:import[ \t]+(?:["'{*])|export[ \t]+(?:[*{]))/.test(code))fail("import");
  const out=[];
  for(const line of code.split("\n")){
   if(/^\s*import\s+/.test(line)){

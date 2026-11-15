@@ -7,6 +7,7 @@ import {dirname,join,resolve} from "node:path";
 import {test} from "node:test";
 import {fileURLToPath} from "node:url";
 import {runtimeDigests} from "../../dist/repair/ci-triage-runtime.js";
+import {runtimeDigests as bootstrapDigests} from "../../scripts/analysis/ci-triage-preimport.mjs";
 
 const project=resolve(dirname(fileURLToPath(import.meta.url)),"../..");
 function fixture(){
@@ -83,6 +84,27 @@ test("missing manifest, invalid bootstrap pin, mismatched signed source all refu
    const out=f.run("observer",["--help"],override);
    assert.notEqual(out.status,0);
    assert.match(out.stderr,/preimport_/);
+  }
+ }finally{f.cleanup();}
+});
+
+test("both closure scanners reject valid but unparsed static ESM import forms",()=>{
+ const f=fixture();
+ try{
+  const target=join(f.root,"dist/repair/observe-ci-triage.js");
+  const original=readFileSync(target,"utf8");
+  writeFileSync(join(f.root,"dist/repair/unlisted.js"),"globalThis.unlistedExecuted=true;\n");
+  const cases=[
+   "import/*gap*/\"./unlisted.js\";",
+   "import\"./unlisted.js\";",
+   "export*from\"./unlisted.js\";",
+   'const x=1;import "./unlisted.js";',
+   'const x=1;export * from "./unlisted.js";',
+  ];
+  for(const statement of cases){
+   writeFileSync(target,original+"\n"+statement+"\n");
+   assert.throws(()=>runtimeDigests(f.root),/implementation_runtime_import_unsupported/,statement);
+   assert.throws(()=>bootstrapDigests(f.root),/preimport_import/,statement);
   }
  }finally{f.cleanup();}
 });
