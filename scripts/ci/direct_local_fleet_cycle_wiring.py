@@ -111,6 +111,14 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
                     'class': 'release_or_ingress_unverified',
                     'error_type': type(_dl_error).__name__
                 }}}}, sort_keys=True), flush=True)
+    # GitHub polling is NOT ClawSweeper's CI event adapter. Even when the
+    # direct-local release is valid, only the authenticated delivery claim
+    # may create its jobs. Keep polling for every other repository.
+    _dl_discovery_policy = dict(policy)
+    _dl_discovery_policy['repositories'] = {{
+        _dl_repo: _dl_cfg for _dl_repo, _dl_cfg in policy['repositories'].items()
+        if _dl_repo != 'AyobamiH/clawsweeper'
+    }}
     _dl_exec_policy = policy
     if _dl_hold:
         # Filter only this cycle's view; never mutate installed fleet policy.
@@ -124,7 +132,7 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
     # release is invalid; unrelated repositories retain their original policy.
     substitutions = (
         (b"discover(db,policy,not a.main_only,a.repo)",
-         b"discover(db,_dl_exec_policy,not a.main_only,a.repo)"),
+         b"discover(db,_dl_discovery_policy,not a.main_only,a.repo)"),
         (b"detached.dispatch(db,policy,a.max_jobs)",
          b"detached.dispatch(db,_dl_exec_policy,a.max_jobs)"),
         (b"def parallel_work(db,policy,max_jobs):",
@@ -148,11 +156,98 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
          b"        + \"ORDER BY CASE ref WHEN 'main' THEN 0 ELSE 1 END,created_at,id LIMIT 100\",\n"
          b"        (time.time(),blocked_repo) if blocked_repo else (time.time(),)).fetchall()]"),
     )
-    output = current.replace(ANCHOR, hook.encode("utf-8") + ANCHOR, 1)
+    locked_guard = '''        # Check actual queue state under the canonical lock. An old poller
+        # or worker may have left an unauthenticated ClawSweeper job behind.
+        if not _dl_hold:
+            try:
+                _dl_pending = db.execute(
+                    "SELECT id FROM jobs WHERE repo=? AND state IN ('queued','claimed','running') LIMIT 33",
+                    ('AyobamiH/clawsweeper',)).fetchall()
+                _dl_unsafe = (len(_dl_pending) > 32
+                              or any(not _dl_authenticated_existing_job(item['id'])
+                                     for item in _dl_pending))
+            except Exception:
+                _dl_unsafe = True
+            if _dl_unsafe:
+                _dl_hold = True
+                _dl_exec_policy = _dl_discovery_policy
+                print(json.dumps({'clawsweeper_direct_local_hold': {
+                    'class': 'legacy_or_ambiguous_queue_provenance',
+                    'unverified_execution_denied': True
+                }}, sort_keys=True), flush=True)
+'''
+    output = current.replace(
+        ANCHOR, hook.encode("utf-8") + ANCHOR + locked_guard.encode("utf-8"), 1)
     for before, after in substitutions:
         if current.count(before) != 1:
             raise RuntimeError("unrecognised_local_fleet_repository_isolation_shape")
         output = output.replace(before, after, 1)
+    # One immutable, event-bound admission record per current-source job.
+    # This is deliberately checked inside the canonical fleet lock for
+    # dispatch, and again inside the detached worker before effects.
+    provenance_guard = '''    def _dl_authenticated_existing_job(_dl_id):
+        import re
+        _dl_job = db.execute(
+            'SELECT id,repo,sha,suite,ref,state FROM jobs WHERE id=?',
+            (_dl_id,)).fetchone()
+        if _dl_job is None:
+            return False
+        if _dl_job['repo'] != 'AyobamiH/clawsweeper':
+            return True
+        _dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')
+        if (not isinstance(_dl_cfg, dict)
+                or _dl_job['sha'] != _dl_cfg.get('enrolled_head')
+                or _dl_job['suite'] != 'linux-node24'
+                or _dl_job['state'] not in ('queued','claimed','running')):
+            return False
+        _dl_records = db.execute(
+            "SELECT value FROM observations WHERE key LIKE 'direct-local:%' LIMIT 2049"
+        ).fetchall()
+        if len(_dl_records) > 2048:
+            return False
+        _dl_matched = 0
+        for _dl_record in _dl_records:
+            try:
+                _dl_evidence = json.loads(_dl_record['value'])
+            except (TypeError, ValueError):
+                return False
+            if not isinstance(_dl_evidence, dict):
+                return False
+            if _dl_evidence.get('job_id') != _dl_id:
+                continue
+            _dl_jobs = _dl_evidence.get('job_intents')
+            _dl_allowed = {
+                '.github/workflows/ci.yml#check',
+                '.github/workflows/ci.yml#sparse-repair-builds'
+            }
+            _dl_ref = _dl_job['ref']
+            if (not isinstance(_dl_ref, str)
+                    or not isinstance(_dl_jobs, list)
+                    or not _dl_jobs
+                    or not all(isinstance(item, str) for item in _dl_jobs)
+                    or len(_dl_jobs) != len(set(_dl_jobs))
+                    or not set(_dl_jobs) <= _dl_allowed
+                    or _dl_evidence.get('proof_kind') !=
+                       'authenticated_queue_admission_not_execution'
+                    or _dl_evidence.get('source_sha') != _dl_job['sha']
+                    or _dl_evidence.get('ref') != _dl_ref
+                    or _dl_evidence.get('suite') != _dl_job['suite']
+                    or (_dl_ref == 'main' and
+                        (_dl_evidence.get('event') != 'push' or
+                         _dl_jobs != ['.github/workflows/ci.yml#check']))
+                    or (_dl_ref != 'main' and
+                        (not re.fullmatch(r'pr/[1-9][0-9]*', _dl_ref) or
+                         _dl_evidence.get('event') != 'pull_request' or
+                         set(_dl_jobs) != _dl_allowed))):
+                return False
+            for _dl_field in ('delivery_sha256', 'intent_identity_sha256'):
+                _dl_digest = _dl_evidence.get(_dl_field)
+                if (not isinstance(_dl_digest, str) or
+                        not re.fullmatch(r'[a-f0-9]{64}', _dl_digest)):
+                    return False
+            _dl_matched += 1
+        return _dl_matched == 1
+'''
     # Detached workers are separate processes: revalidate the signed release
     # for ClawSweeper before execution; leave other repositories untouched.
     worker_before = (
@@ -189,10 +284,13 @@ def compile_prelock_source(current: bytes, *, expected_sha256: str,
             if (not isinstance(_dl_cfg, dict)
                     or _dl_cfg.get('enrolled_head') != _dl_doc.get('commit')):
                 raise RuntimeError('clawsweeper_worker_source_policy_pin_mismatch')
+            if not _dl_authenticated_existing_job(a.job_id or ''):
+                raise RuntimeError('clawsweeper_worker_missing_authenticated_queue_claim')
         result=detached.execute(db,policy,a.job_id or '',a.claim_token or '')'''
     if current.count(worker_before) != 1:
         raise RuntimeError("unrecognised_local_fleet_worker_isolation_shape")
-    output = output.replace(worker_before, worker_guard.encode("utf-8"), 1)
+    output = output.replace(
+        worker_before, provenance_guard.encode("utf-8") + worker_guard.encode("utf-8"), 1)
     try:
         ast.parse(output.decode("utf-8"))
     except SyntaxError as exc:

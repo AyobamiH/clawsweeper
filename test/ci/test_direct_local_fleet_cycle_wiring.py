@@ -92,7 +92,9 @@ class ExactFleetSourceTests(unittest.TestCase):
         self.assertIn("except Exception as _dl_error:", generated)
         self.assertIn("clawsweeper_direct_local_hold", generated)
         self.assertIn("if _dl_repo != 'AyobamiH/clawsweeper'", generated)
-        self.assertIn("discover(db,_dl_exec_policy", generated)
+        self.assertIn("discover(db,_dl_discovery_policy", generated)
+        self.assertIn("legacy_or_ambiguous_queue_provenance", generated)
+        self.assertIn("clawsweeper_worker_missing_authenticated_queue_claim", generated)
         self.assertIn("detached.dispatch(db,_dl_exec_policy", generated)
         self.assertIn('AND repo!=? ', generated)
         self.assertIn("parallel_work(db,_dl_exec_policy", generated)
@@ -271,17 +273,45 @@ class ExactFleetSourceTests(unittest.TestCase):
             (root / "direct_local_receiver_integration.py").write_bytes(verifier)
 
             class Result:
-                def __init__(self, row=None):
+                def __init__(self, row=None, rows=None):
                     self.row = row
+                    self.rows = rows if rows is not None else []
                 def fetchone(self):
                     return self.row
                 def fetchall(self):
-                    return []
+                    return self.rows
 
             class DB:
-                def execute(self, sql, args):
+                proof_present = True
+                legacy_queued = False
+
+                def execute(self, sql, args=()):
                     if sql.startswith("SELECT repo FROM jobs"):
                         return Result({"repo": "AyobamiH/clawsweeper"})
+                    if sql.startswith("SELECT id,repo,sha"):
+                        return Result({
+                            "id": args[0], "repo": "AyobamiH/clawsweeper",
+                            "sha": "a" * 40, "suite": "linux-node24",
+                            "ref": "pr/1", "state": "claimed",
+                        })
+                    if sql.startswith("SELECT id FROM jobs"):
+                        return Result(rows=([{"id": "local-fleet-123456789abc"}]
+                                            if DB.legacy_queued else []))
+                    if sql.startswith("SELECT value FROM observations"):
+                        claim = {
+                            "job_id": "local-fleet-123456789abc",
+                            "source_sha": "a" * 40, "suite": "linux-node24",
+                            "ref": "pr/1", "event": "pull_request",
+                            "proof_kind": "authenticated_queue_admission_not_execution",
+                            "delivery_sha256": "b" * 64,
+                            "intent_identity_sha256": "c" * 64,
+                            "job_intents": [
+                                ".github/workflows/ci.yml#check",
+                                ".github/workflows/ci.yml#sparse-repair-builds",
+                            ],
+                        }
+                        return Result(rows=([{"value": json.dumps(claim)}]
+                                            if DB.proof_present else []))
                     return Result()
 
             for mode, env in (
@@ -316,12 +346,35 @@ class ExactFleetSourceTests(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()) as report:
                         namespace["main"]()
                 if mode == "cycle":
-                    self.assertIn(("discover", repo_names), seen)
+                    self.assertIn(("discover", {"AyobamiH/opstruth-chatgpt-plugin"}), seen)
                     self.assertIn(("dispatch", repo_names), seen)
                     self.assertIn("clawsweeper_direct_local_prelock",
                                   report.getvalue())
                     self.assertNotIn("clawsweeper_direct_local_hold",
                                      report.getvalue())
+                    # A genuinely authenticated queue claim is admitted;
+                    # a historical job with the same SHA but no provenance
+                    # must not silently enter the detached execution lane.
+                    DB.legacy_queued = True
+                    DB.proof_present = True
+                    seen.clear()
+                    with patch.dict(os.environ, env, clear=True):
+                        with contextlib.redirect_stdout(io.StringIO()) as verified:
+                            namespace["main"]()
+                    self.assertIn(("dispatch", repo_names), seen)
+                    self.assertNotIn("legacy_or_ambiguous_queue_provenance",
+                                     verified.getvalue())
+                    DB.proof_present = False
+                    seen.clear()
+                    with patch.dict(os.environ, env, clear=True):
+                        with contextlib.redirect_stdout(io.StringIO()) as unsafe:
+                            namespace["main"]()
+                    self.assertIn("legacy_or_ambiguous_queue_provenance",
+                                  unsafe.getvalue())
+                    self.assertIn(
+                        ("dispatch", {"AyobamiH/opstruth-chatgpt-plugin"}), seen)
+                    DB.legacy_queued = False
+                    DB.proof_present = True
                     policy["repositories"]["AyobamiH/clawsweeper"][
                         "enrolled_head"] = "b" * 40
                     seen.clear()
@@ -335,6 +388,13 @@ class ExactFleetSourceTests(unittest.TestCase):
                 else:
                     # Simulates systemd-run not propagating manager environment.
                     self.assertIn(("execute", True), seen)
+                    DB.proof_present = False
+                    with patch.dict(os.environ, {}, clear=True):
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                "clawsweeper_worker_missing_authenticated_queue_claim"):
+                            namespace["main"]()
+                    DB.proof_present = True
                     policy["repositories"]["AyobamiH/clawsweeper"][
                         "enrolled_head"] = "b" * 40
                     with patch.dict(os.environ, {}, clear=True):
