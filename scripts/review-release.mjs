@@ -16,12 +16,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import {
-  assertLiveReleaseReviewBudget,
-  prepareSourceReview,
-  reviewSource,
-  sourceBundle,
-} from "./commercial/source-review.mjs";
+// Source or head failures must be refused before loading inference-capable
+// review code. A dirty checkout is never a valid provider admission.
 import { classifyReviewFailure } from "./commercial/review-errors.mjs";
 
 const args = process.argv.slice(2);
@@ -100,6 +96,13 @@ try {
     throw new Error("tracked checkout is dirty");
   if (git("merge-base", values[1], values[2]) !== values[1])
     throw new Error("base is not an ancestor");
+  // Load the reviewer only after the exact-head and clean-tree gates pass.
+  const {
+    assertLiveReleaseReviewBudget,
+    prepareSourceReview,
+    reviewSource,
+    sourceBundle,
+  } = await import("./commercial/source-review.mjs");
   const bundle = await sourceBundle(root, values[1], false);
   if (bundle.head !== values[2]) throw new Error("bundle head mismatch");
   // This entrypoint only reviews committed source. Untracked non-generated files

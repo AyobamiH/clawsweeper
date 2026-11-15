@@ -13,6 +13,9 @@ test("release review is exact-head, committed-only, fail-closed and routed throu
   assert.match(entry, /reviewSource\([\s\S]*?"repository-release"[\s\S]*?\)/);
   assert.match(entry, /git\("rev-parse", "HEAD"\)/);
   assert.match(entry, /tracked checkout is dirty/);
+  const sourceGate = entry.indexOf('git("status", "--porcelain", "--untracked-files=no")');
+  const inferenceImport = entry.indexOf('await import("./commercial/source-review.mjs")');
+  assert.ok(sourceGate !== -1 && inferenceImport > sourceGate);
   assert.match(entry, /untracked source in review/);
   assert.match(entry, /base is not an ancestor/);
   assert.match(entry, /if \(!result\.passed\) process\.exitCode = 1/);
