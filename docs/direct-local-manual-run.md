@@ -23,9 +23,14 @@ The source-only adapter checks real ssh-keygen -Y verify, immutable request
 shape and expiry, fresh read-only GitHub develop ref, exact clean source and
 41-workflow/88-job route, host and suite policy, canonical flock and existing
 fleet SQLite WAL. It then claims one ordinary suite row with ref local-manual.
-Only request digests and redacted provenance, never raw request/signature,
-are recorded in the existing observations table. Duplicate signed requests
-deduplicate; colliding nonces, webhook/poller jobs and stale refs are held.
+The existing owner-only observations table atomically retains a bounded
+base64-encoded copy of the signed request **and its SSH signature** alongside
+the digests and provenance. Encoding is **not redaction**: these records must
+never be copied into logs, telemetry or public evidence. Dispatch and detached
+worker startup re-verify the original SSH signature against the fixed owner
+key, bind its nonce/source to the exact queue row and reject any earlier
+digest-only observation. Duplicate signed requests deduplicate; colliding
+nonces, webhook/poller jobs and stale refs are held.
 
 ## Signed local-manual worker and command-level readback (source-only)
 

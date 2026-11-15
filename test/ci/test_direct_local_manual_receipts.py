@@ -41,8 +41,17 @@ class ManualReceiptReadbackTests(unittest.TestCase):
         self.case.save_receipt()
 
     def verify(self):
+        # Isolate downstream step/receipt checks. Real owner SSH verification,
+        # including forged SQLite observation rejection, is tested separately.
+        checked_owner = {
+            "source_sha": self.case.sha,
+            "request_sha256": self.proof["request_sha256"],
+        }
         with mock.patch.object(manual, "read_fresh_develop_sha",
-                               return_value=self.case.sha):
+                               return_value=self.case.sha), \
+             mock.patch.object(readback.manual_worker,
+                               "verify_manual_queue_provenance",
+                               return_value=checked_owner):
             return self.case.prove()
 
     def test_complete_distinct_manual_receipt_maps_two_ordinary_jobs(self):
@@ -80,8 +89,15 @@ class ManualReceiptReadbackTests(unittest.TestCase):
             self.verify()
 
     def test_manual_receipt_fails_if_develop_moved_after_completion(self):
+        checked_owner = {
+            "source_sha": self.case.sha,
+            "request_sha256": self.proof["request_sha256"],
+        }
         with mock.patch.object(manual, "read_fresh_develop_sha",
-                               return_value="a"*40):
+                               return_value="a"*40), \
+             mock.patch.object(readback.manual_worker,
+                               "verify_manual_queue_provenance",
+                               return_value=checked_owner):
             with self.assertRaisesRegex(Hold, "fresh_develop_mismatch"):
                 self.case.prove()
 
@@ -92,7 +108,8 @@ class ManualReceiptReadbackTests(unittest.TestCase):
                     "job_id": self.case.job_id, "event": "push",
                     "proof_kind": "authenticated_queue_admission_not_execution",
                 }), "now"))
-        with self.assertRaisesRegex(Hold, "missing_or_ambiguous"):
+        with self.assertRaisesRegex(
+                Hold, "missing_or_ambiguous|untrusted_local_manual_receipt_provenance"):
             self.verify()
 
 

@@ -8,6 +8,8 @@ read-only: it cannot enqueue, execute, publish statuses or start a provider run.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,41 @@ from estate_policy import Hold
 
 SCHEMA = "clawsweeper.owner-signed-local-manual-worker-provenance.v1"
 MAX_OBSERVATIONS = 2048
+
+
+def _verify_signed_claim_envelope(key: str, evidence: dict, source: str) -> None:
+    """The SQLite observation alone never authenticates an execution grant.
+
+    Check the preserved SSH signature and signed intent at each dispatch and
+    worker start. Never log raw signed requests, signatures or nonce values.
+    """
+    request_b64 = evidence.get("signed_request_b64")
+    signature_b64 = evidence.get("signed_request_signature_b64")
+    if (not isinstance(request_b64, str)
+            or not 0 < len(request_b64) <= 5500
+            or not isinstance(signature_b64, str)
+            or not 0 < len(signature_b64) <= 11000):
+        raise Hold("missing_signed_local_manual_request_envelope")
+    try:
+        raw = base64.b64decode(request_b64, validate=True)
+        sig = base64.b64decode(signature_b64, validate=True)
+        seed = json.loads(raw, object_pairs_hook=manual.unique_object)
+        if not isinstance(seed, dict) or type(seed.get("issued_at")) is not int:
+            raise Hold("malformed_signed_local_manual_intent")
+        intent = manual.parse_intent(raw, seed["issued_at"])
+    except (ValueError, UnicodeError, TypeError, OverflowError) as exc:
+        raise Hold("malformed_signed_local_manual_intent") from exc
+    if (intent["source_sha"] != source
+            or hashlib.sha256(raw).hexdigest() != evidence["request_sha256"]
+            or hashlib.sha256(intent["nonce"].encode("ascii")).hexdigest()
+               != evidence["nonce_sha256"]
+            or key != "direct-local-manual:" + hashlib.sha256(
+                (manual.REPO + "\n" + intent["nonce"]).encode("ascii")
+            ).hexdigest()
+            or intent["job_intents"] != evidence["job_intents"]):
+        raise Hold("signed_local_manual_claim_binding_mismatch")
+    manual.verify_owner_signature_bytes(
+        raw, sig, manual.owner_allowed_signers())
 
 
 def verify_manual_queue_provenance(*, fleet_root: Path, job_id: str) -> dict:
@@ -94,6 +131,7 @@ def verify_manual_queue_provenance(*, fleet_root: Path, job_id: str) -> dict:
             or not isinstance(evidence.get("nonce_sha256"), str)
             or not routing.HEX64.fullmatch(evidence["nonce_sha256"])):
         raise Hold("untrusted_local_manual_worker_observation")
+    _verify_signed_claim_envelope(key, evidence, source)
     return {
         "schema": SCHEMA,
         "repo": manual.REPO, "source_sha": source,

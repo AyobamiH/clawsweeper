@@ -6,6 +6,7 @@ the new local-manual provenance and source-reference class. No new scheduler,
 runner, credential broker or provider status publishing lives in this module.
 """
 from __future__ import annotations
+import base64
 import fcntl
 import hashlib
 import json
@@ -66,21 +67,47 @@ def owner_bytes(path: Path, limit: int, private: bool = True) -> bytes:
         os.close(fd)
 
 
-def verify_owner_signature(raw: bytes, signature: Path, signers: Path) -> None:
-    sig = owner_bytes(signature, 8192)
-    owner_bytes(signers, 8192, private=False)
-    if not sig.startswith(b"-----BEGIN SSH SIGNATURE-----"):
+def owner_allowed_signers() -> Path:
+    """Fixed production owner identity; tests may patch the function only."""
+    return Path.home() / ".config/git/allowed_signers"
+
+
+def verify_owner_signature_bytes(raw: bytes, sig: bytes, signers: Path) -> None:
+    """Reverify the original signed request without trusting mutable SQLite.
+
+    A Linux memory-backed descriptor avoids creating a second credential store,
+    a temporary signature file or a separate execution/queue service.
+    """
+    if (not isinstance(raw, bytes) or not 0 < len(raw) <= 4096
+            or not isinstance(sig, bytes) or not 0 < len(sig) <= 8192
+            or not sig.startswith(b"-----BEGIN SSH SIGNATURE-----")):
         raise Hold("invalid_manual_signature_format")
+    owner_bytes(signers, 8192, private=False)
     try:
+        fd = os.memfd_create("clawsweeper-owner-signed-request", flags=0)
+    except (OSError, AttributeError) as exc:
+        raise Hold("owner_signature_verifier_unavailable") from exc
+    try:
+        if os.write(fd, sig) != len(sig):
+            raise Hold("incomplete_owner_signature_descriptor")
+        os.lseek(fd, 0, os.SEEK_SET)
         res = subprocess.run(
             ["ssh-keygen", "-Y", "verify", "-f", str(signers),
-             "-I", PRINCIPAL, "-n", NAMESPACE, "-s", str(signature)],
+             "-I", PRINCIPAL, "-n", NAMESPACE,
+             "-s", f"/proc/self/fd/{fd}"],
             input=raw, capture_output=True, timeout=8, check=False,
+            pass_fds=(fd,),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Hold("owner_signature_verifier_unavailable") from exc
+    finally:
+        os.close(fd)
     if res.returncode:
         raise Hold("untrusted_owner_signature")
+
+
+def verify_owner_signature(raw: bytes, signature: Path, signers: Path) -> None:
+    verify_owner_signature_bytes(raw, owner_bytes(signature, 8192), signers)
 
 
 def parse_intent(raw: bytes, now: int) -> dict:
@@ -159,8 +186,9 @@ def _claim_verified(
     """
     root = claims.checked_fleet_root(fleet_root)
     raw = owner_bytes(request_file, 4096)
+    signature_bytes = owner_bytes(signature_file, 8192)
     if signature_verifier is None:
-        verify_owner_signature(raw, signature_file, allowed_signers_file)
+        verify_owner_signature_bytes(raw, signature_bytes, allowed_signers_file)
     else:
         signature_verifier(raw, signature_file, allowed_signers_file)
     doc = parse_intent(raw, int(time.time()) if now is None else now)
@@ -240,6 +268,12 @@ def _claim_verified(
                         "job_intents": list(JOBS), "event": "local-manual",
                         "request_sha256": digest,
                         "owner_principal": PRINCIPAL,
+                        # Persist the verifiable signed envelope transactionally
+                        # with admission, not merely its forgeable SQLite digest.
+                        # The existing fleet DB is owner-only; never log payloads.
+                        "signed_request_b64": base64.b64encode(raw).decode("ascii"),
+                        "signed_request_signature_b64":
+                            base64.b64encode(signature_bytes).decode("ascii"),
                         "nonce_sha256": hashlib.sha256(
                             doc["nonce"].encode("ascii")).hexdigest(),
                     }

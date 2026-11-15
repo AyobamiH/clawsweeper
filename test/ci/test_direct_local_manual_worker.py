@@ -1,4 +1,5 @@
 """Real owner SSH admission followed by source-bound, read-only worker proof."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,11 @@ class SignedManualWorkerTests(unittest.TestCase):
         self.addCleanup(self.owner.doCleanups)
         self.first = self.owner.claim()
         self.job_id = self.first["existing_fleet_job_id"]
+        # Test-only owner identity; production loads its fixed owner key path.
+        signers_patch = mock.patch.object(
+            manual, "owner_allowed_signers", return_value=self.owner.signers)
+        signers_patch.start()
+        self.addCleanup(signers_patch.stop)
 
     def verify(self):
         return worker.verify_manual_queue_provenance(
@@ -38,6 +44,44 @@ class SignedManualWorkerTests(unittest.TestCase):
         self.assertFalse(got["provider_status_authorised"])
         self.assertFalse(got["job_executed"])
         self.assertEqual(len(self.owner.rows()), 1)
+
+    def test_unsigned_sqlite_claim_cannot_impersonate_owner(self):
+        # Regression: before this fix, a forged row and observation claimed
+        # verified_owner_origin=True without a corresponding SSH signature.
+        with sqlite3.connect(self.owner.base / "fleet.sqlite3") as db:
+            row = db.execute("SELECT value FROM observations").fetchone()[0]
+            spoofed = json.loads(row)
+            spoofed.pop("signed_request_b64")
+            spoofed.pop("signed_request_signature_b64")
+            db.execute("UPDATE observations SET value=?",
+                       (json.dumps(spoofed),))
+        with self.assertRaisesRegex(
+                Hold, "missing_signed_local_manual_request_envelope"):
+            self.verify()
+
+    def test_tampered_persisted_signature_is_rejected_at_worker_start(self):
+        with sqlite3.connect(self.owner.base / "fleet.sqlite3") as db:
+            row = db.execute("SELECT value FROM observations").fetchone()[0]
+            altered = json.loads(row)
+            bad = bytearray(base64.b64decode(
+                altered["signed_request_signature_b64"], validate=True))
+            bad[-20] ^= 0x01
+            altered["signed_request_signature_b64"] = (
+                base64.b64encode(bad).decode("ascii"))
+            db.execute("UPDATE observations SET value=?",
+                       (json.dumps(altered),))
+        with self.assertRaisesRegex(Hold, "untrusted_owner_signature"):
+            self.verify()
+
+    def test_persisted_nonce_and_signed_payload_must_agree(self):
+        with sqlite3.connect(self.owner.base / "fleet.sqlite3") as db:
+            row = db.execute("SELECT value FROM observations").fetchone()[0]
+            altered = json.loads(row)
+            altered["nonce_sha256"] = "b" * 64
+            db.execute("UPDATE observations SET value=?",
+                       (json.dumps(altered),))
+        with self.assertRaisesRegex(Hold, "signed_local_manual_claim_binding"):
+            self.verify()
 
     def test_real_worker_start_checks_fresh_develop_and_full_source_plan(self):
         with mock.patch.object(manual, "read_fresh_develop_sha",
