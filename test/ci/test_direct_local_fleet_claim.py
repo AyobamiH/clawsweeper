@@ -64,6 +64,11 @@ class ExistingFleetAdmissionTests(unittest.TestCase):
             "repository": {"full_name": router.REPO},
             "ref": "refs/heads/main", "after": self.head,
             "deleted": False, "forced": False,
+            "size": 1, "distinct_size": 1,
+            "commits": [{"id": self.head,
+                         "added": [], "removed": [],
+                         "modified": ["src/clawsweeper.ts"]}],
+            "head_commit": {"id": self.head},
         }
 
     def claim(self, *, payload=None, event_name="push", secret=None,

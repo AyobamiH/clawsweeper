@@ -40,7 +40,12 @@ class SignedLocalEventTests(unittest.TestCase):
         self.secret = b"a" * 32
         self.push = {"repository": {"full_name": router.REPO},
                      "ref": "refs/heads/main", "after": self.head,
-                     "deleted": False, "forced": False}
+                     "deleted": False, "forced": False,
+                     "size": 1, "distinct_size": 1,
+                     "commits": [{"id": self.head,
+                                  "added": [], "removed": [],
+                                  "modified": ["src/clawsweeper.ts"]}],
+                     "head_commit": {"id": self.head}}
 
     def pr(self):
         return {"repository": {"full_name": router.REPO}, "action": "synchronize",
@@ -71,6 +76,35 @@ class SignedLocalEventTests(unittest.TestCase):
         self.assertFalse(result["queue_admitted"])
         self.assertFalse(result["job_executed"])
         self.assertFalse(result["github_status_published"])
+
+    def test_ignored_main_push_is_not_an_eligible_ci_event(self):
+        for files in (["apply-report.json"], ["jobs/receipt.json"],
+                      ["records/x.md", "results/data.json"],
+                      ["repair-apply-report.json"]):
+            push = copy.deepcopy(self.push)
+            push["commits"][0]["modified"] = files
+            with self.subTest(files=files), self.assertRaisesRegex(
+                    Hold, "main_push_paths_ignored"):
+                self.route(payload=push)
+
+    def test_main_push_with_nonignored_path_is_eligible(self):
+        push = copy.deepcopy(self.push)
+        push["commits"][0]["modified"] = ["records/item.md", "src/clawsweeper.ts"]
+        self.assertEqual(len(self.route(payload=push)["intents"]), 1)
+
+    def test_missing_truncated_or_ambiguous_main_diff_is_held(self):
+        for name, mutation in (
+            ("missing", lambda p: p.pop("commits")),
+            ("truncated", lambda p: p.update(size=2)),
+            ("two_commits", lambda p: p["commits"].append(copy.deepcopy(p["commits"][0]))),
+            ("missing_head", lambda p: p.pop("head_commit")),
+            ("head_mismatch", lambda p: p["head_commit"].update(id="0"*40)),
+            ("unsafe_path", lambda p: p["commits"][0].update(modified=["../src/code.ts"])),
+        ):
+            push = copy.deepcopy(self.push)
+            mutation(push)
+            with self.subTest(name=name), self.assertRaises(Hold):
+                self.route(payload=push)
 
     def test_owner_pr_routes_check_and_sparse(self):
         result = self.route(event="pull_request", payload=self.pr())

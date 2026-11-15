@@ -37,6 +37,44 @@ def obj(value):
     return value
 
 
+def _ordinary_main_push_paths_proven(payload: dict, sha: str) -> None:
+    """Conservatively enforce ci.yml push paths-ignore for a complete single commit.
+
+    A multi-commit push requires a separate GitHub compare-API adapter to
+    prove the final diff. We must not mistake intermediate paths for the
+    actual changed files or run checks on ignored-only changes.
+    """
+    commits = payload.get("commits")
+    if (not isinstance(commits, list) or len(commits) != 1
+            or (payload.get("size") is not None and
+                (type(payload["size"]) is not int or payload["size"] != 1))
+            or (payload.get("distinct_size") is not None and
+                (type(payload["distinct_size"]) is not int or
+                 payload["distinct_size"] != 1))):
+        raise Hold("main_push_changed_paths_not_proven")
+    commit = obj(commits[0])
+    head = obj(payload.get("head_commit"))
+    if (commit.get("id") != sha or head.get("id") != sha):
+        raise Hold("main_push_head_commit_mismatch")
+    paths = set()
+    for key in ("added", "modified", "removed"):
+        value = commit.get(key)
+        if not isinstance(value, list):
+            raise Hold("main_push_changed_paths_not_proven")
+        for path in value:
+            if (not isinstance(path, str) or not path or path.startswith("/")
+                    or "\x00" in path or "\\" in path
+                    or any(part in ("", ".", "..") for part in path.split("/"))):
+                raise Hold("unsafe_main_push_changed_path")
+            paths.add(path)
+    if not paths:
+        raise Hold("main_push_changed_paths_not_proven")
+    ignored = {"apply-report.json", "repair-apply-report.json"}
+    if all(path in ignored or path.startswith(
+            ("jobs/", "records/", "results/")) for path in paths):
+        raise Hold("main_push_paths_ignored_by_ci_workflow")
+
+
 def verified_ordinary_intents(plan, *, body, event_name, signature,
                               delivery_id, secret, fresh_ref_sha):
     """Return authenticated SOURCE-ONLY intents; never execute or claim success.
@@ -77,6 +115,9 @@ def verified_ordinary_intents(plan, *, body, event_name, signature,
                 or payload.get("deleted") is not False
                 or payload.get("forced") is not False):
             raise Hold("not_an_exact_safe_main_push")
+        # The main workflow ignores report/data-only pushes. Incomplete
+        # multi-commit webhook diff evidence is a HOLD, never automatic CI.
+        _ordinary_main_push_paths_proven(payload, sha)
         ref = "main"
         eligible = {".github/workflows/ci.yml#check"}
     elif event_name == "pull_request":
