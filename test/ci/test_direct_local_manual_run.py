@@ -108,7 +108,7 @@ class OwnerSignedManualRunTests(unittest.TestCase):
             now=self.now,
         )
         args.update(overrides)
-        return manual.claim_owner_signed_manual_run(**args)
+        return manual._claim_verified(**args)
 
     def rows(self):
         with sqlite3.connect(self.base / "fleet.sqlite3") as db:
@@ -119,6 +119,13 @@ class OwnerSignedManualRunTests(unittest.TestCase):
     def observations(self):
         with sqlite3.connect(self.base / "fleet.sqlite3") as db:
             return list(db.execute("SELECT key,value FROM observations"))
+
+    def test_production_entry_point_has_no_override_parameters(self):
+        import inspect
+        parameters = inspect.signature(manual.claim_owner_signed_manual_run).parameters
+        self.assertNotIn("fresh_source_sha", parameters)
+        self.assertNotIn("signature_verifier", parameters)
+        self.assertNotIn("now", parameters)
 
     def test_real_ssh_signature_one_durable_queue_row_and_replay(self):
         first = self.claim()

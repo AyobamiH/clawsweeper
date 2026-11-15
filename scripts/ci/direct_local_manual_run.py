@@ -138,14 +138,24 @@ def read_fresh_develop_sha() -> str:
 def claim_owner_signed_manual_run(
     *, checkout: Path, fleet_root: Path, request_file: Path,
     signature_file: Path, allowed_signers_file: Path,
+) -> dict:
+    """Production entry point: no injectable clock, source readback or verifier."""
+    return _claim_verified(
+        checkout=checkout, fleet_root=fleet_root, request_file=request_file,
+        signature_file=signature_file, allowed_signers_file=allowed_signers_file,
+    )
+
+
+def _claim_verified(
+    *, checkout: Path, fleet_root: Path, request_file: Path,
+    signature_file: Path, allowed_signers_file: Path,
     fresh_source_sha: str | None = None, signature_verifier=None,
     now: int | None = None,
 ) -> dict:
-    """Durably admit once under the existing canonical lock and WAL database.
+    """Internal implementation. Only in-process tests inject dependencies.
 
-    Production must omit the test-only fresh_source_sha and signature_verifier
-    overrides. A future controller release must independently verify provenance
-    before a worker can execute this new ref class.
+    The installed controller must invoke claim_owner_signed_manual_run above,
+    never this private test seam. Both entry points retain canonical fleet lock.
     """
     root = claims.checked_fleet_root(fleet_root)
     raw = owner_bytes(request_file, 4096)
