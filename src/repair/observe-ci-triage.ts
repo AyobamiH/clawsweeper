@@ -277,7 +277,9 @@ export async function runObservationLoop(options: {
   return { cycles, heldReadCycles, endedWithReadFailure };
 }
 
-export async function runCiTriageObserverCli(args: string[] = process.argv.slice(2)): Promise<void> {
+export async function runCiTriageObserverCli(
+  args: string[] = process.argv.slice(2),
+): Promise<void> {
   const numberOption = (name: string, fallback: number) => {
     const index = args.indexOf(name);
     return index === -1 ? fallback : Number(args[index + 1]);
@@ -323,6 +325,6 @@ export async function runCiTriageObserverCli(args: string[] = process.argv.slice
 }
 // Direct CLI invocation is not the trusted pre-import entrypoint.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.error(JSON.stringify({state:"held",reason:"preimport_required"}));
+  console.error(JSON.stringify({ state: "held", reason: "preimport_required" }));
   process.exitCode = 1;
 }

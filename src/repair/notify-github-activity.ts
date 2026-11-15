@@ -769,7 +769,9 @@ function writeJsonFile(filePath: string, value: JsonValue) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-export async function runCiTriageNotifierCli(args: string[] = process.argv.slice(2)): Promise<void> {
+export async function runCiTriageNotifierCli(
+  args: string[] = process.argv.slice(2),
+): Promise<void> {
   const summary = await runGithubActivityNotifier(args);
   if (summary.exitCode) process.exitCode = summary.exitCode;
 }
@@ -778,8 +780,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.env.CLAWSWEEPER_CI_TRIAGE_ENABLED === "1") {
     console.error("preimport_required");
     process.exitCode = 1;
-  } else runCiTriageNotifierCli().catch((error) => {
-    console.error(errorText(error));
-    process.exit(1);
-  });
+  } else
+    runCiTriageNotifierCli().catch((error) => {
+      console.error(errorText(error));
+      process.exit(1);
+    });
 }

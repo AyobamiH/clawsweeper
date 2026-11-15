@@ -189,8 +189,13 @@ test("manifest issuance does not execute compiled application ESM before closure
   const f = fixture();
   try {
     const entrypoints = [
-      "ci-triage-runtime", "ci-triage-evidence", "ci-triage-ledger",
-      "ci-triage", "notify-github-activity", "observe-ci-triage", "openclaw-hook",
+      "ci-triage-runtime",
+      "ci-triage-evidence",
+      "ci-triage-ledger",
+      "ci-triage",
+      "notify-github-activity",
+      "observe-ci-triage",
+      "openclaw-hook",
     ];
     for (const name of entrypoints) {
       writeFileSync(
@@ -202,13 +207,24 @@ test("manifest issuance does not execute compiled application ESM before closure
     }
     const scripts = join(f.root, "scripts/analysis");
     mkdirSync(scripts, { recursive: true });
-    for (const name of ["ci-triage-manifest.mjs", "ci-triage-preimport.mjs", "ci-triage-source-build.mjs"]) {
+    for (const name of [
+      "ci-triage-manifest.mjs",
+      "ci-triage-preimport.mjs",
+      "ci-triage-source-build.mjs",
+    ]) {
       copyFileSync(join(project, "scripts/analysis", name), join(scripts, name));
     }
     f.git("add", ".");
     f.git(
-      "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-      "-c", "commit.gpgsign=false", "commit", "-qm", "issuer-import-order-fixture",
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "issuer-import-order-fixture",
     );
     execFileSync(
       process.execPath,
@@ -222,20 +238,16 @@ test("manifest issuance does not execute compiled application ESM before closure
     const privateDir = join(f.root, "private");
     mkdirSync(privateDir, { mode: 0o700 });
     const output = join(privateDir, "runtime.json");
-    const issued = spawnSync(
-      process.execPath,
-      [join(scripts, "ci-triage-manifest.mjs"), output],
-      {
-        cwd: f.root,
-        encoding: "utf8",
-        timeout: 120000,
-        env: {
-          ...process.env,
-          CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT: toolchain,
-          CLAWSWEEPER_CI_TRIAGE_NATIVE_COMPILER_SHA256: trustedNativeCompilerSha256,
-        },
+    const issued = spawnSync(process.execPath, [join(scripts, "ci-triage-manifest.mjs"), output], {
+      cwd: f.root,
+      encoding: "utf8",
+      timeout: 120000,
+      env: {
+        ...process.env,
+        CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT: toolchain,
+        CLAWSWEEPER_CI_TRIAGE_NATIVE_COMPILER_SHA256: trustedNativeCompilerSha256,
       },
-    );
+    });
     assert.equal(issued.status, 0, issued.stderr);
     const manifest = JSON.parse(readFileSync(output, "utf8"));
     assert.equal(manifest.implementationSha, f.git("rev-parse", "HEAD"));
