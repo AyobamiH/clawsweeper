@@ -75,16 +75,19 @@ def verify_current_source_ordinary_jobs(*, fleet_root: Path,
             or db_path.stat().st_uid != os.getuid()):
         raise Hold("unsafe_existing_fleet_readback_queue")
     with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=3) as db:
+        # Count all matching attempts, including failed and still-running
+        # duplicates. Filtering only successes can hide ambiguous admission.
         rows = db.execute(
-            "SELECT id FROM jobs WHERE repo=? AND sha=? AND ref=? AND suite=? "
-            "AND state='completed' AND outcome='success' "
-            "ORDER BY id DESC LIMIT 2",
+            "SELECT id,state,outcome FROM jobs WHERE repo=? AND sha=? AND ref=? "
+            "AND suite=? ORDER BY id DESC LIMIT 2",
             (routing.REPO, source_sha, source_ref, claims.SUITE),
         ).fetchall()
     if not rows:
         raise Hold("no_exact_authenticated_real_ordinary_execution")
     if len(rows) != 1:
         raise Hold("ambiguous_multiple_authenticated_ordinary_executions")
+    if rows[0][1:] != ("completed", "success"):
+        raise Hold("exact_authenticated_ordinary_execution_not_successful")
     # Do not swallow a failed provenance or step check just because another
     # historical fleet row happens to have completed successfully.
     return verify_existing_ordinary_job_receipts(
@@ -150,6 +153,8 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
             linked.append(record)
         if not linked:
             raise Hold("legacy_suite_has_no_authenticated_ordinary_job_claim")
+        if len(linked) != 1:
+            raise Hold("ambiguous_authenticated_ordinary_event_claims")
         expected = ({".github/workflows/ci.yml#check"} if source_ref == "main"
                     else set(STEP_FOR_JOB))
         if any(not isinstance(r.get("job_intents"), list)

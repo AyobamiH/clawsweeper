@@ -195,6 +195,24 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
             readback.verify_current_source_ordinary_jobs(
                 fleet_root=self.base, source_sha=self.sha, source_ref="main")
 
+    def test_readback_holds_duplicate_observations_for_one_execution(self):
+        with sqlite3.connect(self.db) as db:
+            claim = db.execute("SELECT value FROM observations").fetchone()[0]
+            db.execute("INSERT INTO observations VALUES (?,?,?)",
+                       ("direct-local:duplicated-delivery", claim, "today"))
+        with self.assertRaisesRegex(Hold, "ambiguous_authenticated_ordinary_event"):
+            self.prove()
+
+    def test_source_readback_holds_failed_parallel_execution(self):
+        second_id = "local-fleet-abcdef123456"
+        with sqlite3.connect(self.db) as db:
+            db.execute("INSERT INTO jobs SELECT ?,repo,sha,suite,policy,ref,"
+                       "state,?,attempt,receipt FROM jobs WHERE id=?",
+                       (second_id, "failure", self.job_id))
+        with self.assertRaisesRegex(Hold, "ambiguous_multiple_authenticated"):
+            readback.verify_current_source_ordinary_jobs(
+                fleet_root=self.base, source_sha=self.sha, source_ref="main")
+
     def test_foreign_receipt_path_is_held(self):
         with sqlite3.connect(self.db) as db:
             db.execute("UPDATE jobs SET receipt=?", ("/tmp/forged.json",))
