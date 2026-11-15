@@ -38,7 +38,11 @@ function fixture(){
  mkdirSync(privateDir,{mode:0o700});
  const manifest=join(privateDir,"runtime.json");
  writeFileSync(manifest,JSON.stringify({
-  schema:"clawsweeper.ci-triage-runtime.v2",implementationSha:source,files:runtimeDigests(root)
+  schema:"clawsweeper.ci-triage-runtime.v3",implementationSha:source,files:runtimeDigests(root),
+  sourceBuild:{schema:"clawsweeper.ci-triage-build.v1",sourceSha:source,
+    runtimeFilesSha256:createHash("sha256").update(JSON.stringify(runtimeDigests(root))).digest("hex"),
+    emittedFilesSha256:"a".repeat(64),toolchain:{typescriptVersion:"7.0.2",
+    compilerSha256:"b".repeat(64),nativeCompilerSha256:"d".repeat(64),lockfileSha256:"c".repeat(64)}}
  }),{mode:0o600});
  const env={...process.env,CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA:source,
    CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256:pin,
@@ -61,7 +65,7 @@ test("tampered transitive ESM config refuses BEFORE import-time side effects",()
     "\nimport {writeFileSync} from 'node:fs';\nwriteFileSync("+JSON.stringify(marker)+",'violated');\n");
   const out=f.run();
   assert.notEqual(out.status,0);
-  assert.match(out.stderr,/preimport_runtime_changed/);
+  assert.match(out.stderr,/preimport_(runtime_changed|build_provenance)/);
   assert.equal(existsSync(marker),false);
   const notifier=f.run("notifier",[]);
   assert.notEqual(notifier.status,0);

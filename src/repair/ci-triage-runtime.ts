@@ -19,8 +19,10 @@ export const CI_TRIAGE_RUNTIME_FILES = [
 
 const MAX_RUNTIME_MODULES = 96;
 const MAX_RUNTIME_BYTES = 1024 * 1024;
-const IMPORT_DECLARATION = /^\s*import\s+(?:(?:[A-Za-z0-9_$*{},\s]+)\s+from\s+)?["']([^"']+)["']\s*;\s*$/;
-const EXPORT_FROM = /^\s*export\s+(?:\*|\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\})\s+from\s+["']([^"']+)["']\s*;\s*$/;
+const IMPORT_DECLARATION =
+  /^\s*import\s+(?:(?:[A-Za-z0-9_$*{},\s]+)\s+from\s+)?["']([^"']+)["']\s*;\s*$/;
+const EXPORT_FROM =
+  /^\s*export\s+(?:\*|\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\})\s+from\s+["']([^"']+)["']\s*;\s*$/;
 
 export function cleanImplementationSha(root: string): string {
   const env: NodeJS.ProcessEnv = {
@@ -60,7 +62,8 @@ function staticImports(code: string): string[] {
   for (const line of code.split("\n")) {
     if (/^\s*import\s+/.test(line)) {
       const declaration = IMPORT_DECLARATION.exec(line);
-      if (!declaration?.[1]) throw new CiEvidenceError("implementation_runtime_import_unsupported", true);
+      if (!declaration?.[1])
+        throw new CiEvidenceError("implementation_runtime_import_unsupported", true);
       specifiers.push(declaration[1]);
     } else if (/^\s*export\s+(?:\*|\{)/.test(line)) {
       const declaration = EXPORT_FROM.exec(line);
@@ -142,9 +145,12 @@ export function verifiedImplementationSha(root: string, manifestPath: string | u
     const files = object(manifest?.files);
     const actual = runtimeDigests(root);
     const names = Object.keys(actual).sort();
+    const sourceBuild = object(manifest?.sourceBuild);
+    const toolchain = object(sourceBuild?.toolchain);
+    const runtimeFilesSha256 = createHash("sha256").update(JSON.stringify(actual)).digest("hex");
     if (
       !manifest ||
-      manifest.schema !== "clawsweeper.ci-triage-runtime.v2" ||
+      manifest.schema !== "clawsweeper.ci-triage-runtime.v3" ||
       manifest.implementationSha !== sha ||
       !files ||
       Object.keys(files).sort().join() !== names.join()
@@ -153,6 +159,19 @@ export function verifiedImplementationSha(root: string, manifestPath: string | u
     }
     if (names.some((name) => actual[name] !== files[name])) {
       throw new CiEvidenceError("implementation_runtime_changed", true);
+    }
+    if (
+      sourceBuild?.schema !== "clawsweeper.ci-triage-build.v1" ||
+      sourceBuild.sourceSha !== sha ||
+      sourceBuild.runtimeFilesSha256 !== runtimeFilesSha256 ||
+      typeof sourceBuild.emittedFilesSha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(sourceBuild.emittedFilesSha256) ||
+      typeof toolchain?.typescriptVersion !== "string" ||
+      !/^[a-f0-9]{64}$/.test(String(toolchain?.compilerSha256 ?? "")) ||
+      !/^[a-f0-9]{64}$/.test(String(toolchain?.nativeCompilerSha256 ?? "")) ||
+      !/^[a-f0-9]{64}$/.test(String(toolchain?.lockfileSha256 ?? ""))
+    ) {
+      throw new CiEvidenceError("implementation_build_provenance_invalid", true);
     }
     return sha;
   } catch (error) {

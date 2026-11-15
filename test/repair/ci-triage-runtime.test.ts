@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -41,10 +51,23 @@ function fixture() {
   }
   const sha = git("rev-parse", "HEAD");
   const manifest = join(root, "manifest.json");
+  const files = runtimeDigests(root);
   const value = {
-    schema: "clawsweeper.ci-triage-runtime.v2",
+    schema: "clawsweeper.ci-triage-runtime.v3",
     implementationSha: sha,
-    files: runtimeDigests(root),
+    files,
+    sourceBuild: {
+      schema: "clawsweeper.ci-triage-build.v1",
+      sourceSha: sha,
+      runtimeFilesSha256: createHash("sha256").update(JSON.stringify(files)).digest("hex"),
+      emittedFilesSha256: "a".repeat(64),
+      toolchain: {
+        typescriptVersion: "7.0.2",
+        compilerSha256: "b".repeat(64),
+        nativeCompilerSha256: "d".repeat(64),
+        lockfileSha256: "c".repeat(64),
+      },
+    },
   };
   writeFileSync(manifest, JSON.stringify(value), { mode: 0o600 });
   return {
@@ -88,6 +111,25 @@ test("dirty source, wrong commit, missing manifest and public manifest fail clos
   }
 });
 
+test("v3 runtime refuses absent or forged build provenance despite correct module hashes", () => {
+  const f = fixture();
+  try {
+    const { sourceBuild, ...withoutBuild } = f.value;
+    writeFileSync(f.manifest, JSON.stringify(withoutBuild));
+    assert.throws(() => verifiedImplementationSha(f.root, f.manifest), /build_provenance_invalid/);
+    writeFileSync(
+      f.manifest,
+      JSON.stringify({
+        ...f.value,
+        sourceBuild: { ...sourceBuild, runtimeFilesSha256: "0".repeat(64) },
+      }),
+    );
+    assert.throws(() => verifiedImplementationSha(f.root, f.manifest), /build_provenance_invalid/);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("ledger refuses symlinked state and world-readable directories", () => {
   const root = mkdtempSync(join(tmpdir(), "ci-ledger-path-"));
   try {
@@ -103,15 +145,10 @@ test("ledger refuses symlinked state and world-readable directories", () => {
   }
 });
 
-
 test("full production ESM closure binds transitive config, json-types and lib before application import", () => {
   const project = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const actual = runtimeDigests(project);
-  for (const name of [
-    "dist/repair/config.js",
-    "dist/repair/json-types.js",
-    "dist/repair/lib.js",
-  ]) {
+  for (const name of ["dist/repair/config.js", "dist/repair/json-types.js", "dist/repair/lib.js"]) {
     assert.equal(typeof actual[name], "string", `missing protected ${name}`);
   }
   assert.ok(Object.keys(actual).length >= 35, "complete executable closure, not seven entrypoints");
@@ -121,7 +158,15 @@ test("full production ESM closure binds transitive config, json-types and lib be
       mkdirSync(dirname(join(f.root, name)), { recursive: true });
       copyFileSync(join(project, name), join(f.root, name));
     }
-    const expanded = { ...f.value, files: runtimeDigests(f.root) };
+    const newFiles = runtimeDigests(f.root);
+    const expanded = {
+      ...f.value,
+      files: newFiles,
+      sourceBuild: {
+        ...f.value.sourceBuild,
+        runtimeFilesSha256: createHash("sha256").update(JSON.stringify(newFiles)).digest("hex"),
+      },
+    };
     writeFileSync(f.manifest, JSON.stringify(expanded));
     assert.equal(verifiedImplementationSha(f.root, f.manifest), f.sha);
     const canary = "globalThis.__unverified_ci_triage_import_side_effect = 1;\n";

@@ -62,10 +62,17 @@ function verify(){
  const env={PATH:process.env.PATH,HOME:process.env.HOME,GIT_OPTIONAL_LOCKS:"0"};
  execFileSync("git",["-C",root,"diff","--quiet","HEAD","--"],{env,stdio:"pipe",timeout:5000});
  const current=execFileSync("git",["-C",root,"rev-parse","HEAD"],{env,encoding:"utf8",timeout:5000}).trim();
- if(current!==sha||manifest?.schema!=="clawsweeper.ci-triage-runtime.v2"||
+ if(current!==sha||manifest?.schema!=="clawsweeper.ci-triage-runtime.v3"||
     manifest?.implementationSha!==sha)fail("source_mismatch");
  if(!manifest.files||typeof manifest.files!=="object"||Array.isArray(manifest.files))fail("files");
  const actual=hashes(),names=Object.keys(actual);
+ const build=manifest.sourceBuild;
+ if(build?.schema!=="clawsweeper.ci-triage-build.v1"||build.sourceSha!==sha||
+    build.runtimeFilesSha256!==createHash("sha256").update(JSON.stringify(actual)).digest("hex")||
+    !/^[a-f0-9]{64}$/.test(build.emittedFilesSha256??"")||
+    !/^[a-f0-9]{64}$/.test(build.toolchain?.compilerSha256??"")||
+    !/^[a-f0-9]{64}$/.test(build.toolchain?.nativeCompilerSha256??"")||
+    !/^[a-f0-9]{64}$/.test(build.toolchain?.lockfileSha256??""))fail("build_provenance");
  if(Object.keys(manifest.files).sort().join()!==names.join()||
     names.some(n=>actual[n]!==manifest.files[n]))fail("runtime_changed");
 }
