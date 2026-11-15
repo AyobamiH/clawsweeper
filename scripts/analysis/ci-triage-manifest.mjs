@@ -47,7 +47,7 @@ try {
     );
   }
   const value = {
-    schema: "clawsweeper.ci-triage-runtime.v1",
+    schema: "clawsweeper.ci-triage-runtime.v2",
     implementationSha: sha,
     createdAt: new Date().toISOString(),
     files,

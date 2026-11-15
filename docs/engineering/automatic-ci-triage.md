@@ -10,7 +10,9 @@ The result means **no steps executed in these jobs**. It does not identify billi
 
 ## Activation contract
 
-Use a clean, committed checkout built with its pinned dependencies. The operator creates a new private manifest that binds the exact implementation commit and compiled runtime bytes. Changed code, a stale build, or an altered manifest fails closed.
+**Security remediation in progress; do not activate this candidate.** Manifest schema v2 now discovers the bounded static NodeNext ESM import closure of the seven triage entrypoints rather than hashing those seven files alone. It rejects non-builtin package imports, dynamic imports, unsupported compiled re-exports, unsafe local paths and closure overflow. The exact compiled closure contains at least 35 JS modules, including `dist/repair/config.js`, `dist/repair/json-types.js` and `dist/repair/lib.js`. A controlled Docker test confirms that changing transitive `config.js` fails manifest verification. These source-only checks do **not** yet protect application import-time side effects; a trusted pre-import bootstrap and reproducible compiled-build provenance are separate unfinished security gates.
+
+Use a clean, committed checkout built with its pinned dependencies. The operator creates a new private manifest that binds the exact implementation commit and compiled runtime bytes. Do not treat this private self-hash as verified build provenance until the independent source-bound build gate is completed.
 
 ```bash
 install -d -m 700 "$HOME/.local/state/clawsweeper-ci-triage"
