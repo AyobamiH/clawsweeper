@@ -169,6 +169,10 @@ test("both closure scanners reject valid but unparsed static ESM import forms", 
       'export\n*from"./unlisted.js";',
       'const x=1;import "./unlisted.js";',
       'const x=1;export * from "./unlisted.js";',
+      'const x=1; /* gap */ import "./unlisted.js";',
+      'const x=1; /* gap */ export * from "./unlisted.js";',
+      '/* gap */ import "./unlisted.js";',
+      'const x=1;\n/* gap */import "./unlisted.js";',
     ];
     for (const statement of cases) {
       writeFileSync(target, original + "\n" + statement + "\n");

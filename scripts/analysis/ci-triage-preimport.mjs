@@ -23,15 +23,85 @@ function fail(reason) {
 const importRe = /^\s*import\s+(?:(?:[A-Za-z0-9_$*{},\s]+)\s+from\s+)?["']([^"']+)["']\s*;\s*$/;
 const exportRe =
   /^\s*export\s+(?:\*|\*\s+as\s+[A-Za-z_$][\w$]*|\{[^}]*\})\s+from\s+["']([^"']+)["']\s*;\s*$/;
+
+// Preserve all string contents while replacing comments with whitespace.
+// This is a fail-closed guard: the original line grammar still parses imports.
+function stripCommentsForImportGuard(code) {
+  const out = [];
+  let state = "code";
+  let quote = "";
+  let escaped = false;
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i],
+      next = code[i + 1];
+    if (state === "line") {
+      if (ch === "\n" || ch === "\r") {
+        out.push(ch);
+        state = "code";
+      } else out.push(" ");
+      continue;
+    }
+    if (state === "block") {
+      if (ch === "*" && next === "/") {
+        out.push(" ", " ");
+        i++;
+        state = "code";
+      } else out.push(ch === "\n" || ch === "\r" ? ch : " ");
+      continue;
+    }
+    if (state === "string") {
+      out.push(ch);
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === quote) state = "code";
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      state = "string";
+      out.push(ch);
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      out.push(" ", " ");
+      i++;
+      state = "line";
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      out.push(" ", " ");
+      i++;
+      state = "block";
+      continue;
+    }
+    out.push(ch);
+  }
+  return out.join("");
+}
+
 function imports(code) {
   if (/\bimport(?:\s|\/\*[\s\S]{0,64}?\*\/)*\(/.test(code) || /\bcreateRequire\s*\(/.test(code))
     fail("dynamic_import");
   // Valid noncanonical static ESM (including import/*comment*/"./x.js"
   // and export*from"./x.js") must never escape the bounded closure parser.
+  const scrubbed = stripCommentsForImportGuard(code);
+  // Any comment-masked import/re-export at the start of a visual line must
+  // not disappear merely because the raw line begins with a comment.
+  const visibleLines = scrubbed.split("\n");
+  const rawLines = code.split("\n");
+  for (let i = 0; i < visibleLines.length; i++) {
+    const visible = visibleLines[i],
+      raw = rawLines[i];
+    if (
+      (/^\s*import\s+/.test(visible) && !/^\s*import\s+/.test(raw)) ||
+      (/^\s*export\s+(?:\*|\{)/.test(visible) && !/^\s*export\s+(?:\*|\{)/.test(raw))
+    )
+      fail("import");
+  }
   if (
-    /^\s*(?:import|export)\s*$/m.test(code) ||
-    /\bimport(?=\/[/*]|["'{*])|\bexport(?=\/[/*]|[*{])/.test(code) ||
-    /[;}][ \t]*(?:import[ \t]+(?:["'{*])|export[ \t]+(?:[*{]))/.test(code)
+    /^\s*(?:import|export)\s*$/m.test(scrubbed) ||
+    /\bimport(?=\/[/*]|["'{*])|\bexport(?=\/[/*]|[*{])/.test(scrubbed) ||
+    /[;}][ \t]*(?:import[ \t]+(?:["'{*])|export[ \t]+(?:[*{]))/.test(scrubbed)
   )
     fail("import");
   const out = [];
