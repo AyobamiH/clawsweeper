@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Fail-closed worker provenance for signed LOCAL requests in the existing fleet.
+
+A queue row is NOT an execution grant. The installed owner controller must call
+this before dispatch and again in the detached worker, then apply its normal
+isolation, resource limits, canonical lock and crash recovery. This module is
+read-only: it cannot enqueue, execute, publish statuses or start a provider run.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import sqlite3
+import stat
+import subprocess
+
+import direct_local_fleet_claim as claims
+import direct_local_manual_run as manual
+import direct_local_workflow as routing
+from estate_policy import Hold
+
+SCHEMA = "clawsweeper.owner-signed-local-manual-worker-provenance.v1"
+MAX_OBSERVATIONS = 2048
+
+
+def verify_manual_queue_provenance(*, fleet_root: Path, job_id: str) -> dict:
+    """Validate the exact single-owner admission record, before any effect.
+
+    This inexpensive local-only validation is also safe inside the owner fleet
+    lock. Only the explicit queue/admission data and existing policy are read.
+    The live source readback MUST independently run at worker execution.
+    """
+    if not isinstance(job_id, str) or not claims.ID.fullmatch(job_id):
+        raise Hold("invalid_local_manual_fleet_job_identity")
+    root = claims.checked_fleet_root(fleet_root)
+    policy = json.loads(manual.owner_bytes(
+        root / "fleet-policy.json", 262144, private=False))
+    cfg = policy.get("repositories", {}).get(manual.REPO, {})
+    source = cfg.get("enrolled_head")
+    if (not isinstance(source, str) or not routing.HEX40.fullmatch(source)
+            or policy.get("execution_hosts", {}).get(manual.REPO)
+                != os.uname().nodename):
+        raise Hold("manual_worker_policy_source_or_host_drift")
+    policy_digest = claims.reviewed_policy_hash(policy)
+    with sqlite3.connect((root / "fleet.sqlite3").as_uri() + "?mode=ro",
+                         uri=True, timeout=3) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            "SELECT id,repo,sha,suite,policy,ref,state FROM jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()
+        if (row is None or row["repo"] != manual.REPO
+                or row["sha"] != source or row["suite"] != claims.SUITE
+                or row["policy"] != policy_digest or row["ref"] != manual.REF
+                or row["state"] not in (
+                    "queued", "claimed", "running", "completed")):
+            raise Hold("manual_worker_job_identity_or_state_mismatch")
+        records = db.execute(
+            "SELECT key,value FROM observations "
+            "WHERE key LIKE ? "
+            "OR key LIKE ? LIMIT ?",
+            ("direct-local-manual:%", "direct-local:%", MAX_OBSERVATIONS + 1),
+        ).fetchall()
+        if len(records) > MAX_OBSERVATIONS:
+            raise Hold("unbounded_manual_worker_provenance")
+        matched = []
+        for candidate in records:
+            try:
+                record = json.loads(candidate["value"])
+            except (ValueError, TypeError) as exc:
+                raise Hold("unreadable_manual_worker_observation") from exc
+            if not isinstance(record, dict):
+                raise Hold("unreadable_manual_worker_observation")
+            if record.get("job_id") != job_id:
+                continue
+            matched.append((candidate["key"], record))
+    if len(matched) != 1:
+        raise Hold("missing_or_ambiguous_local_manual_owner_claim")
+    key, evidence = matched[0]
+    expected_jobs = list(manual.JOBS)
+    if (not key.startswith("direct-local-manual:")
+            or evidence.get("proof_kind") != manual.PROOF
+            or evidence.get("repo") != manual.REPO
+            or evidence.get("source_sha") != source
+            or evidence.get("source_ref") != manual.PROVIDER_REF
+            or evidence.get("ref") != manual.REF
+            or evidence.get("suite") != claims.SUITE
+            or evidence.get("event") != "local-manual"
+            or evidence.get("owner_principal") != manual.PRINCIPAL
+            or evidence.get("job_intents") != expected_jobs
+            or not isinstance(evidence.get("request_sha256"), str)
+            or not routing.HEX64.fullmatch(evidence["request_sha256"])
+            or not isinstance(evidence.get("nonce_sha256"), str)
+            or not routing.HEX64.fullmatch(evidence["nonce_sha256"])):
+        raise Hold("untrusted_local_manual_worker_observation")
+    return {
+        "schema": SCHEMA,
+        "repo": manual.REPO, "source_sha": source,
+        "ref": manual.REF, "suite": claims.SUITE, "job_id": job_id,
+        "job_intents": expected_jobs,
+        "request_sha256": evidence["request_sha256"],
+        "nonce_sha256": evidence["nonce_sha256"],
+        "queue_state": row["state"],
+        "verified_owner_origin": True,
+        "provider_status_authorised": False,
+        "github_actions_admission_authorised": False,
+        "job_executed": False,
+    }
+
+
+def verify_exact_clean_checkout(checkout: Path, expected_sha: str) -> None:
+    """A published Git ref is not enough: the loaded checkout must be clean."""
+    source = Path(checkout)
+    if (source.is_symlink() or not source.is_dir()
+            or source.stat().st_uid != os.getuid()
+            or source.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise Hold("manual_worker_unsafe_source_checkout")
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            capture_output=True, check=False, timeout=6, text=True)
+        status = subprocess.run(
+            ["git", "-C", str(source), "status", "--porcelain",
+             "--untracked-files=normal"],
+            capture_output=True, check=False, timeout=6, text=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("manual_worker_checkout_verifier_unavailable") from exc
+    if (head.returncode or status.returncode
+            or head.stdout.strip() != expected_sha or status.stdout.strip()):
+        raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+
+
+def verify_manual_worker_start(*, checkout: Path, fleet_root: Path,
+                               job_id: str) -> dict:
+    """Production worker entry point. No injectable source or trust bypass."""
+    result = verify_manual_queue_provenance(
+        fleet_root=fleet_root, job_id=job_id)
+    if result["queue_state"] not in ("queued", "claimed", "running"):
+        raise Hold("manual_worker_terminal_job_cannot_be_restarted")
+    fresh = manual.read_fresh_develop_sha()
+    if fresh != result["source_sha"]:
+        raise Hold("manual_worker_develop_moved_or_unavailable")
+    verify_exact_clean_checkout(checkout, fresh)
+    policy = json.loads(manual.owner_bytes(
+        Path(fleet_root) / "fleet-policy.json", 262144, private=False))
+    plan = routing.compile_plan(
+        Path(checkout), policy, commit=fresh,
+        hostname=os.uname().nodename)
+    selected = sorted(job["key"] for job in plan["jobs"]
+                      if job["class"] == "ordinary"
+                      and job["route"] == "existing-local-fleet"
+                      and job["suite"] == claims.SUITE)
+    if (plan.get("source_verified") is not True
+            or len(plan.get("jobs", [])) != 88
+            or selected != sorted(manual.JOBS)):
+        raise Hold("manual_worker_exact_88_job_plan_changed")
+    return {**result, "live_develop_verified": True,
+            "exact_clean_source_verified": True}

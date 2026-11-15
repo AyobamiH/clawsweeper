@@ -27,6 +27,40 @@ Only request digests and redacted provenance, never raw request/signature,
 are recorded in the existing observations table. Duplicate signed requests
 deduplicate; colliding nonces, webhook/poller jobs and stale refs are held.
 
+## Signed local-manual worker and command-level readback (source-only)
+
+The guarded worker now has a distinct read-only
+`verify_manual_queue_provenance` entry point for the existing fleet's
+dispatch lock. It permits only one exact owner-signed admission observation,
+two fixed ordinary job identities, the pinned suite and source, and rejects
+ambiguous/mixed GitHub-webhook provenance or queued-row relabelling. The
+separate production `verify_manual_worker_start` entry point performs a fresh
+read-only GitHub **develop** source GET and validates the exact 41/88 plan.
+Neither function can enqueue, run, replay or publish.
+
+The existing ordinary receipt verifier now also accepts a **separately marked**
+`local-manual` execution with exactly those two command results. It checks
+the canonical SQLite row, signed-request digest linkage, fixed command list,
+per-step exit codes, immutable source/policy, log SHA-256, isolated-container
+cleanup and fresh develop ref. It rejects inherited GitHub status objects.
+The required signed-controller receipt fields are:
+`origin=owner-signed-local-manual`,
+`provider_status=suppressed-local-manual` and
+`manual_request_sha256=<admitted exact request digest>`.
+These do not claim any GitHub provider-accepted check.
+
+**Not yet installed:** r7's worker-side execution guard, current-reference
+check, pending/final status-reporting path and interruption recovery still
+recognise only authenticated GitHub webhook origin. Before any live manual
+claim, a separately signed exact-source controller must call the above
+guard under its canonical dispatch lock AND at worker start, re-check develop
+on retries, and suppress *all* GitHub status POST/outbox paths for manual
+jobs. It must set the above receipt markers only after the normal isolated
+container run and verified cleanup, mark local-only reports durably, and
+re-run interrupted jobs exclusively through existing lease/lock recovery.
+No new worker, queue or scheduler is authorised. This source-only readback
+implementation cannot substitute for that controller release.
+
 ## Important production boundary
 
 **Current r7 does NOT accept or execute local-manual jobs.** Its existing

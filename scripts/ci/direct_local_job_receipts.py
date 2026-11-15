@@ -17,6 +17,8 @@ import sqlite3
 import stat
 
 import direct_local_fleet_claim as claims
+import direct_local_manual_run as manual
+import direct_local_manual_worker as manual_worker
 import direct_local_workflow as routing
 from estate_policy import Hold
 
@@ -65,7 +67,7 @@ def verify_current_source_ordinary_jobs(*, fleet_root: Path,
     There is no new queue, worker, scheduler, webhook or provider effect.
     """
     if (not routing.HEX40.fullmatch(source_sha)
-            or not (source_ref == "main" or (
+            or not (source_ref in ("main", manual.REF) or (
                 source_ref.startswith("pr/") and source_ref[3:].isdigit()
                 and not source_ref[3:].startswith("0")))):
         raise Hold("invalid_source_for_existing_ordinary_readback")
@@ -105,11 +107,20 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
     """
     if (not claims.ID.fullmatch(fleet_job_id)
             or not routing.HEX40.fullmatch(source_sha)
-            or source_ref != "main"
+            or source_ref not in ("main", manual.REF)
                 and (not source_ref.startswith("pr/") or
                      not source_ref[3:].isdigit() or source_ref[3:].startswith("0"))):
         raise Hold("invalid_exact_ordinary_job_identity")
     root = claims.checked_fleet_root(fleet_root)
+    if source_ref == manual.REF:
+        # Genuine owner-signed manual admission has distinct provenance.
+        # Never relabel old GitHub deliveries or use a historical success.
+        manual_proof = manual_worker.verify_manual_queue_provenance(
+            fleet_root=root, job_id=fleet_job_id)
+        if manual_proof["source_sha"] != source_sha:
+            raise Hold("manual_receipt_provenance_source_mismatch")
+        if manual.read_fresh_develop_sha() != source_sha:
+            raise Hold("manual_receipt_fresh_develop_mismatch")
     policy = _object_bytes(_owner_file(root / "fleet-policy.json", 262144))
     cfg = policy.get("repositories", {}).get(routing.REPO, {})
     if (cfg.get("enrolled_head") != source_sha
@@ -133,7 +144,8 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
         # A compromised/unbounded observations table must not turn a
         # read-only evidence operation into uncontrolled memory usage.
         observations = db.execute(
-            "SELECT value FROM observations WHERE key LIKE 'direct-local:%' LIMIT 2049"
+            "SELECT value FROM observations WHERE key LIKE 'direct-local:%' "
+            "OR key LIKE 'direct-local-manual:%' LIMIT 2049"
         ).fetchall()
         if len(observations) > 2048:
             raise Hold("unbounded_direct_local_delivery_evidence")
@@ -142,7 +154,19 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
             record = _object_bytes(item["value"].encode("utf-8"))
             if record.get("job_id") != fleet_job_id:
                 continue
-            if (record.get("proof_kind") != "authenticated_queue_admission_not_execution"
+            if source_ref == manual.REF:
+                if (record.get("proof_kind") != manual.PROOF
+                        or record.get("source_sha") != source_sha
+                        or record.get("source_ref") != manual.PROVIDER_REF
+                        or record.get("ref") != manual.REF
+                        or record.get("suite") != claims.SUITE
+                        or record.get("event") != "local-manual"
+                        or record.get("owner_principal") != manual.PRINCIPAL
+                        or record.get("job_intents") != list(manual.JOBS)
+                        or record.get("request_sha256")
+                           != manual_proof["request_sha256"]):
+                    raise Hold("untrusted_local_manual_receipt_provenance")
+            elif (record.get("proof_kind") != "authenticated_queue_admission_not_execution"
                     or record.get("source_sha") != source_sha
                     or record.get("ref") != source_ref
                     or record.get("suite") != claims.SUITE
@@ -157,10 +181,12 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
             raise Hold("ambiguous_authenticated_ordinary_event_claims")
         expected = ({".github/workflows/ci.yml#check"} if source_ref == "main"
                     else set(STEP_FOR_JOB))
+        expected_event = ("local-manual" if source_ref == manual.REF
+                          else "push" if source_ref == "main" else "pull_request")
         if any(not isinstance(r.get("job_intents"), list)
                or len(r["job_intents"]) != len(expected)
                or set(r["job_intents"]) != expected
-               or r.get("event") != ("push" if source_ref == "main" else "pull_request")
+               or r.get("event") != expected_event
                for r in linked):
             raise Hold("direct_local_event_job_identity_mismatch")
         receipt_path = root / "evidence" / "fleet" / (fleet_job_id + ".json")
@@ -176,6 +202,15 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
                 or receipt.get("mode") != "local-scheduler-not-github-actions"
                 or receipt.get("cleanup", {}).get("container_absent") is not True):
             raise Hold("incomplete_or_foreign_real_fleet_receipt")
+        if source_ref == manual.REF:
+            # Only a signed controller release may emit this local-only marker
+            # after suppressing the GitHub status outbox for this job.
+            if (receipt.get("origin") != "owner-signed-local-manual"
+                    or receipt.get("provider_status") != "suppressed-local-manual"
+                    or receipt.get("manual_request_sha256")
+                       != manual_proof["request_sha256"]
+                    or receipt.get("github_status") is not None):
+                raise Hold("manual_receipt_provider_status_not_proven_suppressed")
         steps = receipt.get("steps")
         if not isinstance(steps, list) or len(steps) != len(STEP_COMMANDS):
             raise Hold("missing_exact_real_step_execution")
@@ -207,7 +242,10 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
              "local_execution": "passed_verified_existing_fleet_receipt"}
             for key in sorted(expected)
         ],
-        "authenticated_event_claim_count": len(linked),
+        "authenticated_event_claim_count": len(linked) if source_ref != manual.REF else 0,
+        "authenticated_owner_manual_claim_count": len(linked) if source_ref == manual.REF else 0,
+        "source_kind": "owner-signed-local-manual" if source_ref == manual.REF else "github-webhook",
+        "provider_status_suppressed_in_receipt": source_ref == manual.REF,
         "github_provider_check_independently_verified": False,
         "protected_codeql_satisfied": False,
     }
