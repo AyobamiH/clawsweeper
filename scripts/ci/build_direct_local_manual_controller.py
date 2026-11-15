@@ -17,7 +17,7 @@ import subprocess
 
 REPO = "AyobamiH/clawsweeper"
 R7_SHA256 = "30749cfab0eab608a5a5b23bb06a7510ae277c96fb7accb6689ba64433a73297"
-MANUAL_SOURCE_COMMIT = "1da545d4c7aa2ed057160b7576daec8da4c46613"
+MANUAL_SOURCE_COMMIT = "fd975fcca48e0cd7d175eb095288909feec136ab"
 MANUAL_SOURCE_CHECKOUT = "/home/johnh/.local/share/agent-worktrees/clawsweeper/direct-local-event-bridge-20261113"
 LIBRARIES = (
     "estate_policy.py",
