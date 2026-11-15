@@ -89,3 +89,42 @@ claim 2/88 accepted from unit tests, a queue claim, or this document.
 
 No PR, GitHub Actions, protected-main mutation, credential export, or production
 release is authorised by this source change.
+
+## Byte-pinned r7 controller release candidate (15 November)
+
+`scripts/ci/build_direct_local_manual_controller.py` builds an **offline staging
+candidate**, not a running service. It rejects any existing/dirty target and any
+base controller other than SHA-256
+`30749cfab0eab608a5a5b23bb06a7510ae277c96fb7accb6689ba64433a73297`.
+The seven manual libraries are extracted from existing SSH-signed source
+`1da545d4c7aa2ed057160b7576daec8da4c46613`, not copied from a
+potentially dirty worktree. The replacement controller embeds their
+individual file digests and uses a fresh isolated Python subprocess for
+manual source/provenance checks, so existing r7 import-cache entries cannot
+substitute older library code.
+
+The candidate adds exactly one `manual-claim` entry point with owner-signed
+request/signature file arguments. It invokes the existing fleet queue claim
+and canonical control.lock, never a second service, Actions workflow,
+fabricated HMAC delivery or blind SQLite insert. During the existing
+detached-worker lifecycle, source, host, owner-signature provenance and current
+published develop ref must pass both dispatch and worker-start checks.
+Interrupted jobs continue through the existing lease, state-file and
+container-absence recovery. Both required ordinary commands remain mapped to
+the unchanged linux-node24 suite. All 86 other classes remain held.
+
+Manual jobs skip pending/final GitHub API status calls. Their terminal
+receipts are marked `origin=owner-signed-local-manual` and
+`provider_status=suppressed-local-manual` only after exact job identity,
+outcome and owned-container cleanup are checked. The existing reporting outbox
+can safely reconcile an interrupted final receipt without a provider POST.
+Normal non-manual repository status publishing and the old webhook path remain
+unchanged.
+
+**Not authorised for live use:** this is a candidate controller + frozen source
+package, not a production installation. It still requires a separately signed
+and owner-approved r8 install manifest covering all installed file hashes,
+single-owner fleet cutover, exclusive lock, rollback to the exact r7 files and
+first genuine owner-signed request. Existing r7 integrity, four foreign queued
+jobs and protected main/CodeQL rules must remain intact. Only the production
+two-job receipt readback can change 0/88 into 2/88.
