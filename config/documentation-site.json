@@ -109,6 +109,11 @@
       "banner": "This is a source-only direct-local routing plan. It does not admit, execute or operationally accept any of the 88 jobs."
     },
     {
+      "path": "direct-local-manual-run.md",
+      "lifecycle": "proposed",
+      "banner": "This describes the signed direct-local manual-run candidate, not an installed controller or accepted CI execution. A separate exact-source production installation is required."
+    },
+    {
       "path": "CI-EXECUTION-POLICY.md",
       "lifecycle": "proposed",
       "banner": "CircleCI fallback is not active until provider, free-budget, exact-SHA and recovery acceptance are verified."
