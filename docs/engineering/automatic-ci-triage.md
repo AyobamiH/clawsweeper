@@ -51,11 +51,18 @@ the explicitly verified notifier/observer routes enter the builtins-only
 pre-import bootstrap. Unexpected flag values refuse. The workflow invokes
 the shell entry directly rather than first launching `pnpm`, as Node processes
 `NODE_OPTIONS=--import/--require` **before** loading any JavaScript bootstrap.
-The trusted shell entry unsets `NODE_OPTIONS` before Node startup. Merely
+The Linux trusted shell entry executes root-managed `/usr/bin/node` (not a
+PATH-resolved `node`) and unsets `NODE_OPTIONS` before Node startup.
+Production release policy must pin and attest that absolute Node binary,
+the shell, bootstrap and manifest source identities together. Merely
 checking this value inside a Node module would be too late. The builtins-only
 bootstrap also calls the Linux system Git binary by absolute path during
 source verification, with fixed `PATH`, disabled external diff/textconv and
 filesystem-monitor hooks, and no inherited global/system Git configuration.
+The offline build/manifest issuer likewise uses absolute system Git and tar
+with a restricted environment; the signed native compiler receives no caller
+PATH/HOME. Negative source-build and shell-launch tests place executable hostile
+`git`, `tar` and `node` shims first on PATH and require zero execution.
 Otherwise an attacker-controlled `git` executable in inherited `PATH` could
 perform an effect **before** the manifest and compiled-runtime checks complete.
 The pre-import regression includes an executable hostile Git shim and checks
@@ -70,7 +77,7 @@ provenance and operator release approval.
 The optional owner-local observer uses existing authenticated `gh api` GET access and invokes the **same notifier**, rather than selecting a skill or inventing an independent classifier:
 
 ```bash
-sh scripts/analysis/ci-triage-launch.sh observer --watch-seconds 300 --interval-seconds 30
+/bin/sh scripts/analysis/ci-triage-launch.sh observer --watch-seconds 300 --interval-seconds 30
 ```
 
 Transient authenticated GET transport failures receive at most one immediate read retry. A timed observation continues after a held collection-read cycle, without retrying any agent POST. Source, policy, manifest and storage faults still stop immediately. A window ending with an unresolved read failure exits nonzero; the summary counts held cycles explicitly.

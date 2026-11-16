@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -238,17 +240,30 @@ test("manifest issuance does not execute compiled application ESM before closure
     const privateDir = join(f.root, "private");
     mkdirSync(privateDir, { mode: 0o700 });
     const output = join(privateDir, "runtime.json");
+    const hostileBin = join(f.root, "hostile-path");
+    mkdirSync(hostileBin);
+    const marker = join(f.root, "UNTRUSTED_BUILD_TOOL_EXECUTED");
+    for (const tool of ["git", "tar"]) {
+      const shim = join(hostileBin, tool);
+      writeFileSync(
+        shim,
+        '#!/bin/sh\nprintf "unsafe\\n" > ' + JSON.stringify(marker) + "\nexit 86\n",
+      );
+      chmodSync(shim, 0o700);
+    }
     const issued = spawnSync(process.execPath, [join(scripts, "ci-triage-manifest.mjs"), output], {
       cwd: f.root,
       encoding: "utf8",
       timeout: 120000,
       env: {
         ...process.env,
+        PATH: hostileBin + ":" + process.env.PATH,
         CLAWSWEEPER_CI_TRIAGE_TOOLCHAIN_ROOT: toolchain,
         CLAWSWEEPER_CI_TRIAGE_NATIVE_COMPILER_SHA256: trustedNativeCompilerSha256,
       },
     });
     assert.equal(issued.status, 0, issued.stderr);
+    assert.equal(existsSync(marker), false, "trusted source-build/manifest must not execute PATH shims");
     const manifest = JSON.parse(readFileSync(output, "utf8"));
     assert.equal(manifest.implementationSha, f.git("rev-parse", "HEAD"));
     assert.equal(Object.keys(manifest.files).length, entrypoints.length);

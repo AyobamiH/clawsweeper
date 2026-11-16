@@ -187,4 +187,4 @@ jobs:
           CLAWSWEEPER_DISCORD_TARGET: ${{ vars.CLAWSWEEPER_DISCORD_TARGET }}
         run: |
           set -euo pipefail
-          sh scripts/analysis/ci-triage-launch.sh notifier --write-report
+          /bin/sh scripts/analysis/ci-triage-launch.sh notifier --write-report

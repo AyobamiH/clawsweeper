@@ -43,15 +43,29 @@ try {
   // Every executed module must have a canonical tracked TypeScript source.
   for (const name of Object.keys(files)) {
     execFileSync(
-      "git",
+      "/usr/bin/git",
       [
+        "-c",
+        "core.fsmonitor=false",
         "-C",
         root,
         "ls-files",
         "--error-unmatch",
         name.replace(/^dist\//, "src/").replace(/\.js$/, ".ts"),
       ],
-      { stdio: "ignore", timeout: 5000 },
+      {
+        stdio: "ignore",
+        timeout: 5000,
+        env: {
+          PATH: "/usr/bin:/bin",
+          HOME: "/nonexistent",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_ATTR_NOSYSTEM: "1",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+        },
+      },
     );
   }
   const value = {

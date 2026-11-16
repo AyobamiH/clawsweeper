@@ -15,12 +15,22 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const sourceEnv = { PATH: process.env.PATH, HOME: process.env.HOME, GIT_OPTIONAL_LOCKS: "0" };
+// Exact-source verification is pre-execution security code: never trust caller PATH.
+const sourceEnv = Object.freeze({
+  PATH: "/usr/bin:/bin",
+  HOME: "/nonexistent",
+  GIT_OPTIONAL_LOCKS: "0",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_ATTR_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0",
+});
+const gitPrefix = (root) => ["-c", "core.fsmonitor=false", "-C", root];
 function refuse(reason) {
   throw new Error("source_build_" + reason);
 }
 function git(root, ...args) {
-  return execFileSync("git", ["-C", root, ...args], {
+  return execFileSync("/usr/bin/git", [...gitPrefix(root), ...args], {
     env: sourceEnv,
     encoding: "utf8",
     timeout: 10000,
@@ -29,7 +39,7 @@ function git(root, ...args) {
 }
 function cleanSha(root) {
   try {
-    git(root, "diff", "--quiet", "HEAD", "--");
+    git(root, "diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--");
     const sha = git(root, "rev-parse", "HEAD");
     if (!/^[a-f0-9]{40}$/.test(sha)) refuse("source_sha");
     return sha;
@@ -110,13 +120,14 @@ export function sourceBoundBuild(
     refuse("native_toolchain_untrusted");
   const temp = mkdtempSync(join(tmpdir(), "clawsweeper-ci-triage-build-"));
   try {
-    const archive = execFileSync("git", ["-C", root, "archive", "--format=tar", sha], {
+    const archive = execFileSync("/usr/bin/git", [...gitPrefix(root), "archive", "--format=tar", sha], {
       env: sourceEnv,
       timeout: 30000,
       maxBuffer: 64 * 1024 * 1024,
     });
-    execFileSync("tar", ["-xf", "-", "-C", temp], {
+    execFileSync("/usr/bin/tar", ["-xf", "-", "-C", temp], {
       input: archive,
+      env: sourceEnv,
       timeout: 30000,
       maxBuffer: 1024 * 1024,
     });
@@ -126,7 +137,7 @@ export function sourceBoundBuild(
       cwd: temp,
       timeout: 120000,
       maxBuffer: 4 * 1024 * 1024,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: "production" },
+      env: { PATH: "/usr/bin:/bin", HOME: "/nonexistent", NODE_ENV: "production" },
     });
     if (cleanSha(root) !== sha) refuse("source_changed");
     const files = outputHashes(temp);

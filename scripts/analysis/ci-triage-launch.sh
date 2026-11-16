@@ -1,5 +1,7 @@
 #!/bin/sh
 # Minimal local entrypoint. No Node code runs before triage selection.
+# All Node invocations use the root-managed Linux system binary, never a
+# caller-controlled PATH executable. Production pins its exact binary identity.
 # Production launchers must pin this exact shell entry and the Node bootstrap
 # to the same reviewed, signed source revision.
 set -eu
@@ -16,7 +18,7 @@ case "$mode" in
     case "${CLAWSWEEPER_CI_TRIAGE_ENABLED:-0}" in
       0)
         # Existing generic notification path remains unchanged when disabled.
-        exec node dist/repair/notify-github-activity.js "$@"
+        exec /usr/bin/node dist/repair/notify-github-activity.js "$@"
         ;;
       1)
         mode=verified-notifier
@@ -40,6 +42,6 @@ esac
 # The trusted shell launch therefore clears it BEFORE starting Node.
 unset NODE_OPTIONS
 if [ "$mode" = "observer" ]; then
-  exec node scripts/analysis/ci-triage-preimport.mjs observer "$@"
+  exec /usr/bin/node scripts/analysis/ci-triage-preimport.mjs observer "$@"
 fi
-exec node scripts/analysis/ci-triage-preimport.mjs notifier "$@"
+exec /usr/bin/node scripts/analysis/ci-triage-preimport.mjs notifier "$@"

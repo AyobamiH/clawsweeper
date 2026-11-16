@@ -21,73 +21,53 @@ test("normal GitHub notifier and package commands use the same shell launch boun
   const pkg = JSON.parse(readFileSync(join(project, "package.json"), "utf8"));
   const wf = readFileSync(join(project, ".github/workflows/github-activity.yml"), "utf8");
   const entry = pkg.scripts["repair:notify-github-activity"];
-  assert.equal(entry, "sh " + launcher + " notifier");
-  assert.equal(pkg.scripts["ci-triage:observe:verified"], "sh " + launcher + " observer");
-  assert.equal(pkg.scripts["ci-triage:notify:verified"], "sh " + launcher + " verified-notifier");
-  assert.match(wf, /sh scripts\/analysis\/ci-triage-launch\.sh notifier --write-report/);
+  assert.equal(entry, "/bin/sh " + launcher + " notifier");
+  assert.equal(pkg.scripts["ci-triage:observe:verified"], "/bin/sh " + launcher + " observer");
+  assert.equal(pkg.scripts["ci-triage:notify:verified"], "/bin/sh " + launcher + " verified-notifier");
+  assert.match(wf, /\/bin\/sh scripts\/analysis\/ci-triage-launch\.sh notifier --write-report/);
   assert.doesNotMatch(wf, /pnpm run repair:notify-github-activity/);
 });
 
-test("disabled notifier remains legacy; enabled notifier and observer route through verified bootstrap", () => {
-  const root = mkdtempSync(join(tmpdir(), "ci-triage-launch-"));
+test("verified launcher refuses untrusted PATH Node before the pre-import bootstrap", () => {
+  const root = mkdtempSync(join(tmpdir(), "ci-triage-path-"));
   try {
     const bin = join(root, "bin");
     mkdirSync(bin);
+    const marker = join(root, "UNTRUSTED_NODE_EXECUTED");
     const shim = join(bin, "node");
     writeFileSync(
       shim,
-      '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CI_TRIAGE_TEST_ARGS"\n' +
-        'printf \'%s\\n\' "${NODE_OPTIONS-unset}" > "$CI_TRIAGE_TEST_OPTIONS"\n',
+      '#!/bin/sh\nprintf "unsafe\\n" > ' + JSON.stringify(marker) + "\nexit 86\n",
     );
     chmodSync(shim, 0o700);
-    const args = join(root, "args");
-    const options = join(root, "options");
     const env = {
       ...process.env,
       PATH: bin + ":" + process.env.PATH,
-      CI_TRIAGE_TEST_ARGS: args,
-      CI_TRIAGE_TEST_OPTIONS: options,
-      NODE_OPTIONS: "--require=/untrusted/preload.js",
+      CLAWSWEEPER_CI_TRIAGE_ENABLED: "1",
+      CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA: "",
+      CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256: "",
+      CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256: "",
+      CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST: "",
     };
-    const run = (mode, setting) =>
-      spawnSync("sh", [launcher, mode, "--write-report"], {
-        cwd: project,
-        env: { ...env, CLAWSWEEPER_CI_TRIAGE_ENABLED: setting },
-        encoding: "utf8",
-        timeout: 4000,
+    for (const mode of ["notifier", "verified-notifier", "observer"]) {
+      const result = spawnSync("/bin/sh", [launcher, mode, "--help"], {
+        cwd: project, env, encoding: "utf8", timeout: 15000,
       });
-    let result = run("notifier", "0");
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(readFileSync(args, "utf8").trim().split("\n"), [
-      "dist/repair/notify-github-activity.js",
-      "--write-report",
-    ]);
-    result = run("notifier", "1");
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(readFileSync(args, "utf8").trim().split("\n"), [
-      "scripts/analysis/ci-triage-preimport.mjs",
-      "notifier",
-      "--write-report",
-    ]);
-    assert.equal(readFileSync(options, "utf8").trim(), "unset");
-    result = run("observer", "0");
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(readFileSync(args, "utf8").trim().split("\n"), [
-      "scripts/analysis/ci-triage-preimport.mjs",
-      "observer",
-      "--write-report",
-    ]);
-    assert.equal(readFileSync(options, "utf8").trim(), "unset");
-    result = run("verified-notifier", "0");
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(readFileSync(options, "utf8").trim(), "unset");
-    const before = readFileSync(args, "utf8");
-    result = run("notifier", "surprise");
-    assert.equal(result.status, 64);
-    assert.equal(readFileSync(args, "utf8"), before, "invalid flag must not start Node");
-    result = run("unreviewed-job", "1");
-    assert.equal(result.status, 64);
-    assert.equal(readFileSync(args, "utf8"), before, "unknown mode must not start Node");
+      assert.notEqual(result.status, 0, result.stderr);
+      assert.match(result.stderr, /preimport_pin_required/);
+      assert.equal(existsSync(marker), false, mode + " must not launch PATH Node");
+    }
+    for (const mode of ["notifier", "unreviewed-job"]) {
+      const result = spawnSync("/bin/sh", [launcher, mode, "--help"], {
+        cwd: project,
+        env: { ...env, CLAWSWEEPER_CI_TRIAGE_ENABLED: "surprise" },
+        encoding: "utf8", timeout: 15000,
+      });
+      assert.equal(result.status, 64);
+      assert.equal(existsSync(marker), false);
+    }
+    const script = readFileSync(join(project, launcher), "utf8");
+    assert.match(script, /exec \/usr\/bin\/node dist\/repair\/notify-github-activity\.js/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
