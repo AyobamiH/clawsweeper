@@ -380,3 +380,43 @@ reconciliation or ClawSweeper discovery. A zero-event cycle must not silently
 fall back to the older main suite. Detached ClawSweeper workers independently
 check this pinned SHA in addition to verifying the fixed, owner-private release.
 A mismatch holds ClawSweeper without blocking the other repositories.
+
+
+### Reviewed, source-bound split policy proposal (16 November)
+
+The existing `scripts/ci/direct_local_distinct_admission.py` now also exposes
+`propose_split_fleet_policy(checkout, policy, commit, hostname)`. It is a **pure
+in-memory proposal**: it writes no live policy, controller, database, job,
+provider status or GitHub event, and explicitly reports installed/admitted/
+executed as false and accepted as zero. The caller must pin the actual
+installed policy file SHA-256 and exact enrolled source commit before using the
+result in a later authorised installation transaction.
+
+It first rechecks the complete 41-workflow/88-job source plan, current
+enrolled fleet/source/host contract, unchanged four-command aggregate suite,
+and exact reviewed resource fields. It then derives only two additional suite
+profiles with **different names and policy hashes**, using the same pinned
+image, four CPU allocation, 3 GiB memory, 4 GiB writable layer, PIDs and
+environment revision as the existing aggregate. Both retain actionlint and
+frozen dependency install; `linux-node24-claw-check` runs only the full
+repository validation, while `linux-node24-claw-sparse` runs only the
+sparse-checkout smoke. Timeouts are copied from the already reviewed steps.
+
+The proposal is idempotent. An incomplete, altered or privileged existing
+split suite, changed command, mutable environment, unknown policy extra,
+foreign host or drifted source holds before any proposal is returned. The
+original `linux-node24` remains unchanged; other repositories and the whole
+fleet policy remain unchanged except the two proposed suite additions.
+Offline tests prove the resulting policy hashes match the installed fleet's
+canonical hashing contract and that no queue row is created.
+
+**Not acceptance:** these candidate suites are not installed, and this code
+does not enqueue or execute them. The separate bounded release must check
+the exact frozen controller/installer, acquire exclusive fleet ownership,
+install a reviewed identical candidate policy and authenticated event path,
+preserve byte-verified rollback and the existing 12 GiB stop reserve,
+then collect two *distinct* source/intent-bound sandbox/container identities
+and terminal receipts. Current C: headroom is below the 16.5 GiB requirement
+for even one full per-definition ClawSweeper job. Do not trigger GitHub Actions,
+rewrite the original aggregate historical receipt or count the two commands
+inside it as two independently accepted jobs.

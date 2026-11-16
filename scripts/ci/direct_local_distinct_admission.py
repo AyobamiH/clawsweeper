@@ -8,6 +8,7 @@ It never reinterprets the historical aggregate run as two executed jobs.
 """
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -90,6 +91,71 @@ def _split_policy(policy: dict, intents: list[dict]) -> list[dict]:
     if not keys or len(keys) != len(set(keys)) or not set(keys) <= set(SPLIT):
         raise Hold("invalid_authenticated_ordinary_split_intents")
     return [profiles[name] for name in keys]
+
+
+def propose_split_fleet_policy(*, checkout: Path, policy: dict,
+                               commit: str, hostname: str) -> dict:
+    """Pure in-memory policy proposal for the SAME installed fleet, not rollout.
+
+    Bind every command to the existing trusted four-step aggregate contract.
+    Never infer a new command, image, credential, worker or resource allowance.
+    The caller must separately authorise an exact policy/controller installation.
+    """
+    if not isinstance(policy, dict) or not isinstance(policy.get("repositories"), dict):
+        raise Hold("invalid_existing_fleet_policy")
+    plan = router.compile_plan(checkout, policy, commit=commit, hostname=hostname)
+    if plan["summary"]["mapped_to_existing_fleet"] != 2:
+        raise Hold("source_is_not_enrolled_for_existing_fleet")
+    cfg = policy["repositories"][router.REPO]
+    suites = cfg["suites"]
+    base = suites.get("linux-node24")
+    fields = ("node", "image", "cpus", "memory_mib", "pids",
+              "writable_mib", "execution_environment_revision")
+    if not isinstance(base, dict) or set(base) != {*fields, "steps"}:
+        raise Hold("unreviewed_aggregate_fleet_profile")
+    steps = base["steps"]
+    expected = (*SETUP,
+                (TERMINAL_NAME[".github/workflows/ci.yml#check"],
+                 SPLIT[".github/workflows/ci.yml#check"][1]),
+                (TERMINAL_NAME[".github/workflows/ci.yml#sparse-repair-builds"],
+                 SPLIT[".github/workflows/ci.yml#sparse-repair-builds"][1]))
+    if (not isinstance(steps, list) or len(steps) != len(expected)
+            or any(not isinstance(step, dict)
+                   or set(step) != {"name", "command", "timeout"}
+                   or step.get("name") != label
+                   or step.get("command") != command
+                   or type(step.get("timeout")) is not int
+                   or not 1 <= step["timeout"] <= 1800
+                   for step, (label, command) in zip(steps, expected))):
+        raise Hold("aggregate_commands_do_not_match_source_review")
+    present = set(suites).intersection(suite for suite, _ in SPLIT.values())
+    expected_suites = {suite for suite, _ in SPLIT.values()}
+    if present and present != expected_suites:
+        raise Hold("preexisting_split_suite_differs_from_reviewed_source")
+    candidate = copy.deepcopy(policy)
+    candidate_suites = candidate["repositories"][router.REPO]["suites"]
+    for i, (_definition, (suite, _)) in enumerate(SPLIT.items()):
+        proposed = {field: copy.deepcopy(base[field]) for field in fields}
+        proposed["steps"] = [copy.deepcopy(step) for step in
+                             (steps[0], steps[1], steps[i + 2])]
+        if suite in candidate_suites and candidate_suites[suite] != proposed:
+            raise Hold("preexisting_split_suite_differs_from_reviewed_source")
+        candidate_suites[suite] = proposed
+    verified = _split_policy(candidate, [{"job": name} for name in SPLIT])
+    canonical = lambda data: json.dumps(data, sort_keys=True,
+                                        separators=(",", ":")).encode()
+    return {
+        "schema": "clawsweeper.source-only-split-policy-proposal.v1",
+        "source_sha": commit,
+        "original_policy_sha256": hashlib.sha256(canonical(policy)).hexdigest(),
+        "proposed_policy_sha256": hashlib.sha256(canonical(candidate)).hexdigest(),
+        "proposed_policy": candidate,
+        "suites": verified,
+        "installed": False,
+        "admitted": False,
+        "executed": False,
+        "accepted": 0,
+    }
 
 
 def claim_distinct_existing_fleet_jobs(

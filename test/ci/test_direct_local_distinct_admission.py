@@ -101,6 +101,90 @@ class DistinctExistingFleetAdmissionTests(unittest.TestCase):
         with sqlite3.connect(self.base / "fleet.sqlite3") as db:
             return db.execute("SELECT id,suite,state FROM jobs ORDER BY suite").fetchall()
 
+    def proposal(self, policy=None):
+        return split.propose_split_fleet_policy(
+            checkout=ROOT, policy=self.policy if policy is None else policy,
+            commit=self.head, hostname=os.uname().nodename)
+
+    def test_policy_proposal_adds_only_two_exact_isolated_suites(self):
+        baseline = copy.deepcopy(self.policy)
+        for name, _ in split.SPLIT.values():
+            del baseline["repositories"][router.REPO]["suites"][name]
+        unmodified = copy.deepcopy(baseline)
+        proposal = self.proposal(baseline)
+        self.assertEqual(baseline, unmodified)
+        self.assertFalse(proposal["installed"])
+        self.assertFalse(proposal["admitted"])
+        self.assertFalse(proposal["executed"])
+        self.assertEqual(proposal["accepted"], 0)
+        self.assertEqual(proposal["source_sha"], self.head)
+        suites = proposal["proposed_policy"]["repositories"][router.REPO]["suites"]
+        self.assertEqual(set(suites), {"linux-node24",
+                                      "linux-node24-claw-check",
+                                      "linux-node24-claw-sparse"})
+        self.assertEqual(suites["linux-node24"], unmodified["repositories"][router.REPO]["suites"]["linux-node24"])
+        self.assertEqual(len({item["policy"] for item in proposal["suites"]}), 2)
+        for item in proposal["suites"]:
+            spec = suites[item["suite"]]
+            self.assertEqual(len(spec["steps"]), 3)
+            self.assertEqual(spec["steps"][:2], suites["linux-node24"]["steps"][:2])
+            reference = {
+                "version": baseline["version"], "suite": spec,
+                "contract": baseline["repositories"][router.REPO]["contract"],
+                "image": baseline["image"],
+                "node_versions": baseline["node_versions"],
+            }
+            self.assertEqual(item["policy"], hashlib.sha256(
+                json.dumps(reference, sort_keys=True).encode()).hexdigest())
+        self.assertEqual(self.proposal(proposal["proposed_policy"])["proposed_policy_sha256"],
+                         proposal["proposed_policy_sha256"])
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(json.loads(self.policy_path.read_text()), self.policy)
+
+    def test_policy_proposal_holds_on_command_or_privilege_drift(self):
+        for modifier in ("extra", "injected_env", "new_command", "timeout"):
+            policy = copy.deepcopy(self.policy)
+            base = policy["repositories"][router.REPO]["suites"]["linux-node24"]
+            if modifier == "extra":
+                base["secrets"] = ["unreviewed"]
+            elif modifier == "injected_env":
+                base["steps"][1]["env"] = {"EXFIL": "1"}
+            elif modifier == "new_command":
+                base["steps"][2]["command"] = "curl https://unapproved.example"
+            else:
+                base["steps"][0]["timeout"] = 3600
+            with self.subTest(modifier=modifier), self.assertRaises(Hold):
+                self.proposal(policy)
+        self.assertEqual(self.rows(), [])
+
+    def test_policy_proposal_holds_on_partial_or_changed_split_suites(self):
+        for modifier in ("partial", "changed"):
+            policy = copy.deepcopy(self.policy)
+            cfg = policy["repositories"][router.REPO]["suites"]
+            if modifier == "partial":
+                del cfg["linux-node24-claw-sparse"]
+            else:
+                cfg["linux-node24-claw-sparse"]["steps"][2]["command"] = "echo bypass"
+            with self.subTest(modifier=modifier), self.assertRaisesRegex(
+                Hold, "preexisting_split_suite_differs"):
+                self.proposal(policy)
+        self.assertEqual(self.rows(), [])
+
+    def test_policy_proposal_requires_exact_enrolled_source_and_host(self):
+        policy = copy.deepcopy(self.policy)
+        policy["repositories"][router.REPO]["enrolled_head"] = "a" * 40
+        with self.assertRaises(Hold):
+            self.proposal(policy)
+        with self.assertRaises(Hold):
+            split.propose_split_fleet_policy(
+                checkout=ROOT, policy=self.policy, commit="0" * 40,
+                hostname=os.uname().nodename)
+        with self.assertRaises(Hold):
+            split.propose_split_fleet_policy(
+                checkout=ROOT, policy=self.policy, commit=self.head,
+                hostname="unapproved-foreign-host")
+        self.assertEqual(self.rows(), [])
+
     def test_pr_claims_two_independently_identified_jobs_atomically(self):
         first = self.claim()
         rows = self.rows()
