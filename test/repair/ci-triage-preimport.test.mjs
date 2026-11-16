@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { spawnSync, execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -119,6 +120,35 @@ test("builtins-only bootstrap executes verified observer help", () => {
     f.cleanup();
   }
 });
+test("preimport source verification never executes an inherited-PATH git shim", () => {
+  const f = fixture();
+  try {
+    const bin = join(f.root, "untrusted-bin");
+    mkdirSync(bin);
+    const marker = join(f.root, "UNTRUSTED_GIT_SHIM_EXECUTED");
+    const shim = join(bin, "git");
+    writeFileSync(shim, "#!/bin/sh\nprintf unsafe > " + JSON.stringify(marker) + "\nexit 72\n");
+    chmodSync(shim, 0o700);
+    const hostilePath = bin + ":" + (process.env.PATH ?? "");
+    const control = spawnSync("git", ["--version"], {
+      env: { ...process.env, PATH: hostilePath },
+      encoding: "utf8",
+    });
+    assert.equal(control.status, 72, control.stderr);
+    assert.equal(existsSync(marker), true, "hostile shim must be a real executable");
+    rmSync(marker);
+    const out = f.run("observer", ["--help"], {
+      PATH: hostilePath,
+      GIT_CONFIG_GLOBAL: join(f.root, "untrusted-global-gitconfig"),
+    });
+    assert.equal(existsSync(marker), false, "git binary must be trusted, not PATH-resolved");
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /observe-ci-triage/);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("tampered transitive ESM config refuses BEFORE import-time side effects", () => {
   const f = fixture();
   try {

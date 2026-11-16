@@ -52,7 +52,14 @@ pre-import bootstrap. Unexpected flag values refuse. The workflow invokes
 the shell entry directly rather than first launching `pnpm`, as Node processes
 `NODE_OPTIONS=--import/--require` **before** loading any JavaScript bootstrap.
 The trusted shell entry unsets `NODE_OPTIONS` before Node startup. Merely
-checking this value inside a Node module would be too late. The signed release
+checking this value inside a Node module would be too late. The builtins-only
+bootstrap also calls the Linux system Git binary by absolute path during
+source verification, with fixed `PATH`, disabled external diff/textconv and
+filesystem-monitor hooks, and no inherited global/system Git configuration.
+Otherwise an attacker-controlled `git` executable in inherited `PATH` could
+perform an effect **before** the manifest and compiled-runtime checks complete.
+The pre-import regression includes an executable hostile Git shim and checks
+that it never runs while the normal observer still succeeds. The signed release
 must bind the shell entry, bootstrap identity, runtime manifest digest and
 reviewed source SHA together; source-only tests do not grant that authority.
 Commands that launch via an upstream Node-based package manager may already

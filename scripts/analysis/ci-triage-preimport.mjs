@@ -195,13 +195,26 @@ function verify() {
   if (createHash("sha256").update(manifestBytes).digest("hex") !== manifestPin)
     fail("manifest_changed");
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, GIT_OPTIONAL_LOCKS: "0" };
-  execFileSync("git", ["-C", root, "diff", "--quiet", "HEAD", "--"], {
-    env,
-    stdio: "pipe",
-    timeout: 5000,
-  });
-  const current = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+  // Pre-import verification must not execute an attacker-controlled git from
+  // PATH or invoke a repository-configured external diff/fsmonitor process.
+  // This production path is Linux-only, with a trusted system Git executable.
+  const gitBinary = "/usr/bin/git";
+  const env = {
+    PATH: "/usr/bin:/bin",
+    HOME: "/nonexistent",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_ATTR_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+  const gitPrefix = ["-c", "core.fsmonitor=false", "-C", root];
+  execFileSync(
+    gitBinary,
+    [...gitPrefix, "diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
+    { env, stdio: "pipe", timeout: 5000 },
+  );
+  const current = execFileSync(gitBinary, [...gitPrefix, "rev-parse", "HEAD"], {
     env,
     encoding: "utf8",
     timeout: 5000,
