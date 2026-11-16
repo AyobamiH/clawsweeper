@@ -227,5 +227,152 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
             self.prove()
 
 
+
+
+class DistinctOrdinaryTerminalReceiptTests(unittest.TestCase):
+    def setUp(self):
+        from test_direct_local_distinct_admission import DistinctExistingFleetAdmissionTests
+        import direct_local_distinct_admission as split
+        self.split = split
+        self.fixture = DistinctExistingFleetAdmissionTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.base = self.fixture.base
+        self.sha = self.fixture.head
+        self.controller_data = b"exact-reviewed-test-fleet-controller\n"
+        self.controller_hash = hashlib.sha256(self.controller_data).hexdigest()
+        (self.base / "fleet_ci.py").write_bytes(self.controller_data)
+        (self.base / "evidence" / "fleet").mkdir(parents=True)
+        (self.base / "logs" / "fleet").mkdir(parents=True)
+        result = self.fixture.claim()
+        self.assertEqual(result["admission"], "queued")
+        self.entries = result["jobs"]
+        self.receipts = {}
+        for entry in self.entries:
+            job_id = entry["job_id"]
+            definition = entry["workflow_job"]
+            data = b"real direct local job evidence " + job_id.encode()
+            checkout = ("git init -q; git remote add origin https://github.com/AyobamiH/clawsweeper.git; "
+                        "git -c credential.helper= fetch --quiet --depth=1 origin " + self.sha +
+                        '; git checkout --quiet --detach FETCH_HEAD; test "$(git rev-parse HEAD)" = "$GITHUB_SHA"')
+            steps = [{"name": "Exact commit checkout", "command": checkout, "exit_code": 0}]
+            steps += [{"name": label, "command": command, "exit_code": 0}
+                      for label, command in
+                      (*split.SETUP, (split.TERMINAL_NAME[definition], split.SPLIT[definition][1]))]
+            receipt = {
+                "id": job_id, "repo": router.REPO, "sha": self.sha,
+                "ref": "pr/101", "suite": entry["suite"],
+                "policy": entry["policy"], "attempt": 1,
+                "outcome": "success", "mode": "local-scheduler-not-github-actions",
+                "executor": "web/docker", "sandbox_identity": job_id,
+                "engine_container_id": hashlib.sha256(job_id.encode()).hexdigest(),
+                "image": self.fixture.policy["repositories"][router.REPO][
+                    "suites"][entry["suite"]]["image"],
+                "isolation": "unprivileged Docker container with no host socket or personal files",
+                "resource_limits": {field: self.fixture.policy["repositories"][router.REPO][
+                    "suites"][entry["suite"]][field]
+                    for field in ("cpus", "memory_mib", "pids", "writable_mib")}
+                    | {"host_cpu_affinity": [0, 1, 2, 3]},
+                "controller_sha256": self.controller_hash,
+                "started_at": "2026-11-16T18:00:00Z",
+                "finished_at": "2026-11-16T18:01:00Z",
+                "cleanup": {"container_absent": True,
+                            "workspace_and_dependency_cache_removed": True},
+                "steps": steps, "log_bytes": len(data),
+                "log_sha256": hashlib.sha256(data).hexdigest(),
+            }
+            self.receipts[job_id] = receipt
+            self.save_receipt(job_id)
+            (self.base / "logs" / "fleet" / (job_id + ".log")).write_bytes(data)
+            with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+                db.execute("UPDATE jobs SET state='completed',outcome='success',"
+                           "attempt=1,receipt=? WHERE id=?",
+                           (str(self.base / "evidence" / "fleet" / (job_id + ".json")), job_id))
+
+    def save_receipt(self, job_id):
+        (self.base / "evidence" / "fleet" / (job_id + ".json")).write_text(
+            json.dumps(self.receipts[job_id]))
+
+    def prove(self, **overrides):
+        return readback.verify_distinct_ordinary_definition_receipts(
+            checkout=ROOT, fleet_root=self.base, source_sha=self.sha,
+            source_ref="pr/101",
+            reviewed_controller_sha256=overrides.get("controller_hash", self.controller_hash))
+
+    def test_two_real_job_ids_and_independent_sandbox_receipts(self):
+        result = self.prove()
+        self.assertEqual(result["accepted_independent_ordinary_jobs"], 2)
+        self.assertEqual(len(result["independent_definition_jobs"]), 2)
+        self.assertEqual(len({r["sandbox_identity"] for r in result["independent_definition_jobs"]}), 2)
+        self.assertFalse(result["github_provider_checks_verified"])
+        self.assertFalse(result["protected_codeql_satisfied"])
+
+    def test_single_aggregate_success_cannot_replace_two_jobs(self):
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            db.execute("UPDATE jobs SET suite='linux-node24' WHERE id=?",
+                       (self.entries[0]["job_id"],))
+        with self.assertRaisesRegex(Hold, "unrecognised_or_ambiguous"):
+            self.prove()
+
+    def test_independent_sandbox_identity_missing_or_reused(self):
+        a, b = (e["job_id"] for e in self.entries)
+        for replacement in (None, a):
+            self.receipts[b]["sandbox_identity"] = replacement
+            self.save_receipt(b)
+            with self.assertRaisesRegex(Hold, "incomplete_distinct_sandbox"):
+                self.prove()
+
+    def test_failed_or_unreviewed_command_never_passes(self):
+        ident = self.entries[0]["job_id"]
+        for replacement in (1, True):
+            self.receipts[ident]["steps"][-1]["exit_code"] = replacement
+            self.save_receipt(ident)
+            with self.assertRaisesRegex(Hold, "distinct_sandbox_command"):
+                self.prove()
+
+    def test_modified_provenance_or_duplicate_ownership_holds(self):
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            key, raw = db.execute("SELECT key,value FROM observations").fetchone()
+            data = json.loads(raw)
+            data["jobs"][0]["policy"] = "0" * 64
+            db.execute("UPDATE observations SET value=? WHERE key=?",
+                       (json.dumps(data), key))
+        with self.assertRaisesRegex(Hold, "distinct_job_policy"):
+            self.prove()
+
+    def test_controller_mismatch_or_log_tampering_holds(self):
+        with self.assertRaisesRegex(Hold, "controller_digest"):
+            self.prove(controller_hash="0" * 64)
+        ident = self.entries[0]["job_id"]
+        (self.base / "logs" / "fleet" / (ident + ".log")).write_bytes(b"changed")
+        with self.assertRaisesRegex(Hold, "incomplete_distinct_sandbox"):
+            self.prove()
+
+    def test_engine_container_identity_must_be_distinct_and_trusted(self):
+        a, b = (e["job_id"] for e in self.entries)
+        self.receipts[b]["engine_container_id"] = self.receipts[a]["engine_container_id"]
+        self.save_receipt(b)
+        with self.assertRaisesRegex(Hold, "shared_distinct_fleet_sandbox"):
+            self.prove()
+        self.receipts[b]["engine_container_id"] = "not-an-engine-id"
+        self.save_receipt(b)
+        with self.assertRaisesRegex(Hold, "incomplete_distinct_sandbox"):
+            self.prove()
+
+    def test_resource_or_image_expansion_cannot_be_accepted(self):
+        job = self.entries[0]["job_id"]
+        self.receipts[job]["resource_limits"]["memory_mib"] *= 2
+        self.save_receipt(job)
+        with self.assertRaisesRegex(Hold, "incomplete_distinct_sandbox"):
+            self.prove()
+
+    def test_pending_or_retried_attempt_cannot_claim_acceptance(self):
+        ident = self.entries[0]["job_id"]
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            db.execute("UPDATE jobs SET attempt=2 WHERE id=?", (ident,))
+        with self.assertRaisesRegex(Hold, "not_terminal_first_attempt"):
+            self.prove()
+
+
 if __name__ == "__main__":
     unittest.main()

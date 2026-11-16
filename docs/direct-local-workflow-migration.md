@@ -420,3 +420,21 @@ and terminal receipts. Current C: headroom is below the 16.5 GiB requirement
 for even one full per-definition ClawSweeper job. Do not trigger GitHub Actions,
 rewrite the original aggregate historical receipt or count the two commands
 inside it as two independently accepted jobs.
+
+### Split-suite terminal proof boundary (16 November 2026)
+
+The local-only verify_distinct_ordinary_definition_receipts verifies
+exactly two separately executed PR-scoped ordinary CI definitions using
+the one existing fleet: unique immutable queue and Docker engine IDs,
+authenticated distinct-delivery provenance, two separate per-job receipts,
+source-bound commands, an exact reviewed installed controller SHA-256,
+resource limits, separate log digests, and teardown proofs.
+
+The installed r8p3 worker does NOT emit the required sandbox_identity and
+engine_container_id proof fields. Those fields must be captured from the
+actual Docker inspect result by an exact-source-reviewed controller cutover,
+not derived or invented from job IDs. The cutover must also exclude
+ClawSweeper from generic polling while preserving other repositories.
+Current aggregate receipts and fixture results are not 2/2 acceptance.
+Even genuine distinct local receipts do not satisfy app-owned CodeQL,
+provider-required checks or overall 88/88 production acceptance.
