@@ -27,6 +27,31 @@ SOURCE_FILES = frozenset({
 SHA40 = re.compile(r"[a-f0-9]{40}\Z")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 SCHEMA = "clawsweeper.direct-local-owner-release.v1"
+# Source identity is verified BEFORE importing any checked-out modules.
+# Never execute an inherited PATH shim or a checkout-defined fsmonitor.
+TRUSTED_GIT = "/usr/bin/git"
+
+
+def trusted_git_env() -> dict:
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/nonexistent",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LC_ALL": "C",
+    }
+
+
+def trusted_git_source() -> str:
+    binary = Path(TRUSTED_GIT)
+    if (binary.is_symlink() or not binary.is_file()
+            or binary.stat().st_uid != 0
+            or binary.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise RuntimeError("untrusted_absolute_git_binary")
+    return str(binary)
+
 
 
 def unique_keys(pairs):
@@ -90,12 +115,15 @@ def verify_release(doc: dict) -> None:
         if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("direct_local_source_module_drift")
     try:
+        git_binary, process_env = trusted_git_source(), trusted_git_env()
         head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, check=True, timeout=5, text=True)
+            [git_binary, "-c", "core.fsmonitor=false", "-C", str(root),
+             "rev-parse", "HEAD"],
+            env=process_env, capture_output=True, check=True, timeout=5, text=True)
         changed = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
-            capture_output=True, check=True, timeout=5, text=True)
+            [git_binary, "-c", "core.fsmonitor=false", "-C", str(root),
+             "status", "--porcelain", "--untracked-files=normal"],
+            env=process_env, capture_output=True, check=True, timeout=5, text=True)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("unavailable_direct_local_git_identity") from exc
     if head.stdout.strip() != doc["commit"] or changed.stdout.strip():

@@ -505,3 +505,10 @@ manual success receipt without admitting it as a new distinct job, and add
 real Docker identity capture. No v2 release may be installed merely by
 swapping an environment variable or unverified module at runtime. C: physical
 reserve and genuine two-job acceptance remain independent gates.
+
+
+The v2 release verifier also corrects an inherited pre-import trust boundary:
+Git HEAD and clean-tree checks invoke root-owned absolute /usr/bin/git with a
+sealed minimal environment and disabled Git fsmonitor. An adversarial PATH
+shim cannot execute before the release source is verified. This change is
+source-only and does not claim to remediate a running installed controller.

@@ -166,6 +166,31 @@ class OwnerReleaseTests(unittest.TestCase):
         self.save()
         return extra
 
+    def test_adversarial_path_git_shim_cannot_run_before_source_verification(self):
+        from unittest import mock
+        self.make_distinct_release()
+        forged_dir = self.home / "untrusted-path"
+        forged_dir.mkdir()
+        marker_file = self.home / "untrusted-git-executed"
+        shim = forged_dir / "git"
+        shim.write_text("#!/bin/sh" + chr(10) +
+                        "printf shim > " + str(marker_file) + chr(10) +
+                        "exit 0" + chr(10))
+        shim.chmod(0o755)
+        # Positive control: the fake tool really is executable and writes
+        # its marker, so not observing it below proves PATH was ignored.
+        subprocess.run([str(shim)], check=True)
+        self.assertTrue(marker_file.exists())
+        marker_file.unlink()
+        with mock.patch.dict(os.environ, {"PATH": str(forged_dir),
+                                          "HOME": str(forged_dir)}):
+            hook = module.load_released_distinct_claim(
+                self.release, adapter=lambda **_kw: {"source_verified": True})
+            self.assertTrue(hook(
+                body=b"{}", event_name="push", signature="sig",
+                delivery_id="uuid", secret=b"secret")["source_verified"])
+        self.assertFalse(marker_file.exists())
+
     def test_distinct_release_pins_additional_source_and_is_non_mutating(self):
         self.make_distinct_release()
         calls = []
