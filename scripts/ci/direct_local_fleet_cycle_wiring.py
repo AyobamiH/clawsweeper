@@ -396,3 +396,185 @@ def compile_distinct_sandbox_evidence_source(
         "proposed_sha256": sha(output),
         "content": output,
     }
+
+
+V2_SCHEMA = "clawsweeper.exact-installed-fleet-distinct-release-upgrade.v1"
+V2_AUTH_START = b"    def _dl_authenticated_existing_job(_dl_id):\n"
+V2_AUTH_END = b"    if a.mode=='execute-job':\n"
+V2_MARKER = b"    # Source-verified v2 distinct job identity; aggregate v1 is forbidden.\n"
+
+# Deliberately does not insert a new process, service, scheduler, queue, or lock.
+# The current installed r8p3 already owns the pre-lock ingress and detached worker.
+V2_AUTH = '''    # Source-verified v2 distinct job identity; aggregate v1 is forbidden.
+    def _dl_authenticated_existing_job(_dl_id):
+        import re
+        _dl_job = db.execute(
+            'SELECT id,repo,sha,suite,ref,policy,state FROM jobs WHERE id=?',
+            (_dl_id,)).fetchone()
+        if _dl_job is None:
+            return False
+        if _dl_job['repo'] != 'AyobamiH/clawsweeper':
+            return True
+        _dl_names = {
+            '.github/workflows/ci.yml#check': 'linux-node24-claw-check',
+            '.github/workflows/ci.yml#sparse-repair-builds':
+                'linux-node24-claw-sparse'
+        }
+        _dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')
+        if (not isinstance(_dl_cfg, dict)
+                or _dl_job['sha'] != _dl_cfg.get('enrolled_head')
+                or _dl_job['suite'] not in set(_dl_names.values())
+                or _dl_job['state'] not in ('queued','claimed','running')):
+            return False
+        _dl_records = db.execute(
+            "SELECT value FROM observations WHERE key LIKE "
+            "'direct-local-distinct:%' LIMIT 2049"
+        ).fetchall()
+        if len(_dl_records) > 2048:
+            return False
+        _dl_matched = 0
+        for _dl_record in _dl_records:
+            try:
+                _dl_evidence = json.loads(_dl_record['value'])
+            except (ValueError, TypeError):
+                return False
+            if not isinstance(_dl_evidence, dict):
+                return False
+            _dl_jobs = _dl_evidence.get('jobs')
+            if not isinstance(_dl_jobs, list):
+                return False
+            if not any(isinstance(item, dict) and
+                       item.get('job_id') == _dl_id for item in _dl_jobs):
+                continue
+            _dl_ref = _dl_job['ref']
+            if _dl_ref == 'main':
+                _dl_expected = {'.github/workflows/ci.yml#check'}
+                _dl_event = 'push'
+            elif isinstance(_dl_ref, str) and re.fullmatch(
+                    r'pr/[1-9][0-9]*', _dl_ref):
+                _dl_expected = set(_dl_names)
+                _dl_event = 'pull_request'
+            else:
+                return False
+            if (len(_dl_jobs) != len(_dl_expected)
+                    or _dl_evidence.get('proof_kind') !=
+                       'authenticated_distinct_admission_not_execution'
+                    or _dl_evidence.get('source_sha') != _dl_job['sha']
+                    or _dl_evidence.get('ref') != _dl_ref
+                    or _dl_evidence.get('event') != _dl_event
+                    or any(not isinstance(_dl_evidence.get(field), str)
+                           or not re.fullmatch(
+                               r'[a-f0-9]{64}', _dl_evidence[field])
+                           for field in ('delivery_sha256',
+                                         'intent_identity_sha256'))):
+                return False
+            _dl_seen_names = set()
+            _dl_seen_ids = set()
+            _dl_found = 0
+            for _dl_entry in _dl_jobs:
+                if not isinstance(_dl_entry, dict):
+                    return False
+                _dl_name = _dl_entry.get('workflow_job')
+                _dl_job_id = _dl_entry.get('job_id')
+                if (_dl_name not in _dl_expected
+                        or _dl_entry.get('suite') != _dl_names[_dl_name]
+                        or not isinstance(_dl_job_id, str)
+                        or not re.fullmatch(
+                            r'local-fleet-[a-f0-9]{12}', _dl_job_id)
+                        or not isinstance(_dl_entry.get('policy'), str)
+                        or not re.fullmatch(
+                            r'[a-f0-9]{64}', _dl_entry['policy'])
+                        or _dl_name in _dl_seen_names
+                        or _dl_job_id in _dl_seen_ids):
+                    return False
+                # Verify both identities against the SAME durable queue, not
+                # only the active job. A forged sibling policy is a hold.
+                _dl_related = db.execute(
+                    'SELECT repo,sha,ref,suite,policy,state FROM jobs WHERE id=?',
+                    (_dl_job_id,)).fetchone()
+                if (_dl_related is None
+                        or _dl_related['repo'] != 'AyobamiH/clawsweeper'
+                        or _dl_related['sha'] != _dl_job['sha']
+                        or _dl_related['ref'] != _dl_ref
+                        or _dl_related['suite'] != _dl_entry['suite']
+                        or _dl_related['policy'] != _dl_entry['policy']
+                        or _dl_related['state'] not in
+                           ('queued','claimed','running','completed')):
+                    return False
+                _dl_seen_names.add(_dl_name)
+                _dl_seen_ids.add(_dl_job_id)
+                if _dl_job_id == _dl_id:
+                    if (_dl_entry['suite'] != _dl_job['suite']
+                            or _dl_entry['policy'] != _dl_job['policy']):
+                        return False
+                    _dl_found += 1
+            if _dl_seen_names != _dl_expected or _dl_found != 1:
+                return False
+            _dl_matched += 1
+        return _dl_matched == 1
+'''
+
+
+def compile_distinct_v2_installed_upgrade(
+    current: bytes, *, expected_sha256: str,
+) -> dict:
+    """Render an exact-r8p3 v1 -> v2 source-only upgrade, never install.
+
+    Keeps the existing owner lock, scheduled timer, ingress module and detached
+    worker. The v2 release must be separately signed and enrolled; any v1
+    aggregate delivery or job remains held, including after installation.
+    """
+    if (not isinstance(current, bytes)
+            or not isinstance(expected_sha256, str)
+            or not SHA256.fullmatch(expected_sha256)
+            or sha(current) != expected_sha256):
+        raise RuntimeError("distinct_upgrade_exact_installed_source_mismatch")
+    try:
+        tree = ast.parse(current.decode("utf-8"))
+    except (SyntaxError, UnicodeDecodeError) as exc:
+        raise RuntimeError("distinct_upgrade_invalid_controller_source") from exc
+    if (not any(isinstance(node, ast.FunctionDef) and node.name == "main"
+                for node in tree.body)
+            or current.count(V2_AUTH_START) != 1
+            or current.count(V2_AUTH_END) != 1
+            or V2_MARKER in current
+            or current.count(b"    with core.lock():\n") != 1
+            or b"'direct-local:%' LIMIT 2049" not in current
+            or b"'authenticated_queue_admission_not_execution'" not in current
+            or b"_dl_job['suite'] != 'linux-node24'" not in current):
+        raise RuntimeError("distinct_upgrade_unreviewed_v1_fleet_shape")
+    start = current.index(V2_AUTH_START)
+    end = current.index(V2_AUTH_END, start)
+    if not (start < end < current.index(b"    with core.lock():\n")):
+        raise RuntimeError("distinct_upgrade_wrong_worker_location")
+    substitutions = (
+        (b"_dl_verifier.read_release(_dl_bound)",
+         b"_dl_verifier.read_distinct_release(_dl_bound)"),
+        (b"_dl_verifier.verify_release(_dl_doc)",
+         b"_dl_verifier.verify_distinct_release(_dl_doc)"),
+        (b"_dl_mod.read_release(_dl_bound)",
+         b"_dl_mod.read_distinct_release(_dl_bound)"),
+        (b"_dl_mod.verify_release(_dl_doc)",
+         b"_dl_mod.verify_distinct_release(_dl_doc)"),
+        (b"secret_file=ROOT / 'secrets' / 'webhook-hmac')",
+         b"secret_file=ROOT / 'secrets' / 'webhook-hmac',\n"
+         b"                    profile='distinct')"),
+    )
+    output = current[:start] + V2_AUTH.encode("utf-8") + current[end:]
+    for before, after in substitutions:
+        if current.count(before) != 1 or output.count(before) != 1:
+            raise RuntimeError("distinct_upgrade_unreviewed_v1_release_hook")
+        output = output.replace(before, after, 1)
+    ast.parse(output.decode("utf-8"))
+    if (output.count(V2_MARKER) != 1
+            or b"'direct-local:%' LIMIT 2049" in output
+            or b"_dl_verifier.read_release(_dl_bound)" in output
+            or b"_dl_mod.read_release(_dl_bound)" in output):
+        raise RuntimeError("distinct_upgrade_legacy_fallback_detected")
+    return {
+        "schema": V2_SCHEMA,
+        "state": "source_only_not_installed",
+        "original_sha256": expected_sha256,
+        "proposed_sha256": sha(output),
+        "content": output,
+    }
