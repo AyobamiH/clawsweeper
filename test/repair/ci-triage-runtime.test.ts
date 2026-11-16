@@ -193,6 +193,13 @@ test("runtime closure refuses dynamic import, package resolution and unlisted mo
     assert.throws(() => runtimeDigests(f.root), /runtime_dynamic_import/);
     writeFileSync(entry, 'import /* unsupported */ ("./unlisted.js");\n');
     assert.throws(() => runtimeDigests(f.root), /runtime_dynamic_import/);
+    writeFileSync(entry, "await import/*" + "x".repeat(128) + '*/("./unlisted.js");\n');
+    assert.throws(() => runtimeDigests(f.root), /runtime_dynamic_import/);
+    writeFileSync(
+      entry,
+      "const localRequire = createRequire/*" + "y".repeat(128) + "*/(import.meta.url);\n",
+    );
+    assert.throws(() => runtimeDigests(f.root), /runtime_dynamic_import/);
     writeFileSync(entry, 'import express from "express";\n');
     assert.throws(() => runtimeDigests(f.root), /runtime_package_unsupported/);
     writeFileSync(entry, 'export {\n  unlisted\n} from "./unlisted.js";\n');

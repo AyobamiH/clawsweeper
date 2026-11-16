@@ -119,6 +119,11 @@ function staticImports(code: string): string[] {
   // rather than silently omit executable modules from the integrity closure.
   // Reject multiple declarations on one line for the same reason.
   const scrubbed = stripCommentsForImportGuard(code);
+  // Comments have no fixed length in valid JavaScript. Inspect the
+  // comment-scrubbed tokens rather than a bounded raw-comment regex.
+  if (/\b(?:import|createRequire)\s*\(/.test(scrubbed)) {
+    throw new CiEvidenceError("implementation_runtime_dynamic_import", true);
+  }
   // Any comment-masked import/re-export at the start of a visual line must
   // not disappear merely because the raw line begins with a comment.
   const visibleLines = scrubbed.split("\n");

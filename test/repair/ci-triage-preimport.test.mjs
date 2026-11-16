@@ -187,3 +187,15 @@ test("both closure scanners reject valid but unparsed static ESM import forms", 
     f.cleanup();
   }
 });
+
+test("long-comment dynamic imports are rejected by both runtime scanners", () => {
+  const f = fixture();
+  try {
+    const target = join(f.root, "dist/repair/observe-ci-triage.js");
+    appendFileSync(target, "\nawait import/*" + "x".repeat(128) + '*/("./unlisted.js");\n');
+    assert.throws(() => runtimeDigests(f.root), /implementation_runtime_dynamic_import/);
+    assert.throws(() => bootstrapDigests(f.root), /preimport_dynamic_import/);
+  } finally {
+    f.cleanup();
+  }
+});

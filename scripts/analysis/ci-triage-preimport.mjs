@@ -85,6 +85,8 @@ function imports(code) {
   // Valid noncanonical static ESM (including import/*comment*/"./x.js"
   // and export*from"./x.js") must never escape the bounded closure parser.
   const scrubbed = stripCommentsForImportGuard(code);
+  // Long valid comments cannot hide a dynamic module load from the guard.
+  if (/\b(?:import|createRequire)\s*\(/.test(scrubbed)) fail("dynamic_import");
   // Any comment-masked import/re-export at the start of a visual line must
   // not disappear merely because the raw line begins with a comment.
   const visibleLines = scrubbed.split("\n");
