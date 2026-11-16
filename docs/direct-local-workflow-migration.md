@@ -122,10 +122,34 @@ container or credential store is created.
 readback, an authorised exact-source fleet-policy pin and integration with
 the existing webhook/polling controller. Only the fleet controller may execute
 the queued job, reconcile interruptions and publish its separately labelled
-local CI result. A single suite may represent both ordinary jobs only where
-individual required-command execution and successful step receipts are verified;
-the suite's aggregate success must not be misreported as two accepted jobs.
+local CI result. A single aggregate suite can prove individual commands
+passed, **not** that two independently isolated workflow jobs executed.
 Existing protected CodeQL checks remain independent and unaltered.
+
+### Independent ordinary-job queue admission — source-only
+
+`scripts/ci/direct_local_distinct_admission.py` prepares the next migration
+gate without installing a second scheduler. It authenticates a bounded GitHub
+push/PR event through the existing source/HMAC validator and, only when an
+owner-installed existing-fleet policy explicitly contains **two separately
+reviewed, source-pinned suites**, claims one main-push job or two PR jobs in
+one transaction under the **existing** fleet `control.lock` and SQLite
+`jobs`/`observations` tables. Each definition gets its own fleet ID and
+suite policy digest. The split steps allow only the exact reviewed setup and
+one appropriate final command per suite; image, CPU, memory, PIDs and writable
+layer stay identical to the older reviewed aggregate profile. An existing
+aggregate job for that source, a different delivery ID trying to relabel a
+split job, or a partial/changed split claim is a HOLD, not a retry.
+
+This is **source-only** and is **not called by the live controller**. The
+installed ClawSweeper policy still has only `linux-node24`; no split jobs
+were queued or executed by this change. A source-bound owner-authorised
+installation must separately establish policy, frozen worker imports,
+release/rollback, per-definition sandbox identity and exact terminal receipt
+readback before either ordinary job can become accepted. The original signed
+manual request does **not** authorise two new executions by reinterpretation;
+this prototype covers authentic future webhook events, not a new manual
+signature or GitHub Actions dispatch. No GitHub provider checks are fabricated.
 
 The no-provider tests use temporary owner-marked SQLite WAL databases and
 never write to the installed fleet queue.
