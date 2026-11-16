@@ -5,6 +5,7 @@ import copy
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -159,6 +160,39 @@ class FreshProviderReadbackTests(unittest.TestCase):
             self.claim(fetch=offline)
         self.assertEqual(self.fixture.rows(), [])
 
+    def test_provider_get_uses_root_pinned_gh_and_sealed_environment(self):
+        response = mock.Mock(returncode=0,
+                             stdout=b'{"ref":"refs/heads/main"}', stderr=b"")
+        with mock.patch.object(refs, "trusted_gh_executable", return_value="/usr/bin/gh"), \
+             mock.patch.object(refs.subprocess, "run", return_value=response) as run, \
+             mock.patch.dict(os.environ, {
+                 "PATH": "/tmp/untrusted-github-cli-first",
+                 "GH_HOST": "attacker.example",
+                 "GH_CONFIG_DIR": "/tmp/attacker-credentials",
+                 "GIT_CONFIG_GLOBAL": "/tmp/malicious-gitconfig",
+                 "GH_TOKEN": "existing-authorised-owner-token",
+             }):
+            result = refs.read_github_get(refs.MAIN_GET)
+        self.assertEqual(result["ref"], "refs/heads/main")
+        argv = run.call_args.args[0]
+        opts = run.call_args.kwargs
+        self.assertEqual(argv, ["/usr/bin/gh", "api", "--hostname", "github.com",
+                                "--method", "GET", refs.MAIN_GET])
+        self.assertEqual(opts["cwd"], "/")
+        self.assertEqual(opts["env"]["PATH"], "/usr/bin:/bin")
+        self.assertEqual(opts["env"]["GH_HOST"], "github.com")
+        self.assertEqual(opts["env"]["GH_TOKEN"], "existing-authorised-owner-token")
+        self.assertNotIn("GH_CONFIG_DIR", opts["env"])
+        self.assertNotIn("GIT_CONFIG_GLOBAL", opts["env"])
+        self.assertTrue(opts["capture_output"])
+        self.assertFalse(opts["check"])
+
+    def test_missing_absolute_github_cli_fails_before_subprocess(self):
+        with mock.patch.object(refs, "TRUSTED_GH", "/missing-root-owned-gh-test"), \
+             mock.patch.object(refs.subprocess, "run") as run:
+            with self.assertRaisesRegex(Hold, "untrusted_absolute_github_cli"):
+                refs.read_github_get(refs.MAIN_GET)
+            run.assert_not_called()
     def test_strict_get_paths_no_actions_endpoints(self):
         with self.assertRaisesRegex(Hold, "unapproved_fresh_github_get_path"):
             refs.read_github_get("repos/AyobamiH/clawsweeper/actions/workflows/codeql.yml/dispatches")

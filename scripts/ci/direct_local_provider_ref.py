@@ -11,7 +11,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+from pathlib import Path
+import pwd
 import re
+import stat
 import subprocess
 from typing import Callable
 
@@ -24,6 +28,47 @@ MAIN_GET = f"repos/{REPO}/git/ref/heads/main"
 PR_GET = re.compile(rf"repos/{REPO}/pulls/[1-9][0-9]{{0,8}}\Z")
 MAX_BODY = 65536
 MAX_RESPONSE = 131072
+
+
+# An inherited PATH shim is not a trusted GitHub provider identity.
+TRUSTED_GH = "/usr/bin/gh"
+
+
+def trusted_gh_executable() -> str:
+    binary = Path(TRUSTED_GH)
+    try:
+        info = binary.lstat()
+    except OSError as exc:
+        raise Hold("untrusted_absolute_github_cli") from exc
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not info.st_mode & stat.S_IXUSR):
+        raise Hold("untrusted_absolute_github_cli")
+    return str(binary)
+
+
+def trusted_gh_env() -> dict[str, str]:
+    # HOME/GH_HOST/GH_CONFIG_DIR from the caller are not trustworthy.
+    try:
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError as exc:
+        raise Hold("untrusted_github_cli_account") from exc
+    if not home.startswith("/"):
+        raise Hold("untrusted_github_cli_account")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": home,
+        "GH_HOST": "github.com",
+        "GH_PROMPT_DISABLED": "1",
+        "GH_NO_UPDATE_NOTIFIER": "1",
+        "LC_ALL": "C",
+    }
+    # Keep existing owner-scoped token custody. Never log tokens.
+    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        token = os.environ.get(key)
+        if token:
+            env[key] = token
+    return env
 
 
 def _object(value: object) -> dict:
@@ -47,7 +92,9 @@ def read_github_get(path: str) -> dict:
         raise Hold("unapproved_fresh_github_get_path")
     try:
         result = subprocess.run(
-            ["gh", "api", "--method", "GET", path],
+            [trusted_gh_executable(), "api", "--hostname", "github.com",
+             "--method", "GET", path],
+            env=trusted_gh_env(), cwd="/",
             capture_output=True, timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
