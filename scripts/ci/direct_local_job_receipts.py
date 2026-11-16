@@ -202,11 +202,21 @@ def verify_existing_ordinary_job_receipts(*, fleet_root: Path, fleet_job_id: str
         "source_ref": source_ref, "fleet_job_id": fleet_job_id,
         "receipt_sha256": hashlib.sha256(receipt_raw).hexdigest(),
         "log_sha256": hashlib.sha256(log).hexdigest(),
-        "verified_local_job_steps": [
-            {"job": key, "step": STEP_FOR_JOB[key],
-             "local_execution": "passed_verified_existing_fleet_receipt"}
+        # One fleet receipt can prove command execution but cannot establish
+        # two independently scheduled, sandboxed workflow-job executions.
+        # Keep the aggregate evidence available without an acceptance-shaped
+        # field name that downstream reporting could count as 2/2.
+        "verified_aggregate_command_steps": [
+            {"workflow_job": key, "step": STEP_FOR_JOB[key],
+             "fleet_job_id": fleet_job_id,
+             "local_execution": "command_passed_in_shared_aggregate_fleet_job"}
             for key in sorted(expected)
         ],
+        "aggregate_fleet_execution_id_count": 1,
+        "independent_definition_execution_ids": [],
+        "independent_definition_sandboxes_verified": 0,
+        "accepted_independent_ordinary_jobs": 0,
+        "acceptance_hold": "distinct_per_definition_job_ids_and_sandboxes_not_proven",
         "authenticated_event_claim_count": len(linked),
         "github_provider_check_independently_verified": False,
         "protected_codeql_satisfied": False,

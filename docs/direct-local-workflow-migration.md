@@ -160,9 +160,12 @@ to the exact fleet job ID, SHA, ref and pinned policy; a completed successful
 existing SQLite queue row; an owner-held, non-symlinked terminal receipt;
 successful exact checkout, semantic validation, dependency install and both
 ordinary commands in the defined order; container cleanup; and a matching
-bounded SHA-256 execution log. For a genuine main push it attributes only
-`ci.yml#check`; for an eligible owner PR it attributes both ordinary jobs
-only when both real commands passed. Historical aggregate successes lacking
+bounded SHA-256 execution log. For a genuine main push it verifies the `ci.yml#check` command; for
+an eligible owner PR it verifies both ordinary commands when both actually
+passed. **Neither one nor two successful commands from a single aggregate
+fleet job constitute separately isolated workflow-job executions.** The
+readback always reports zero accepted independent definitions until distinct
+source-bound job IDs, sandboxes and receipts are proven. Historical aggregate successes lacking
 an authenticated event claim are deliberately held, not grandfathered in.
 
 It never changes the queue, claims a new job, publishes a GitHub check or

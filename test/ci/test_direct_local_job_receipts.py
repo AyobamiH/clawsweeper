@@ -107,17 +107,24 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
 
     def test_authenticated_main_push_is_only_one_job(self):
         verified = self.prove()
-        self.assertEqual([x["job"] for x in verified["verified_local_job_steps"]],
+        self.assertEqual([x["workflow_job"] for x in verified["verified_aggregate_command_steps"]],
                          [".github/workflows/ci.yml#check"])
         self.assertFalse(verified["github_provider_check_independently_verified"])
         self.assertFalse(verified["protected_codeql_satisfied"])
 
-    def test_authenticated_pr_maps_two_steps_to_two_jobs(self):
+    def test_authenticated_pr_two_steps_are_not_two_independent_executions(self):
         self.ref = "pr/113"
         self.make_evidence()
         result = self.prove()
-        self.assertEqual(len(result["verified_local_job_steps"]), 2)
-        self.assertEqual(len({x["step"] for x in result["verified_local_job_steps"]}), 2)
+        self.assertEqual(len(result["verified_aggregate_command_steps"]), 2)
+        self.assertEqual(len({x["step"] for x in result["verified_aggregate_command_steps"]}), 2)
+        self.assertEqual(len({x["fleet_job_id"] for x in result["verified_aggregate_command_steps"]}), 1)
+        self.assertEqual(result["aggregate_fleet_execution_id_count"], 1)
+        self.assertEqual(result["independent_definition_execution_ids"], [])
+        self.assertEqual(result["independent_definition_sandboxes_verified"], 0)
+        self.assertEqual(result["accepted_independent_ordinary_jobs"], 0)
+        self.assertEqual(result["acceptance_hold"],
+                         "distinct_per_definition_job_ids_and_sandboxes_not_proven")
 
     def test_legacy_success_without_direct_local_event_is_held(self):
         self.make_evidence(with_claim=False)
@@ -157,7 +164,7 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
     def test_source_readback_proves_only_authenticated_main_job(self):
         result = readback.verify_current_source_ordinary_jobs(
             fleet_root=self.base, source_sha=self.sha, source_ref="main")
-        self.assertEqual(len(result["verified_local_job_steps"]), 1)
+        self.assertEqual(len(result["verified_aggregate_command_steps"]), 1)
         self.assertEqual(result["fleet_job_id"], self.job_id)
 
     def test_source_readback_proves_two_distinct_pr_steps(self):
@@ -165,9 +172,9 @@ class ExistingFleetOrdinaryEvidenceTests(unittest.TestCase):
         self.make_evidence()
         result = readback.verify_current_source_ordinary_jobs(
             fleet_root=self.base, source_sha=self.sha, source_ref="pr/113")
-        self.assertEqual(len(result["verified_local_job_steps"]), 2)
-        self.assertNotEqual(result["verified_local_job_steps"][0]["step"],
-                            result["verified_local_job_steps"][1]["step"])
+        self.assertEqual(len(result["verified_aggregate_command_steps"]), 2)
+        self.assertNotEqual(result["verified_aggregate_command_steps"][0]["step"],
+                            result["verified_aggregate_command_steps"][1]["step"])
 
     def test_source_readback_does_not_relabel_legacy_success(self):
         self.make_evidence(with_claim=False)
