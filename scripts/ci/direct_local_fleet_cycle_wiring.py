@@ -308,3 +308,91 @@ def non_secret_receipt(result: dict) -> str:
         raise RuntimeError("invalid_direct_local_patch_receipt")
     return json.dumps({k: v for k, v in result.items() if k != "content"},
                       sort_keys=True)
+
+
+CAPTURE_SCHEMA = "clawsweeper.exact-fleet-docker-container-receipt.v1"
+CAPTURE_ANCHOR = b"        core.execute(args,timeout=30)\n"
+
+
+def compile_distinct_sandbox_evidence_source(
+    current: bytes, *, expected_sha256: str,
+) -> dict:
+    """Source-only patch: inspect each REAL split-job Docker sandbox.
+
+    The exact existing fleet creates the container, executes the commands,
+    cleans it and owns the queue. This patch cannot create a second worker or
+    fabricate a container ID. A failed/ambiguous inspect raises before any
+    command, and the existing finally block performs owned cleanup.
+    """
+    if (not isinstance(current, bytes) or not isinstance(expected_sha256, str)
+            or not SHA256.fullmatch(expected_sha256)
+            or sha(current) != expected_sha256):
+        raise RuntimeError("fleet_capture_exact_source_mismatch")
+    try:
+        tree = ast.parse(current.decode("utf-8"))
+    except (SyntaxError, UnicodeDecodeError) as exc:
+        raise RuntimeError("unrecognised_capture_controller_python") from exc
+    funcs = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+             and node.name == "run_job"]
+    if (len(funcs) != 1 or current.count(CAPTURE_ANCHOR) != 1
+            or b"def configured_parallelism():" not in current
+            or b"def run_job(db,policy,row,cpu_affinity=None):" not in current
+            or b"receipt['engine_container_id']" in current):
+        raise RuntimeError("unrecognised_fleet_container_creation_shape")
+    # Source-order check prevents accidentally instrumenting unrelated code.
+    location = current.index(CAPTURE_ANCHOR)
+    if not (current.index(b"def run_job(db,policy,row,cpu_affinity=None):")
+            < location < current.index(b"def configured_parallelism():")):
+        raise RuntimeError("capture_outside_reviewed_worker")
+    capture = '''        # Independently inspect the container created by this worker.
+        # These fields are never inferred from the queued ID or a unit test.
+        # An ambiguous inspect fails BEFORE executing untrusted repository code.
+        if (job['repo'] == 'AyobamiH/clawsweeper' and
+                job['suite'] in ('linux-node24-claw-check',
+                                 'linux-node24-claw-sparse')):
+            if ENGINE != 'docker':
+                raise RuntimeError('distinct_job_requires_reviewed_docker_engine')
+            _dl_actual = inspect(name)
+            _dl_host = _dl_actual.get('HostConfig') if isinstance(_dl_actual, dict) else None
+            _dl_config = _dl_actual.get('Config') if isinstance(_dl_actual, dict) else None
+            _dl_id = _dl_actual.get('Id') if isinstance(_dl_actual, dict) else None
+            _dl_image = cfg.get('image', policy['image'])
+            if (not isinstance(_dl_id, str)
+                    or not re.fullmatch(r'[a-f0-9]{64}', _dl_id)
+                    or _dl_actual.get('Name') != '/' + name
+                    or not isinstance(_dl_actual.get('State'), dict)
+                    or _dl_actual['State'].get('Running') is not True
+                    or _dl_actual['State'].get('OOMKilled') is not False
+                    or _dl_actual.get('Image') != _dl_image
+                    or not isinstance(_dl_config, dict)
+                    or _dl_config.get('Image') != _dl_image
+                    or _dl_config.get('User') != '1001:123'
+                    or _dl_config.get('Labels', {}).get(LABEL) != name
+                    or not isinstance(_dl_host, dict)
+                    or _dl_host.get('Privileged') is not False
+                    or _dl_host.get('NetworkMode') != 'bridge'
+                    or _dl_host.get('Memory') != cfg['memory_mib'] * core.MIB
+                    or _dl_host.get('MemorySwap') != cfg['memory_mib'] * core.MIB
+                    or _dl_host.get('NanoCpus') != cfg.get('cpus', 1) * 1000000000
+                    or _dl_host.get('PidsLimit') != cfg.get('pids', 256)
+                    or _dl_host.get('CapDrop') != ['ALL']
+                    or _dl_host.get('SecurityOpt') != ['no-new-privileges']
+                    or _dl_host.get('Binds') != [str(tools) + ':/ci-tools:ro']):
+                raise RuntimeError('distinct_job_actual_docker_sandbox_unverified')
+            receipt['sandbox_identity'] = name
+            receipt['engine_container_id'] = _dl_id
+            core.atomic(STATE/(name+'.json'), receipt)
+'''
+    output = current.replace(CAPTURE_ANCHOR,
+                             CAPTURE_ANCHOR + capture.encode(), 1)
+    try:
+        ast.parse(output.decode("utf-8"))
+    except SyntaxError as exc:
+        raise RuntimeError("generated_distinct_container_source_invalid") from exc
+    return {
+        "schema": CAPTURE_SCHEMA,
+        "state": "source_only_not_installed",
+        "current_sha256": expected_sha256,
+        "proposed_sha256": sha(output),
+        "content": output,
+    }

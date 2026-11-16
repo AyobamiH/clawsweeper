@@ -438,3 +438,38 @@ ClawSweeper from generic polling while preserving other repositories.
 Current aggregate receipts and fixture results are not 2/2 acceptance.
 Even genuine distinct local receipts do not satisfy app-owned CodeQL,
 provider-required checks or overall 88/88 production acceptance.
+
+### Exact Docker-inspect identity capture — source-only (16 November 2026)
+
+The existing direct_local_fleet_cycle_wiring.py now also provides
+compile_distinct_sandbox_evidence_source. It accepts only an exact,
+SHA-256-pinned, recognised current fleet controller and produces an **in-memory**
+controller candidate. There is no installed code, policy change, webhook,
+provider action, queue insertion, or added executor.
+
+The patch instruments the original run_job immediately after its existing
+Docker run operation. Only the two proposed ClawSweeper split-suite jobs
+undergo strict docker inspect readback. The installed Docker ID, container
+name, owner label, immutable image, unprivileged UID/GID, network, memory,
+CPU, PIDs, capabilities, no-new-privileges and sole read-only tools mount
+must all match the reviewed job profile before any repository command runs.
+It persists the actual Docker ID and sandbox identity into the original
+crash-recovery receipt journal, which the original worker subsequently carries
+into its immutable terminal receipt. An absent or altered inspect causes an
+execution error and the original owned-container cleanup; it cannot create
+a passing receipt. Other repositories and the historical aggregate suite
+retain their existing execution behaviour.
+
+**Release boundary:** this is one component of a future, exact-source,
+coordinated controller+split-policy cutover, **not an authorisation to
+install it**. The installed controller's existing authenticated-job verifier
+currently recognises only linux-node24 for non-manual ClawSweeper jobs,
+and its existing ingress claims aggregate identities. Both must be reviewed
+and migrated to separate authenticated per-definition identities before
+cutover. The current installed controller is already instrumented with its
+older direct-local prelock hook; do NOT try to reapply that hook to it.
+Run the new container-capture renderer against the verified installed
+controller source directly (and any subsequent exact-source split admission
+patch), rather than stacking duplicate prelock hooks. The existing 12 GiB
+physical stop reserve and the 16.5 GiB admission floor remain unchanged.
+No provider-required CodeQL checks are satisfied by this proposal.

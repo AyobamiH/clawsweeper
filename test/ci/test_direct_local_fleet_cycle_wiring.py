@@ -428,3 +428,148 @@ class ExactFleetSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DistinctDockerCaptureTests(unittest.TestCase):
+    """Adversarial, effect-free probe of the exact fleet-runner source patch."""
+
+    WORKER = b"""def run_job(db,policy,row,cpu_affinity=None):
+    job = dict(row)
+    cfg = policy['repositories'][job['repo']]['suites'][job['suite']]
+    name = job['id']
+    tools = '/home/johnh/.local/share/local-ci/tools'
+    args = ['docker', 'run']
+    receipt = {}
+    try:
+        core.execute(args,timeout=30)
+        initial='git init -q; '
+    finally:
+        pass
+    return receipt
+def configured_parallelism():
+    return 1
+"""
+
+    def patch_source(self, source=None, expected=None):
+        source = source if source is not None else self.WORKER
+        return wiring.compile_distinct_sandbox_evidence_source(
+            source,
+            expected_sha256=expected or hashlib.sha256(source).hexdigest())
+
+    def sandbox(self):
+        name = 'local-fleet-0123456789ab'
+        image = 'sha256:' + 'c' * 64
+        return {
+            'Id': 'b' * 64, 'Name': '/' + name, 'Image': image,
+            'State': {'Running': True, 'OOMKilled': False},
+            'Config': {'Image': image, 'User': '1001:123',
+                       'Labels': {'io.ayobamih.local-ci.fleet': name}},
+            'HostConfig': {
+                'Privileged': False, 'NetworkMode': 'bridge',
+                'Memory': 3072 * 1048576, 'MemorySwap': 3072 * 1048576,
+                'NanoCpus': 4000000000, 'PidsLimit': 256,
+                'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'],
+                'Binds': ['/home/johnh/.local/share/local-ci/tools:/ci-tools:ro'],
+            },
+        }
+
+    def execute(self, sandbox, *, suite='linux-node24-claw-check',
+                engine='docker', repo='AyobamiH/clawsweeper'):
+        import copy
+        import re
+        from types import SimpleNamespace
+        source = self.patch_source()['content'].decode()
+        effects = {'run': 0, 'receipt': 0}
+        def execute(args, timeout):
+            effects['run'] += 1
+        def atomic(path, receipt):
+            effects['receipt'] += 1
+        ns = {
+            'ENGINE': engine, 'LABEL': 'io.ayobamih.local-ci.fleet',
+            'STATE': Path('/tmp'),
+            're': re,
+            'core': SimpleNamespace(MIB=1048576, execute=execute, atomic=atomic),
+            'inspect': lambda name: copy.deepcopy(sandbox),
+        }
+        exec(compile(source, '<reviewed-fleet-source-fixture>', 'exec'), ns)
+        policy = {'image': 'sha256:' + 'c' * 64, 'repositories': {
+            repo: {'suites': {suite: {
+                'image': 'sha256:' + 'c' * 64,
+                'cpus': 4, 'memory_mib': 3072, 'pids': 256,
+            }}}}}
+        job = {'id': 'local-fleet-0123456789ab', 'repo': repo, 'suite': suite}
+        try:
+            return ns['run_job'](None, policy, job), effects
+        except RuntimeError as exc:
+            return str(exc), effects
+
+    def test_actual_docker_id_is_persisted_before_any_job_commands(self):
+        receipt, effects = self.execute(self.sandbox())
+        self.assertEqual(receipt['sandbox_identity'], 'local-fleet-0123456789ab')
+        self.assertEqual(receipt['engine_container_id'], 'b' * 64)
+        self.assertEqual(effects, {'run': 1, 'receipt': 1})
+
+    def test_only_two_reviewed_suites_have_new_proof_requirement(self):
+        for suite, repo in (
+            ('linux-node24', 'AyobamiH/clawsweeper'),
+            ('linux-python312', 'AyobamiH/post-once'),
+        ):
+            receipt, effects = self.execute(None, suite=suite, repo=repo)
+            self.assertEqual(receipt, {})
+            self.assertEqual(effects, {'run': 1, 'receipt': 0})
+
+    def test_drifted_inspect_fails_before_any_command_receipt(self):
+        import copy
+        for location, field, value in (
+            ((), 'Id', 'fake-job-derived-id'),
+            ((), 'Name', '/foreign-container'),
+            ((), 'Image', 'sha256:' + 'd' * 64),
+            (('State',), 'Running', False),
+            (('State',), 'OOMKilled', True),
+            (('Config',), 'Image', 'sha256:' + 'd' * 64),
+            (('Config',), 'User', '0:0'),
+            (('Config', 'Labels'), 'io.ayobamih.local-ci.fleet', 'other'),
+            (('HostConfig',), 'Privileged', True),
+            (('HostConfig',), 'NetworkMode', 'host'),
+            (('HostConfig',), 'Memory', 0),
+            (('HostConfig',), 'MemorySwap', 0),
+            (('HostConfig',), 'NanoCpus', 0),
+            (('HostConfig',), 'PidsLimit', 0),
+            (('HostConfig',), 'CapDrop', []),
+            (('HostConfig',), 'SecurityOpt', []),
+            (('HostConfig',), 'Binds', ['/var/run/docker.sock:/var/run/docker.sock']),
+        ):
+            with self.subTest(location=location, field=field):
+                sample = copy.deepcopy(self.sandbox())
+                target = sample
+                for segment in location:
+                    target = target[segment]
+                target[field] = value
+                result, effects = self.execute(sample)
+                self.assertEqual(result, 'distinct_job_actual_docker_sandbox_unverified')
+                self.assertEqual(effects, {'run': 1, 'receipt': 0})
+
+    def test_missing_inspect_and_unsupported_engine_fail_closed(self):
+        for sample, engine, expected in (
+            (None, 'docker', 'distinct_job_actual_docker_sandbox_unverified'),
+            (self.sandbox(), 'podman', 'distinct_job_requires_reviewed_docker_engine'),
+        ):
+            result, effects = self.execute(sample, engine=engine)
+            self.assertEqual(result, expected)
+            self.assertEqual(effects, {'run': 1, 'receipt': 0})
+
+    def test_controller_exact_head_and_shape_required(self):
+        good = self.patch_source()
+        ast.parse(good['content'].decode())
+        self.assertEqual(good['proposed_sha256'], wiring.sha(good['content']))
+        with self.assertRaisesRegex(RuntimeError, 'fleet_capture_exact_source_mismatch'):
+            self.patch_source(expected='0' * 64)
+        with self.assertRaisesRegex(RuntimeError, 'unrecognised_fleet_container_creation_shape'):
+            self.patch_source(source=good['content'])
+        with self.assertRaisesRegex(RuntimeError, 'unrecognised_fleet_container_creation_shape'):
+            self.patch_source(source=self.WORKER.replace(
+                b'core.execute(args,timeout=30)', b'core.execute(args,timeout=10)'))
+        with self.assertRaisesRegex(RuntimeError, 'unrecognised_fleet_container_creation_shape'):
+            self.patch_source(source=self.WORKER.replace(
+                b'    core.execute(args,timeout=30)\n', b'    pass\n')
+                + b'    core.execute(args,timeout=30)\n')
