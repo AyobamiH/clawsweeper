@@ -89,6 +89,9 @@ function fixture() {
     CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA: source,
     CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256: pin,
     CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST: manifest,
+    CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256: createHash("sha256")
+      .update(readFileSync(manifest))
+      .digest("hex"),
   };
   const run = (mode = "observer", args = ["--help"], extra = {}) =>
     spawnSync(process.execPath, [boot, mode, ...args], {
@@ -137,6 +140,32 @@ test("tampered transitive ESM config refuses BEFORE import-time side effects", (
     f.cleanup();
   }
 });
+test("forged manifest cannot approve altered config.js even when Git HEAD is clean", () => {
+  const f = fixture();
+  try {
+    const marker = join(f.root, "FORGED_MANIFEST_SIDE_EFFECT");
+    appendFileSync(
+      join(f.root, "dist/repair/config.js"),
+      '\nimport {writeFileSync} from "node:fs";\nwriteFileSync(' +
+        JSON.stringify(marker) +
+        ', "violated");\n',
+    );
+    const manifest = JSON.parse(readFileSync(f.manifest, "utf8"));
+    manifest.files = runtimeDigests(f.root);
+    manifest.sourceBuild.runtimeFilesSha256 = createHash("sha256")
+      .update(JSON.stringify(manifest.files))
+      .digest("hex");
+    // A forged self-consistent build receipt must not become its own trust root.
+    writeFileSync(f.manifest, JSON.stringify(manifest), { mode: 0o600 });
+    const out = f.run();
+    assert.notEqual(out.status, 0);
+    assert.match(out.stderr, /preimport_manifest_changed/);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("missing manifest, invalid bootstrap pin, mismatched signed source all refuse before application load", () => {
   const f = fixture();
   try {
@@ -144,6 +173,7 @@ test("missing manifest, invalid bootstrap pin, mismatched signed source all refu
       { CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST: "/not/found" },
       { CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256: "0".repeat(64) },
       { CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA: "0".repeat(40) },
+      { CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256: "" },
     ];
     for (const override of cases) {
       const out = f.run("observer", ["--help"], override);
@@ -241,7 +271,13 @@ test("verified synchronous module fence refuses unlisted imports even when stati
       .digest("hex");
     writeFileSync(f.manifest, JSON.stringify(manifest), { mode: 0o600 });
 
-    const result = f.run();
+    // Synthetic trusted-fixture manifest only: re-pin to reach the later
+    // module fence. Production pins must come from the signed release.
+    const result = f.run("observer", ["--help"], {
+      CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256: createHash("sha256")
+        .update(readFileSync(f.manifest))
+        .digest("hex"),
+    });
     assert.notEqual(result.status, 0, result.stdout);
     assert.match(result.stderr, /preimport_unlisted_module/);
     assert.equal(existsSync(marker), false, "unlisted module must not execute");
@@ -272,7 +308,13 @@ test("verified module fence refuses alias-created CommonJS loads outside the man
       .update(JSON.stringify(hashes))
       .digest("hex");
     writeFileSync(f.manifest, JSON.stringify(manifest), { mode: 0o600 });
-    const result = f.run();
+    // Synthetic trusted-fixture manifest only: re-pin to reach the later
+    // module fence. Production pins must come from the signed release.
+    const result = f.run("observer", ["--help"], {
+      CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256: createHash("sha256")
+        .update(readFileSync(f.manifest))
+        .digest("hex"),
+    });
     assert.notEqual(result.status, 0, result.stdout);
     assert.match(result.stderr, /preimport_unlisted_module/);
     assert.equal(existsSync(marker), false, "unlisted CommonJS module must not execute");

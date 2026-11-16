@@ -20,6 +20,9 @@ node scripts/analysis/ci-triage-manifest.mjs \
   "$HOME/.local/state/clawsweeper-ci-triage/runtime.json"
 export CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA="$(git rev-parse HEAD)"
 export CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST="$HOME/.local/state/clawsweeper-ci-triage/runtime.json"
+# Set this independently in the signed release policy to the issuer's
+# runtimeManifestSha256. Do NOT recompute it from a mutable file at launch.
+export CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256="<signed-release-pinned-64-hex>"
 export CLAWSWEEPER_CI_TRIAGE_STATE_DIR="$HOME/.local/state/clawsweeper-ci-triage"
 export CLAWSWEEPER_CI_TRIAGE_REPOSITORIES="AyobamiH/clawsweeper"
 export CLAWSWEEPER_CI_TRIAGE_ENABLED=1
@@ -29,8 +32,11 @@ The existing notification workflow uses its approved `GH_TOKEN`/`GITHUB_TOKEN` f
 
 The triage-enabled notifier and observer now have a dedicated builtins-only
 pre-import bootstrap. The trusted release launcher must independently pin its
-CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256 and signed source revision; computing
-that value from a mutable checkout at startup is not a trust guarantee.
+CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256, CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256,
+and signed source revision. These pins must be bound to the same signed release
+by the trusted launcher; computing either digest from a mutable file at
+startup is not a trust guarantee. A rewritten manifest with internally
+consistent source-build and runtime hashes is now refused before loading code.
 The bootstrap refuses missing/stale manifests and checks every compiled ESM
 dependency before importing notifier/observer application code. After verification,
 a synchronous builtins-only Node module-load fence supplies only the previously

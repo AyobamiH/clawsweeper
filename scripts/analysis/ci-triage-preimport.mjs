@@ -164,7 +164,13 @@ function verify() {
   const sha = process.env.CLAWSWEEPER_CI_TRIAGE_SOURCE_SHA;
   const pin = process.env.CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256;
   const manifestPath = process.env.CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST;
-  if (!/^[a-f0-9]{40}$/.test(sha ?? "") || !/^[a-f0-9]{64}$/.test(pin ?? "")) fail("pin_required");
+  const manifestPin = process.env.CLAWSWEEPER_CI_TRIAGE_RUNTIME_MANIFEST_SHA256;
+  if (
+    !/^[a-f0-9]{40}$/.test(sha ?? "") ||
+    !/^[a-f0-9]{64}$/.test(pin ?? "") ||
+    !/^[a-f0-9]{64}$/.test(manifestPin ?? "")
+  )
+    fail("pin_required");
   if (
     createHash("sha256")
       .update(readFileSync(fileURLToPath(import.meta.url)))
@@ -183,7 +189,12 @@ function verify() {
     (process.getuid && st.uid !== process.getuid())
   )
     fail("manifest_unsafe");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  // This immutable value must come from the separately signed release policy.
+  // A self-consistent, rewritten manifest is NOT signed source-build provenance.
+  const manifestBytes = readFileSync(manifestPath);
+  if (createHash("sha256").update(manifestBytes).digest("hex") !== manifestPin)
+    fail("manifest_changed");
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const env = { PATH: process.env.PATH, HOME: process.env.HOME, GIT_OPTIONAL_LOCKS: "0" };
   execFileSync("git", ["-C", root, "diff", "--quiet", "HEAD", "--"], {
     env,

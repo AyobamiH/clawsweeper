@@ -11,6 +11,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { sourceBoundBuild, assertBuildOutput } from "./ci-triage-source-build.mjs";
@@ -61,13 +62,15 @@ try {
     files,
     scope: "owner-local exact-build identity; not release approval",
   };
+  const manifestBytes = JSON.stringify(value, null, 2) + "\n";
+  const manifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
   const fd = openSync(
     destination,
     constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY,
     0o600,
   );
   try {
-    writeFileSync(fd, JSON.stringify(value, null, 2) + "\n");
+    writeFileSync(fd, manifestBytes);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -84,6 +87,7 @@ try {
       runtimeFiles: Object.keys(files).length,
       emittedFilesSha256: sourceBuild.emittedFilesSha256,
       manifestCreated: true,
+      runtimeManifestSha256: manifestSha256,
     }),
   );
 } catch {
