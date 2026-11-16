@@ -187,4 +187,4 @@ jobs:
           CLAWSWEEPER_DISCORD_TARGET: ${{ vars.CLAWSWEEPER_DISCORD_TARGET }}
         run: |
           set -euo pipefail
-          pnpm run repair:notify-github-activity -- --write-report
+          sh scripts/analysis/ci-triage-launch.sh notifier --write-report

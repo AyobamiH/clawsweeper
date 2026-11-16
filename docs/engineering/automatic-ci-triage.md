@@ -44,13 +44,26 @@ hashed JavaScript bytes; unlisted ESM, CommonJS and other module resolutions
 are rejected before their contents execute, even if unusual syntax evades
 static import discovery. This is defence in depth, not permission for dynamic
 package resolution. The generic notification route with triage disabled is
-preserved unchanged. This remains source-only until independent build provenance
-and operator release approval.
+preserved unchanged. The normal `github-activity` notifier invocation and all
+three package entrypoints now use `scripts/analysis/ci-triage-launch.sh`:
+disabled triage executes the existing notifier unchanged; enabled triage and
+the explicitly verified notifier/observer routes enter the builtins-only
+pre-import bootstrap. Unexpected flag values refuse. The workflow invokes
+the shell entry directly rather than first launching `pnpm`, as Node processes
+`NODE_OPTIONS=--import/--require` **before** loading any JavaScript bootstrap.
+The trusted shell entry unsets `NODE_OPTIONS` before Node startup. Merely
+checking this value inside a Node module would be too late. The signed release
+must bind the shell entry, bootstrap identity, runtime manifest digest and
+reviewed source SHA together; source-only tests do not grant that authority.
+Commands that launch via an upstream Node-based package manager may already
+execute a preload before the shell entry is reached and are not the trusted
+production launch boundary. This remains source-only until independent build
+provenance and operator release approval.
 
 The optional owner-local observer uses existing authenticated `gh api` GET access and invokes the **same notifier**, rather than selecting a skill or inventing an independent classifier:
 
 ```bash
-node scripts/analysis/ci-triage-preimport.mjs observer --watch-seconds 300 --interval-seconds 30
+sh scripts/analysis/ci-triage-launch.sh observer --watch-seconds 300 --interval-seconds 30
 ```
 
 Transient authenticated GET transport failures receive at most one immediate read retry. A timed observation continues after a held collection-read cycle, without retrying any agent POST. Source, policy, manifest and storage faults still stop immediately. A window ending with an unresolved read failure exits nonzero; the summary counts held cycles explicitly.

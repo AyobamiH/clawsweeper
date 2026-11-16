@@ -105,7 +105,7 @@
     },
     {
       "path": ".github/workflows/github-activity.yml",
-      "sha256": "c24ceb52bf215b503ebcc89322c36154f86c98313f019a1cac82db9b36f05290",
+      "sha256": "9b1beb6590dcebccef2a5e5fb1e380a3838de796f0c8b98c45c2b756d067ffa6",
       "events": [
         "issue_comment",
         "issues",
@@ -923,7 +923,7 @@
         "workflow_run"
       ],
       "risks": ["secret_reference", "write_permission", "possible_write_effect"],
-      "source_sha256": "c24ceb52bf215b503ebcc89322c36154f86c98313f019a1cac82db9b36f05290",
+      "source_sha256": "9b1beb6590dcebccef2a5e5fb1e380a3838de796f0c8b98c45c2b756d067ffa6",
       "status": "labelled_local_not_operationally_verified",
       "execution_boundary": "guarded_sensitive_effects"
     },
