@@ -217,3 +217,66 @@ test("template interpolation refuses hidden long-comment dynamic imports", () =>
     f.cleanup();
   }
 });
+
+test("verified synchronous module fence refuses unlisted imports even when static parsing misses eval-built syntax", () => {
+  const f = fixture();
+  try {
+    const target = join(f.root, "dist/repair/observe-ci-triage.js");
+    const marker = join(f.root, "UNLISTED_MODULE_EXECUTED");
+    writeFileSync(
+      join(f.root, "dist/repair/unlisted.js"),
+      'import { writeFileSync } from "node:fs";\nwriteFileSync(' +
+        JSON.stringify(marker) +
+        ', "unsafe");\n',
+    );
+    // Runtime-only import assembled from two strings: not a static import
+    // declaration and deliberately invisible to the bounded closure parser.
+    appendFileSync(target, '\nawait eval("im" + "port(\\"./unlisted.js\\")");\n');
+    const hashes = runtimeDigests(f.root);
+    assert.equal(hashes["dist/repair/unlisted.js"], undefined);
+    const manifest = JSON.parse(readFileSync(f.manifest, "utf8"));
+    manifest.files = hashes;
+    manifest.sourceBuild.runtimeFilesSha256 = createHash("sha256")
+      .update(JSON.stringify(hashes))
+      .digest("hex");
+    writeFileSync(f.manifest, JSON.stringify(manifest), { mode: 0o600 });
+
+    const result = f.run();
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /preimport_unlisted_module/);
+    assert.equal(existsSync(marker), false, "unlisted module must not execute");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("verified module fence refuses alias-created CommonJS loads outside the manifest", () => {
+  const f = fixture();
+  try {
+    const target = join(f.root, "dist/repair/observe-ci-triage.js");
+    const marker = join(f.root, "UNLISTED_CJS_EXECUTED");
+    writeFileSync(
+      join(f.root, "dist/repair/unlisted.cjs"),
+      'require("node:fs").writeFileSync(' + JSON.stringify(marker) + ', "unsafe");\n',
+    );
+    appendFileSync(
+      target,
+      '\nconst nativeModule = process.getBuiltinModule("node:module");\n' +
+        "const makeRequire = nativeModule.createRequire;\n" +
+        'makeRequire(import.meta.url)("./unlisted.cjs");\n',
+    );
+    const hashes = runtimeDigests(f.root);
+    const manifest = JSON.parse(readFileSync(f.manifest, "utf8"));
+    manifest.files = hashes;
+    manifest.sourceBuild.runtimeFilesSha256 = createHash("sha256")
+      .update(JSON.stringify(hashes))
+      .digest("hex");
+    writeFileSync(f.manifest, JSON.stringify(manifest), { mode: 0o600 });
+    const result = f.run();
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /preimport_unlisted_module/);
+    assert.equal(existsSync(marker), false, "unlisted CommonJS module must not execute");
+  } finally {
+    f.cleanup();
+  }
+});

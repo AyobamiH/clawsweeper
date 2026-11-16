@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { isBuiltin } from "node:module";
+import { isBuiltin, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -222,11 +222,48 @@ function verify() {
     names.some((n) => actual[n] !== manifest.files[n])
   )
     fail("runtime_changed");
+  return actual;
+}
+
+// A second, runtime-enforced boundary: even if the static grammar misses an
+// exotic executable import, Node may load ONLY the manifest's verified bytes.
+// The synchronous loader supplies those exact bytes, avoiding verify/load races.
+function installVerifiedLoadFence(files) {
+  const allowed = new Map(
+    Object.entries(files).map(([name, hash]) => [pathToFileURL(resolve(root, name)).href, hash]),
+  );
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      const resolved = nextResolve(specifier, context);
+      if (resolved.url.startsWith("node:") && isBuiltin(resolved.url)) return resolved;
+      if (!allowed.has(resolved.url)) fail("unlisted_module");
+      return resolved;
+    },
+    load(url, context, nextLoad) {
+      if (url.startsWith("node:") && isBuiltin(url)) return nextLoad(url, context);
+      const expected = allowed.get(url);
+      if (!expected) fail("unlisted_module");
+      const filename = fileURLToPath(url);
+      const st = lstatSync(filename);
+      if (
+        !st.isFile() ||
+        st.isSymbolicLink() ||
+        st.nlink !== 1 ||
+        st.size > 1048576 ||
+        realpathSync(filename) !== filename
+      )
+        fail("runtime_changed");
+      const bytes = readFileSync(filename);
+      if (createHash("sha256").update(bytes).digest("hex") !== expected) fail("runtime_changed");
+      return { format: "module", source: bytes, shortCircuit: true };
+    },
+  });
 }
 async function run() {
   const mode = process.argv[2];
   if (mode !== "observer" && mode !== "notifier") fail("mode");
-  verify();
+  const allowed = verify();
+  installVerifiedLoadFence(allowed);
   // No application dependencies are imported until every check above passed.
   const path = join(
     root,

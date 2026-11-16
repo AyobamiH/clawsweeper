@@ -32,9 +32,14 @@ pre-import bootstrap. The trusted release launcher must independently pin its
 CLAWSWEEPER_CI_TRIAGE_BOOTSTRAP_SHA256 and signed source revision; computing
 that value from a mutable checkout at startup is not a trust guarantee.
 The bootstrap refuses missing/stale manifests and checks every compiled ESM
-dependency before importing notifier/observer application code. The generic
-notification route with triage disabled is preserved unchanged. This remains
-source-only until independent build provenance and operator release approval.
+dependency before importing notifier/observer application code. After verification,
+a synchronous builtins-only Node module-load fence supplies only the previously
+hashed JavaScript bytes; unlisted ESM, CommonJS and other module resolutions
+are rejected before their contents execute, even if unusual syntax evades
+static import discovery. This is defence in depth, not permission for dynamic
+package resolution. The generic notification route with triage disabled is
+preserved unchanged. This remains source-only until independent build provenance
+and operator release approval.
 
 The optional owner-local observer uses existing authenticated `gh api` GET access and invokes the **same notifier**, rather than selecting a skill or inventing an independent classifier:
 
