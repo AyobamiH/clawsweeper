@@ -308,5 +308,47 @@ class DistinctExistingFleetAdmissionTests(unittest.TestCase):
         self.assertEqual(len(self.rows()), 1)
 
 
+    def test_fresh_provider_get_to_split_queue_once(self):
+        import direct_local_provider_ref as provider
+        body = json.dumps(self.payload).encode()
+        signature = "sha256=" + hmac.new(self.secret, body, hashlib.sha256).hexdigest()
+        requests = []
+        def fresh(path):
+            requests.append(path)
+            return self.payload["pull_request"]
+        def claim():
+            return provider.claim_distinct_with_fresh_provider_readback(
+                checkout=ROOT, fleet_root=self.base, body=body,
+                event_name="pull_request", signature=signature,
+                delivery_id=self.delivery, secret=self.secret,
+                provider_get=fresh)
+        first = claim()
+        replay = claim()
+        self.assertEqual(first["admission"], "queued")
+        self.assertEqual(replay["admission"], "already_admitted")
+        self.assertEqual({item["suite"] for item in first["jobs"]},
+                         {suite for suite, _ in split.SPLIT.values()})
+        self.assertEqual({row[0] for row in self.rows()},
+                         {item["job_id"] for item in first["jobs"]})
+        self.assertEqual(len(requests), 2)
+        self.assertFalse(first["provider_ci_execution"])
+        self.assertFalse(first["github_status_published"])
+        self.assertFalse(first["github_actions_dispatched"])
+
+    def test_fresh_provider_drift_blocks_distinct_queue_without_side_effect(self):
+        import direct_local_provider_ref as provider
+        body = json.dumps(self.payload).encode()
+        signature = "sha256=" + hmac.new(self.secret, body, hashlib.sha256).hexdigest()
+        current = copy.deepcopy(self.payload["pull_request"])
+        current["head"]["sha"] = "0" * 40
+        with self.assertRaisesRegex(Hold, "fresh_pr_head_or_trust_metadata_moved"):
+            provider.claim_distinct_with_fresh_provider_readback(
+                checkout=ROOT, fleet_root=self.base, body=body,
+                event_name="pull_request", signature=signature,
+                delivery_id=self.delivery, secret=self.secret,
+                provider_get=lambda _path: current)
+        self.assertEqual(self.rows(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

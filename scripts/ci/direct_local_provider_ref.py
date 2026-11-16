@@ -156,3 +156,29 @@ def claim_with_fresh_provider_readback(
     return {**result, "fresh_provider_source_verified": True,
             "provider_get_kind": ("main_ref" if event_name == "push" else "pr"),
             "provider_ci_execution": False}
+
+
+def claim_distinct_with_fresh_provider_readback(
+    *, checkout, fleet_root, body: bytes, event_name: str,
+    signature: str, delivery_id: str, secret: bytes,
+    provider_get: Callable[[str], dict] = read_github_get,
+) -> dict:
+    """Fresh GET + exact two-definition claim, never GitHub Actions.
+
+    The installed v2 owner release must hash this module and the separate
+    split admission module before importing either. This is not a fleet
+    controller, runner or external-status publisher.
+    """
+    fresh_sha = verified_fresh_source_sha(
+        body=body, event_name=event_name, signature=signature,
+        delivery_id=delivery_id, secret=secret, provider_get=provider_get,
+    )
+    import direct_local_distinct_admission as split
+    result = split.claim_distinct_existing_fleet_jobs(
+        checkout=checkout, fleet_root=fleet_root, body=body,
+        event_name=event_name, signature=signature, delivery_id=delivery_id,
+        secret=secret, fresh_ref_sha=fresh_sha,
+    )
+    return {**result, "fresh_provider_source_verified": True,
+            "provider_get_kind": ("main_ref" if event_name == "push" else "pr"),
+            "provider_ci_execution": False}

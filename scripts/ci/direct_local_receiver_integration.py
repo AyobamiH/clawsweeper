@@ -157,3 +157,101 @@ def load_released_ingress(file: Path):
         return True
 
     return verify
+
+
+# A separate, non-retroactive release identity is mandatory for TWO genuine
+# ordinary workflow definitions. The original v1 aggregate release remains
+# usable only by the aggregate adapter and cannot attest this extra module.
+DISTINCT_SCHEMA = "clawsweeper.direct-local-owner-release.v2-distinct"
+DISTINCT_SOURCE_FILES = SOURCE_FILES | frozenset({
+    "scripts/ci/direct_local_distinct_admission.py",
+})
+
+
+def read_distinct_release(file: Path) -> dict:
+    """Reject an old aggregate manifest or an unpinned split module."""
+    try:
+        doc = json.loads(_owned_file(Path(file)), object_pairs_hook=unique_keys)
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise RuntimeError("malformed_distinct_direct_local_release") from exc
+    if (not isinstance(doc, dict)
+            or set(doc) != {"schema", "repo", "checkout", "commit",
+                            "fleet_root", "sha256"}
+            or doc["schema"] != DISTINCT_SCHEMA
+            or doc["repo"] != "AyobamiH/clawsweeper"
+            or not isinstance(doc["commit"], str)
+            or not SHA40.fullmatch(doc["commit"])
+            or not isinstance(doc["sha256"], dict)
+            or set(doc["sha256"]) != DISTINCT_SOURCE_FILES
+            or any(not isinstance(h, str) or not SHA256.fullmatch(h)
+                   for h in doc["sha256"].values())):
+        raise RuntimeError("unapproved_distinct_direct_local_release_identity")
+    for key in ("checkout", "fleet_root"):
+        value = doc[key]
+        if not isinstance(value, str) or not value.startswith("/") or "\0" in value:
+            raise RuntimeError("unsafe_distinct_direct_local_release_path")
+        location = Path(value)
+        if (location.is_symlink() or not location.is_dir()
+                or location.stat().st_uid != os.getuid()):
+            raise RuntimeError("unsafe_distinct_direct_local_release_directory")
+        doc[key] = str(location)
+    return doc
+
+
+def verify_distinct_release(doc: dict) -> None:
+    """Reuse all v1 checks then verify the extra split-source exact digest."""
+    if (not isinstance(doc, dict)
+            or doc.get("schema") != DISTINCT_SCHEMA
+            or not isinstance(doc.get("sha256"), dict)
+            or set(doc["sha256"]) != DISTINCT_SOURCE_FILES):
+        raise RuntimeError("invalid_distinct_direct_local_release")
+    base = dict(doc)
+    base["schema"] = SCHEMA
+    base["sha256"] = {k: doc["sha256"][k] for k in SOURCE_FILES}
+    verify_release(base)  # all original modules and exact clean Git HEAD
+    extra = Path(doc["checkout"]) / "scripts/ci/direct_local_distinct_admission.py"
+    if (extra.is_symlink() or not extra.is_file()
+            or extra.stat().st_uid != os.getuid()
+            or extra.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or hashlib.sha256(extra.read_bytes()).hexdigest() !=
+               doc["sha256"]["scripts/ci/direct_local_distinct_admission.py"]):
+        raise RuntimeError("unverified_distinct_admission_source")
+
+
+def load_released_distinct_claim(file: Path, *, adapter=None):
+    """Never permit a v1 aggregate owner release to authorize split claims."""
+    doc = read_distinct_release(file)
+    verify_distinct_release(doc)
+    if adapter is None:
+        module_dir = str(Path(doc["checkout"]) / "scripts/ci")
+        names = ("direct_local_provider_ref", "direct_local_distinct_admission",
+                 "direct_local_fleet_claim", "direct_local_event_admission",
+                 "direct_local_workflow", "estate_policy")
+        if any(name in sys.modules for name in names):
+            raise RuntimeError("cached_unverified_distinct_local_module")
+        old_flag = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, module_dir)
+        try:
+            provider = importlib.import_module("direct_local_provider_ref")
+            # Provider adapter's split import is lazy; import and bind that
+            # exact verified module WHILE the pinned path is still active.
+            # Otherwise the later owner-cycle claim may fail to import it
+            # after sys.path has been restored, or resolve an alien module.
+            importlib.import_module("direct_local_distinct_admission")
+            adapter = provider.claim_distinct_with_fresh_provider_readback
+        finally:
+            sys.path.remove(module_dir)
+            sys.dont_write_bytecode = old_flag
+
+    def claim(*, body: bytes, event_name: str, signature: str,
+              delivery_id: str, secret: bytes) -> dict:
+        if read_distinct_release(file) != doc:
+            raise RuntimeError("distinct_direct_local_release_revoked_or_changed")
+        verify_distinct_release(doc)
+        return adapter(
+            checkout=Path(doc["checkout"]), fleet_root=Path(doc["fleet_root"]),
+            body=body, event_name=event_name, signature=signature,
+            delivery_id=delivery_id, secret=secret,
+        )
+    return claim

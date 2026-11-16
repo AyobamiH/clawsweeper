@@ -206,3 +206,94 @@ class ExistingFleetIngressTests(unittest.TestCase):
                 ledger_dir=self.ledger_dir, release_file=self.release_file,
                 secret_file=self.secret_file, batch_limit=128, claim=self.accepted)
         self.assertFalse(hasattr(bridge, "main"))
+
+    def make_distinct_profile(self):
+        extra = self.checkout / "scripts/ci/direct_local_distinct_admission.py"
+        extra.write_text("# exact v2 source\n")
+        subprocess.run(["git", "-C", str(self.checkout), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.checkout), "-c", "commit.gpgsign=false",
+                        "-c", "user.name=Fixture",
+                        "-c", "user.email=test@example.invalid", "commit",
+                        "-qm", "distinct"], check=True)
+        config = json.loads(self.release_file.read_text())
+        config["schema"] = release.DISTINCT_SCHEMA
+        config["commit"] = subprocess.check_output(
+            ["git", "-C", str(self.checkout), "rev-parse", "HEAD"], text=True).strip()
+        config["sha256"] = {
+            name: hashlib.sha256((self.checkout / name).read_bytes()).hexdigest()
+            for name in release.DISTINCT_SOURCE_FILES
+        }
+        self.release_file.write_text(json.dumps(config))
+        self.release_file.chmod(0o600)
+
+    @staticmethod
+    def accepted_distinct():
+        return {
+            "schema": "clawsweeper.existing-fleet-distinct-ordinary-claim.v1",
+            "fresh_provider_source_verified": True,
+            "admission": "queued", "queue_admitted": True,
+            "independent_jobs_executed": 0, "accepted_independent_jobs": 0,
+            "provider_ci_execution": False,
+            "github_actions_dispatched": False,
+            "github_status_published": False,
+            "source_sha": "a" * 40, "ref": "main",
+            "jobs": [{
+                "job_id": "local-fleet-" + "a" * 12,
+                "workflow_job": ".github/workflows/ci.yml#check",
+                "suite": "linux-node24-claw-check",
+                "policy": "a" * 64,
+            }],
+        }
+
+    def test_distinct_profile_consumes_only_verified_independent_identity(self):
+        self.make_distinct_profile()
+        self.stage()
+        calls = []
+        def claim(**kwargs):
+            calls.append(kwargs)
+            return self.accepted_distinct()
+        receipt = bridge.reconcile_existing_fleet_ingress(
+            ledger_dir=self.ledger_dir, release_file=self.release_file,
+            secret_file=self.secret_file, claim=claim, profile="distinct")
+        self.assertEqual(receipt["schema"], bridge.DISTINCT_SCHEMA)
+        self.assertEqual(receipt["consumed"], 1)
+        self.assertFalse(receipt["job_execution_proved"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+
+    def test_distinct_profile_cannot_accept_aggregate_or_forged_proof(self):
+        self.make_distinct_profile()
+        self.stage()
+        good = self.accepted_distinct()
+        forged = [
+            self.accepted(),
+            {**good, "independent_jobs_executed": 2},
+            {**good, "github_actions_dispatched": True},
+            {**good, "ref": "pr/101"},
+            {**good, "jobs": [*good["jobs"], dict(good["jobs"][0])]},
+            {**good, "jobs": [{**good["jobs"][0], "suite": "linux-node24"}]},
+            {**good, "jobs": [{**good["jobs"][0], "policy": "not-a-sha"}]},
+            {**good, "source_sha": "bad"},
+        ]
+        for fake in forged:
+            with self.subTest(fake=fake):
+                receipt = bridge.reconcile_existing_fleet_ingress(
+                    ledger_dir=self.ledger_dir, release_file=self.release_file,
+                    secret_file=self.secret_file, claim=lambda **_kw: fake,
+                    profile="distinct")
+                self.assertEqual(receipt["held"], 1)
+                self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+        self.assertEqual(bridge.reconcile_existing_fleet_ingress(
+            ledger_dir=self.ledger_dir, release_file=self.release_file,
+            secret_file=self.secret_file, claim=lambda **_kw: good,
+            profile="distinct")["consumed"], 1)
+
+    def test_aggregate_release_cannot_be_used_for_distinct_ingress(self):
+        self.stage()
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            bridge.reconcile_existing_fleet_ingress(
+                ledger_dir=self.ledger_dir, release_file=self.release_file,
+                secret_file=self.secret_file,
+                claim=lambda **_kw: self.accepted_distinct(),
+                profile="distinct")
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)

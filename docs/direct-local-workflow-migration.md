@@ -473,3 +473,35 @@ controller source directly (and any subsequent exact-source split admission
 patch), rather than stacking duplicate prelock hooks. The existing 12 GiB
 physical stop reserve and the 16.5 GiB admission floor remain unchanged.
 No provider-required CodeQL checks are satisfied by this proposal.
+
+### Exact-source distinct ingress release — source only (16 November 2026)
+
+The next narrow integration candidate adds a separate v2 owner-private
+release identity for two genuinely separate ordinary CI definitions. The
+existing v1 aggregate release remains unchanged and cannot authorise v2
+admission. The v2 manifest must hash the additional
+direct_local_distinct_admission.py source, alongside every existing
+source-bound ingress module and the exact clean checkout HEAD. A changed,
+unowned, unpinned or revoked source fails before its claim is called.
+
+The existing pre-lock ledger reconciliation accepts the explicit
+profile=distinct only with the v2 release; it calls the same existing
+canonical control lock and SQLite queue, using one read-only fresh GitHub GET
+and the existing HMAC-verified delivery record. The new bounded proof check
+rejects aggregate receipts, shared job IDs, mismatched job/suite mappings,
+unverified provider source, provider execution claims and any apparent
+job success at ingestion. A staged event is consumed only after a verified,
+durable distinct admission or its exact idempotent replay; uncertain failures
+remain staged. No new receiver, fleet, worker, timer, GitHub Actions job or
+status publisher is introduced.
+
+Not installed: the present r8p3 controller still calls the v1 aggregate
+ingress path and verifies only the aggregate queue provenance. A future
+coordinated, exact-source owner-approved controller/policy cutover must pin
+the updated ingress and release verifier module bytes, explicitly select v2,
+verify the new distinct observations inside the canonical lock and in each
+detached worker, exclude ordinary ClawSweeper polling, preserve the legacy
+manual success receipt without admitting it as a new distinct job, and add
+real Docker identity capture. No v2 release may be installed merely by
+swapping an environment variable or unverified module at runtime. C: physical
+reserve and genuine two-job acceptance remain independent gates.

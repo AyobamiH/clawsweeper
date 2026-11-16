@@ -149,5 +149,94 @@ class OwnerReleaseTests(unittest.TestCase):
             module.load_released_claim(link, adapter=lambda **kw: None)
 
 
+    def make_distinct_release(self):
+        extra = self.root / "scripts/ci/direct_local_distinct_admission.py"
+        extra.write_text("# exact owner split admission source\\n")
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "v2"], check=True)
+        self.doc["commit"] = subprocess.check_output(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.doc["schema"] = module.DISTINCT_SCHEMA
+        self.doc["sha256"] = {
+            name: hashlib.sha256((self.root / name).read_bytes()).hexdigest()
+            for name in module.DISTINCT_SOURCE_FILES
+        }
+        self.save()
+        return extra
+
+    def test_distinct_release_pins_additional_source_and_is_non_mutating(self):
+        self.make_distinct_release()
+        calls = []
+        hook = module.load_released_distinct_claim(
+            self.release, adapter=lambda **kw: calls.append(kw) or
+            {"queue_admitted": True})
+        result = hook(body=b"{}", event_name="pull_request", signature="sig",
+                      delivery_id="uuid", secret=b"test-secret")
+        self.assertTrue(result["queue_admitted"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["checkout"], self.root)
+        self.assertEqual(list(self.fleet.iterdir()), [])
+
+    def test_distinct_loader_binds_lazy_split_before_restoring_import_path(self):
+        from unittest import mock
+        self.make_distinct_release()
+        imported = []
+        class FakeProvider:
+            claim_distinct_with_fresh_provider_readback = staticmethod(
+                lambda **kwargs: {"queue_admitted": False})
+        def fake_import(name):
+            imported.append(name)
+            return FakeProvider() if name == "direct_local_provider_ref" else object()
+        # The combined suite legitimately imports several fixture modules
+        # in this interpreter. Simulate the isolated production worker's
+        # initially empty module cache without weakening its fail-closed gate.
+        blocked = {"direct_local_provider_ref",
+                   "direct_local_distinct_admission",
+                   "direct_local_fleet_claim", "direct_local_event_admission",
+                   "direct_local_workflow", "estate_policy"}
+        isolated_cache = {key: value for key, value in module.sys.modules.items()
+                          if key not in blocked}
+        with (mock.patch.object(module.sys, "modules", isolated_cache),
+              mock.patch.object(module.importlib, "import_module",
+                                side_effect=fake_import)):
+            hook = module.load_released_distinct_claim(self.release)
+        self.assertEqual(imported, ["direct_local_provider_ref",
+                                    "direct_local_distinct_admission"])
+        self.assertTrue(callable(hook))
+
+    def test_v1_release_cannot_authorise_distinct_execution(self):
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            module.load_released_distinct_claim(
+                self.release, adapter=lambda **kw: None)
+
+    def test_distinct_release_rejects_tamper_and_revoke_before_claim(self):
+        extra = self.make_distinct_release()
+        calls = []
+        hook = module.load_released_distinct_claim(
+            self.release, adapter=lambda **kw: calls.append(kw))
+        extra.write_text("# mutated but uncommitted source\\n")
+        with self.assertRaisesRegex(RuntimeError, "source_not_exact_clean_head|unverified_distinct_admission_source"):
+            hook(body=b"{}", event_name="push", signature="sig",
+                 delivery_id="uuid", secret=b"test-secret")
+        self.assertEqual(calls, [])
+        extra.write_text("# exact owner split admission source\\n")
+        self.doc["commit"] = "a" * 40
+        self.save()
+        with self.assertRaisesRegex(RuntimeError, "revoked_or_changed"):
+            hook(body=b"{}", event_name="push", signature="sig",
+                 delivery_id="uuid", secret=b"test-secret")
+        self.assertEqual(calls, [])
+
+    def test_distinct_release_rejects_partial_module_manifest(self):
+        self.make_distinct_release()
+        self.doc["sha256"].pop("scripts/ci/direct_local_distinct_admission.py")
+        self.save()
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            module.load_released_distinct_claim(
+                self.release, adapter=lambda **kw: None)
+
+
 if __name__ == "__main__":
     unittest.main()
