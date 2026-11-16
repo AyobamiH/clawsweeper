@@ -119,6 +119,12 @@ function staticImports(code: string): string[] {
   // rather than silently omit executable modules from the integrity closure.
   // Reject multiple declarations on one line for the same reason.
   const scrubbed = stripCommentsForImportGuard(code);
+  // Template interpolations contain executable code, but the comment scrubber
+  // preserves their text. Reject comment-separated import tokens regardless
+  // of comment length, even inside nested template interpolations.
+  if (/\bimport\s+\/\*/.test(code)) {
+    throw new CiEvidenceError("implementation_runtime_import_unsupported", true);
+  }
   // Comments have no fixed length in valid JavaScript. Inspect the
   // comment-scrubbed tokens rather than a bounded raw-comment regex.
   if (/\b(?:import|createRequire)\s*\(/.test(scrubbed)) {

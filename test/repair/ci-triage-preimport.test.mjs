@@ -199,3 +199,21 @@ test("long-comment dynamic imports are rejected by both runtime scanners", () =>
     f.cleanup();
   }
 });
+
+test("template interpolation refuses hidden long-comment dynamic imports", () => {
+  const f = fixture();
+  try {
+    const target = join(f.root, "dist/repair/observe-ci-triage.js");
+    appendFileSync(
+      target,
+      "\nconst report = \`\${import /*" + "x".repeat(128) + '*/("./unlisted.js")}\`;\n',
+    );
+    // Prove the hidden dynamic import is valid Node ESM, not a malformed fixture.
+    const parsed = spawnSync(process.execPath, ["--check", target], { encoding: "utf8" });
+    assert.equal(parsed.status, 0, parsed.stderr);
+    assert.throws(() => runtimeDigests(f.root), /implementation_runtime_import_unsupported/);
+    assert.throws(() => bootstrapDigests(f.root), /preimport_import/);
+  } finally {
+    f.cleanup();
+  }
+});

@@ -85,6 +85,10 @@ function imports(code) {
   // Valid noncanonical static ESM (including import/*comment*/"./x.js"
   // and export*from"./x.js") must never escape the bounded closure parser.
   const scrubbed = stripCommentsForImportGuard(code);
+  // Template interpolations contain executable code, but the comment scrubber
+  // preserves their text. Reject comment-separated import tokens regardless
+  // of comment length, even inside nested template interpolations.
+  if (/\bimport\s+\/\*/.test(code)) fail("import");
   // Long valid comments cannot hide a dynamic module load from the guard.
   if (/\b(?:import|createRequire)\s*\(/.test(scrubbed)) fail("dynamic_import");
   // Any comment-masked import/re-export at the start of a visual line must
