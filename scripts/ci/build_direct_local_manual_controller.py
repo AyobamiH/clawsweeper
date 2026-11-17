@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import stat
 import subprocess
@@ -28,6 +29,32 @@ LIBRARIES = (
     "direct_local_manual_worker.py",
     "direct_local_job_receipts.py",
 )
+
+
+def _sealed_git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """Read signed Git objects without executing ambient tools or repository helpers."""
+    for name in ("git", "ssh-keygen"):
+        binary = Path("/usr/bin") / name
+        meta = binary.lstat()
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0
+                or meta.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            raise RuntimeError("untrusted_system_git_verifier")
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    signers = home / ".config/git/allowed_signers"
+    if (signers.is_symlink() or not signers.is_file()
+            or signers.stat().st_uid != os.getuid()
+            or signers.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise RuntimeError("untrusted_owner_allowed_signers")
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LC_ALL": "C",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+           "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_NO_REPLACE_OBJECTS": "1",
+           "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+    return subprocess.run(
+        ["/usr/bin/git", "-C", str(repo),
+         "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=/usr/bin/ssh-keygen",
+         "-c", "gpg.ssh.allowedSignersFile=" + str(signers),
+         "-c", "core.fsmonitor=false", *args],
+        capture_output=True, check=False, timeout=10, env=env)
 
 
 def digest(raw: bytes) -> str:
@@ -343,9 +370,7 @@ def signed_git_files(repo: Path) -> dict[str, bytes]:
     data = {}
     for filename in LIBRARIES:
         name = "scripts/ci/" + filename
-        result = subprocess.run(
-            ["git", "-C", str(repo), "show", MANUAL_SOURCE_COMMIT + ":" + name],
-            capture_output=True, check=False, timeout=10)
+        result = _sealed_git(repo, "cat-file", "blob", MANUAL_SOURCE_COMMIT + ":" + name)
         if result.returncode or not result.stdout:
             raise RuntimeError("signed_candidate_library_missing")
         data[filename] = result.stdout
@@ -365,16 +390,16 @@ def _exclusive_file(path: Path, content: bytes) -> None:
 def stage(*, base: Path, repo: Path, destination: Path) -> dict:
     # Installation is a SEPARATE owner decision. Never stage inside the live
     # fleet/controller/source directory or replace an existing artefact.
-    evidence = Path.home() / ".local/share/local-ci/evidence/clawsweeper-direct-local-20261113"
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    evidence = home / ".local/share/local-ci/evidence/clawsweeper-direct-local-20261113"
     if (destination.is_symlink() or destination.exists()
             or not destination.absolute().is_relative_to(evidence)
-            or base.resolve() != (Path.home() / ".local/share/local-ci/fleet_ci.py").resolve()):
+            or base.resolve() != (home / ".local/share/local-ci/fleet_ci.py").resolve()):
         raise RuntimeError("release_stage_must_be_new_private_evidence_directory")
     if (not repo.is_dir() or repo.is_symlink()
             or repo.stat().st_uid != os.getuid()):
         raise RuntimeError("untrusted_manual_source_repository")
-    signed = subprocess.run(["git", "-C", str(repo), "verify-commit", MANUAL_SOURCE_COMMIT],
-                            capture_output=True, timeout=10)
+    signed = _sealed_git(repo, "verify-commit", MANUAL_SOURCE_COMMIT)
     if signed.returncode:
         raise RuntimeError("local_manual_signed_source_not_verified")
     frozen = signed_git_files(repo)

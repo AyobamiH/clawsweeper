@@ -38,6 +38,48 @@ class FakeDB:
         self.commits += 1
 
 
+class BuilderTrustBoundaryTests(unittest.TestCase):
+    def test_signed_source_reads_seal_path_home_and_git_configuration(self):
+        # An untrusted PATH previously ran an attacker-supplied git binary
+        # while the offline release builder claimed to verify signed source.
+        with tempfile.TemporaryDirectory(prefix="manual-builder-hostile-") as tmp:
+            root = Path(tmp)
+            marker = root / "shim-executed"
+            shim = root / "git"
+            shim.write_text("#!/bin/sh\nprintf 'executed' > " + str(marker) + "\nexit 0\n")
+            shim.chmod(0o755)
+            with mock.patch.dict(os.environ, {
+                "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                "HOME": str(root),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "gpg.ssh.program",
+                "GIT_CONFIG_VALUE_0": str(shim),
+                "GIT_EXEC_PATH": str(root),
+                "LD_PRELOAD": str(root / "untrusted.so"),
+            }):
+                frozen = build.signed_git_files(ROOT)
+                signature = build._sealed_git(
+                    ROOT, "verify-commit", build.MANUAL_SOURCE_COMMIT)
+            self.assertFalse(marker.exists(), "pre-verification git shim ran")
+            self.assertEqual(set(frozen), set(build.LIBRARIES))
+            self.assertTrue(all(frozen.values()))
+            self.assertEqual(signature.returncode, 0, signature.stderr[:200])
+
+
+    def test_release_stage_cannot_use_injected_home_as_fleet(self):
+        # A forged HOME must not redirect the release-root identity check.
+        with tempfile.TemporaryDirectory(prefix="manual-builder-home-") as td:
+            home = Path(td)
+            bogus_base = home / ".local/share/local-ci/fleet_ci.py"
+            bogus_stage = (home / ".local/share/local-ci/evidence/"
+                           "clawsweeper-direct-local-20261113/new-stage")
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "release_stage_must_be_new_private"):
+                    build.stage(base=bogus_base, repo=ROOT, destination=bogus_stage)
+            self.assertFalse(bogus_stage.exists())
+
+
 class ReleaseCandidateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
