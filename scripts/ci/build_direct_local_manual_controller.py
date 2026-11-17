@@ -201,13 +201,23 @@ def _signed_manual_claim_entry(request_file, signature_file):
         "allowed_signers_file=pathlib.Path(sys.argv[6]));"
         "print(json.dumps(p,sort_keys=True))"
     )
+    # Never allow HOME or LD_PRELOAD to choose the signer or executable
+    # environment before owner-signature verification in the child.
+    home = pathlib.Path(__import__("pwd").getpwuid(
+        __import__("os").getuid()).pw_dir)
+    environment = {"HOME": str(home), "PATH": "/usr/bin:/bin",
+                   "LC_ALL": "C", "GH_HOST": "github.com",
+                   "GH_PROMPT_DISABLED": "1"}
+    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        if __import__("os").environ.get(key):
+            environment[key] = __import__("os").environ[key]
     try:
         result = subprocess.run(
             [sys.executable, "-I", "-B", "-c", program,
              str(_MANUAL_LIB), str(_MANUAL_CHECKOUT), str(ROOT),
              str(request_file), str(signature_file),
-             str(pathlib.Path.home() / ".config/git/allowed_signers")],
-            capture_output=True, timeout=60, check=False)
+             str(home / ".config/git/allowed_signers")],
+            capture_output=True, timeout=60, check=False, env=environment)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError("owner_signed_manual_claim_unavailable") from exc
     if result.returncode != 0 or len(result.stdout) > 8192:

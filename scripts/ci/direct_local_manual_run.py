@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import sqlite3
@@ -59,7 +60,7 @@ def _trusted_system_binary(name: str) -> str:
 
 
 def _trusted_github_env() -> dict[str, str]:
-    home = Path.home()
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     cfg = home / ".config" / "gh"
     try:
         st = cfg.lstat()
@@ -106,7 +107,7 @@ def owner_bytes(path: Path, limit: int, private: bool = True) -> bytes:
 
 def owner_allowed_signers() -> Path:
     """Fixed production owner identity; tests may patch the function only."""
-    return Path.home() / ".config/git/allowed_signers"
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".config/git/allowed_signers"
 
 
 def verify_owner_signature_bytes(raw: bytes, sig: bytes, signers: Path) -> None:

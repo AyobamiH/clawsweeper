@@ -204,6 +204,63 @@ class SignedManualWorkerTests(unittest.TestCase):
             with self.assertRaisesRegex(Hold, "not_exact_clean_head"):
                 worker.verify_exact_clean_checkout(repo, "a"*40)
 
+    def test_hostile_git_path_cannot_forge_clean_source(self):
+        # Before hardening, this fake git produced a valid SHA and empty status,
+        # so an unverified directory was accepted as a clean signed checkout.
+        with tempfile.TemporaryDirectory(prefix="manual-git-path-") as td:
+            root = Path(td)
+            repo = root / "repo"
+            fake_bin = root / "bin"
+            repo.mkdir()
+            fake_bin.mkdir()
+            marker = root / "hostile-executable-ran"
+            shim = fake_bin / "git"
+            shim.write_text(
+                "#!/bin/sh\nprintf ran > " + str(marker)
+                + "\nif [ \"$3\" = \"rev-parse\" ]; then printf '%040d\\n' 0; fi\n"
+            )
+            shim.chmod(0o700)
+            with mock.patch.dict(os.environ, {
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "HOME": str(root), "GIT_CONFIG_GLOBAL": str(root / "hostile"),
+            }):
+                with self.assertRaisesRegex(
+                        Hold, "manual_worker_source_checkout_not_exact_clean_head"):
+                    worker.verify_exact_clean_checkout(repo, "0" * 40)
+            self.assertFalse(marker.exists(),
+                             "untrusted git executable ran before source proof")
+
+    def test_repository_filter_cannot_execute_before_blob_verification(self):
+        # Git status can execute filter.clean from untrusted .git/config.
+        # The worker must validate HEAD/index/worktree using only safe plumbing.
+        with tempfile.TemporaryDirectory(prefix="manual-filter-gate-") as td:
+            repo = Path(td)
+            marker = repo / "filter-was-run"
+            def git(*args):
+                return subprocess.run(
+                    ["/usr/bin/git", *args], cwd=repo, check=True,
+                    capture_output=True, text=True, timeout=7)
+            git("init", "-q")
+            git("config", "user.name", "CI Fixture")
+            git("config", "user.email", "ci@localhost")
+            tracked = repo / "tracked.txt"
+            tracked.write_text("original")
+            (repo / ".gitattributes").write_text("tracked.txt filter=unsafe\n")
+            git("add", ".")
+            git("-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
+            sha = git("rev-parse", "HEAD").stdout.strip()
+            worker.verify_exact_clean_checkout(repo, sha)
+            hook = repo / "hostile-filter.sh"
+            hook.write_text(
+                "#!/bin/sh\nprintf called > " + str(marker) + "\ncat\n"
+            )
+            hook.chmod(0o700)
+            git("config", "filter.unsafe.clean", str(hook))
+            tracked.write_text("tampered")
+            with self.assertRaisesRegex(Hold, "not_exact_clean_head"):
+                worker.verify_exact_clean_checkout(repo, sha)
+            self.assertFalse(marker.exists(), "Git executed a local clean filter")
+
     def test_production_worker_entry_has_no_injected_get_or_plan(self):
         import inspect
         params = inspect.signature(worker.verify_manual_worker_start).parameters

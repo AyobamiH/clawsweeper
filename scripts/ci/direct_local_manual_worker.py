@@ -148,25 +148,106 @@ def verify_manual_queue_provenance(*, fleet_root: Path, job_id: str) -> dict:
 
 
 def verify_exact_clean_checkout(checkout: Path, expected_sha: str) -> None:
-    """A published Git ref is not enough: the loaded checkout must be clean."""
+    """Compare HEAD, index and worktree blobs without running Git clean filters.
+
+    Even /usr/bin/git status may execute a repository-configured filter.clean
+    BEFORE source integrity is known. Only use non-executing Git plumbing, then
+    hash the working-tree bytes directly against the signed HEAD object IDs.
+    """
     source = Path(checkout)
     if (source.is_symlink() or not source.is_dir()
             or source.stat().st_uid != os.getuid()
-            or source.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            or source.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not routing.HEX40.fullmatch(expected_sha)):
         raise Hold("manual_worker_unsafe_source_checkout")
-    try:
-        head = subprocess.run(
-            ["git", "-C", str(source), "rev-parse", "HEAD"],
-            capture_output=True, check=False, timeout=6, text=True)
-        status = subprocess.run(
-            ["git", "-C", str(source), "status", "--porcelain",
-             "--untracked-files=normal"],
-            capture_output=True, check=False, timeout=6, text=True)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Hold("manual_worker_checkout_verifier_unavailable") from exc
-    if (head.returncode or status.returncode
-            or head.stdout.strip() != expected_sha or status.stdout.strip()):
+    binary = manual._trusted_system_binary("git")
+    home = str(Path(manual.owner_allowed_signers()).parents[2])
+    env = {"PATH": "/usr/bin:/bin", "HOME": home, "LC_ALL": "C",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+           "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_OPTIONAL_LOCKS": "0",
+           "GIT_TERMINAL_PROMPT": "0"}
+    prefix = [binary, "-c", "core.fsmonitor=false",
+              "-c", "core.hooksPath=/dev/null", "-C", str(source)]
+
+    def git_bytes(*args: str) -> bytes:
+        try:
+            result = subprocess.run(
+                [*prefix, *args], capture_output=True, check=False,
+                timeout=15, env=env)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise Hold("manual_worker_checkout_verifier_unavailable") from exc
+        if result.returncode or len(result.stdout) > 16 * 1024 * 1024:
+            raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+        return result.stdout
+
+    if git_bytes("rev-parse", "HEAD").strip() != expected_sha.encode("ascii"):
         raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+
+    def records(raw: bytes, *, index: bool) -> dict[bytes, tuple[bytes, bytes]]:
+        parsed = {}
+        for item in raw.split(b"\0"):
+            if not item:
+                continue
+            try:
+                meta, name = item.split(b"\t", 1)
+                fields = meta.split()
+                if index:
+                    mode, digest, stage = fields
+                    if stage != b"0":
+                        raise ValueError("unmerged index")
+                else:
+                    mode, kind, digest = fields
+                    if kind != b"blob":
+                        raise ValueError("nonblob source")
+                if (mode not in (b"100644", b"100755") or len(digest) != 40
+                        or any(c not in b"0123456789abcdef" for c in digest)
+                        or not name or name.startswith(b"/")
+                        or b".." in name.split(b"/") or name in parsed):
+                    raise ValueError("unexpected source path or mode")
+            except (ValueError, IndexError) as exc:
+                raise Hold("manual_worker_source_checkout_not_exact_clean_head") from exc
+            parsed[name] = (mode, digest)
+            if len(parsed) > 30000:
+                raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+        return parsed
+
+    head = records(git_bytes("ls-tree", "-rz", "HEAD"), index=False)
+    staged = records(git_bytes("ls-files", "--stage", "-z"), index=True)
+    if not head or head != staged or git_bytes(
+            "ls-files", "--others", "--exclude-standard", "-z"):
+        raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+
+    total_size = 0
+    for name, (mode, digest) in head.items():
+        path = source / os.fsdecode(name)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try:
+                before = os.fstat(fd)
+                total_size += before.st_size
+                if (not stat.S_ISREG(before.st_mode)
+                        or before.st_size > 128 * 1024 * 1024
+                        or total_size > 1024 * 1024 * 1024
+                        or bool(before.st_mode & 0o111) != (mode == b"100755")):
+                    raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+                h = hashlib.sha1(
+                    b"blob " + str(before.st_size).encode("ascii") + b"\0")
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                after = os.fstat(fd)
+                if (h.hexdigest().encode("ascii") != digest
+                        or (before.st_dev, before.st_ino, before.st_size,
+                            before.st_mtime_ns, before.st_ctime_ns) !=
+                           (after.st_dev, after.st_ino, after.st_size,
+                            after.st_mtime_ns, after.st_ctime_ns)):
+                    raise Hold("manual_worker_source_checkout_not_exact_clean_head")
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            raise Hold("manual_worker_source_checkout_not_exact_clean_head") from exc
 
 
 def verify_manual_worker_start(*, checkout: Path, fleet_root: Path,

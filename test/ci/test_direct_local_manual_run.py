@@ -168,6 +168,34 @@ class OwnerSignedManualRunTests(unittest.TestCase):
                 self.assertNotEqual(env["GH_CONFIG_DIR"], str(tmp))
                 self.assertNotIn("LD_PRELOAD", env)
 
+    def test_offline_controller_builder_pins_child_environment(self):
+        # The original renderer passed ambient HOME and LD_PRELOAD to a Python
+        # child before any owner signature had been authenticated.
+        source = (ROOT / "scripts/ci/build_direct_local_manual_controller.py"
+                  ).read_text()
+        entry = source.split("def _signed_manual_claim_entry(", 1)[1]
+        entry = entry.split("\ndef ", 1)[0]
+        self.assertIn('home = pathlib.Path(__import__("pwd").getpwuid(', entry)
+        self.assertIn('env=environment', entry)
+        self.assertIn('str(home / ".config/git/allowed_signers")', entry)
+        self.assertNotIn('str(pathlib.Path.home()', entry)
+        self.assertNotIn('"LD_PRELOAD"', entry)
+
+    def test_owner_signer_and_github_config_ignore_injected_home(self):
+        import pwd
+        authoritative = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        with tempfile.TemporaryDirectory(prefix="manual-hostile-home-") as td:
+            fake_home = Path(td)
+            (fake_home / ".config/git").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(fake_home)}):
+                self.assertEqual(manual.owner_allowed_signers(),
+                                 authoritative / ".config/git/allowed_signers")
+                env = manual._trusted_github_env()
+                self.assertEqual(env["HOME"], str(authoritative))
+                self.assertEqual(env["GH_CONFIG_DIR"],
+                                 str(authoritative / ".config/gh"))
+                self.assertNotIn(str(fake_home), str(env))
+
     def test_real_ssh_signature_one_durable_queue_row_and_replay(self):
         first = self.claim()
         second = self.claim()
