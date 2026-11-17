@@ -283,3 +283,161 @@ def load_released_distinct_claim(file: Path, *, adapter=None):
             delivery_id=delivery_id, secret=secret,
         )
     return claim
+
+
+# The frozen implementation and the independently enrolled CI target are
+# different source identities before the implementation lands on develop.
+# The v2 schema conflates them and therefore cannot authorise that rollout.
+SPLIT_SOURCE_SCHEMA = "clawsweeper.direct-local-owner-release.v3-split"
+SPLIT_SOURCE_FIELDS = frozenset({
+    "schema", "repo", "implementation_checkout", "implementation_commit",
+    "execution_checkout", "execution_commit", "execution_ref", "fleet_root",
+    "sha256",
+})
+
+
+def _canonical_owner_directory(value: str) -> str:
+    if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
+        raise RuntimeError("unsafe_split_source_path")
+    location = Path(value)
+    if (str(location) != value or location.is_symlink()
+            or not location.is_dir() or location.stat().st_uid != os.getuid()
+            or location.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or any(parent.is_symlink() for parent in location.parents)):
+        raise RuntimeError("unsafe_split_source_directory")
+    return value
+
+
+def read_split_source_release(file: Path) -> dict:
+    """Read a private, explicit TWO-source release; never upgrade a v1/v2 file."""
+    try:
+        doc = json.loads(_owned_file(Path(file)), object_pairs_hook=unique_keys)
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise RuntimeError("malformed_split_source_release") from exc
+    if (not isinstance(doc, dict) or set(doc) != SPLIT_SOURCE_FIELDS
+            or doc["schema"] != SPLIT_SOURCE_SCHEMA
+            or doc["repo"] != "AyobamiH/clawsweeper"
+            or doc["execution_ref"] != "develop"
+            or any(not isinstance(doc[k], str) or not SHA40.fullmatch(doc[k])
+                   for k in ("implementation_commit", "execution_commit"))
+            or not isinstance(doc["sha256"], dict)
+            or set(doc["sha256"]) != DISTINCT_SOURCE_FILES
+            or any(not isinstance(v, str) or not SHA256.fullmatch(v)
+                   for v in doc["sha256"].values())):
+        raise RuntimeError("unapproved_split_source_release_identity")
+    for field in ("implementation_checkout", "execution_checkout", "fleet_root"):
+        doc[field] = _canonical_owner_directory(doc[field])
+    return doc
+
+
+def _trusted_exact_clean_head(directory: Path, expected_sha: str) -> None:
+    """Verify a frozen commit without invoking repository hooks or ambient git."""
+    try:
+        git, env = trusted_git_source(), trusted_git_env()
+        head = subprocess.run(
+            [git, "-c", "core.fsmonitor=false", "-C", str(directory),
+             "rev-parse", "--verify", "HEAD^{commit}"],
+            env=env, capture_output=True, timeout=6, check=True, text=True)
+        status = subprocess.run(
+            [git, "-c", "core.fsmonitor=false", "-C", str(directory),
+             "status", "--porcelain", "--untracked-files=normal"],
+            env=env, capture_output=True, timeout=6, check=True, text=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("split_execution_source_unavailable") from exc
+    if head.stdout.strip() != expected_sha or status.stdout.strip():
+        raise RuntimeError("split_execution_source_not_exact_clean_head")
+
+
+def verify_split_source_release(doc: dict, *, enrolled_sha: str) -> None:
+    """Bind signed implementation and isolated CI checkout to ONE enrolled SHA.
+
+    This read-only gate cannot install a release or admit a job. The caller
+    must independently establish installed policy and source authority.
+    """
+    if (not isinstance(doc, dict) or set(doc) != SPLIT_SOURCE_FIELDS
+            or doc.get("schema") != SPLIT_SOURCE_SCHEMA
+            or not isinstance(enrolled_sha, str)
+            or not SHA40.fullmatch(enrolled_sha)
+            or doc.get("execution_commit") != enrolled_sha):
+        raise RuntimeError("split_execution_not_enrolled_in_existing_fleet")
+    implementation = {
+        "schema": DISTINCT_SCHEMA,
+        "repo": doc["repo"],
+        "checkout": doc["implementation_checkout"],
+        "commit": doc["implementation_commit"],
+        "fleet_root": doc["fleet_root"],
+        "sha256": doc["sha256"],
+    }
+    verify_distinct_release(implementation)
+    _trusted_exact_clean_head(
+        Path(doc["execution_checkout"]), doc["execution_commit"])
+    # The caller's enrolled_sha is not authority on its own. Bind the
+    # execution commit to the ACTUAL existing fleet's owner-only policy.
+    policy_path = Path(doc["fleet_root"]) / "fleet-policy.json"
+    if policy_path.is_symlink() or not policy_path.is_file():
+        raise RuntimeError("missing_split_source_fleet_policy")
+    try:
+        fd = os.open(policy_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            info = os.fstat(fd)
+            if (info.st_uid != os.getuid()
+                    or not stat.S_ISREG(info.st_mode)
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or not 0 < info.st_size <= 262144):
+                raise RuntimeError("untrusted_split_source_fleet_policy")
+            policy_bytes = os.read(fd, info.st_size + 1)
+            if len(policy_bytes) != info.st_size:
+                raise RuntimeError("changed_split_source_fleet_policy")
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RuntimeError("unavailable_split_source_fleet_policy") from exc
+    try:
+        policy = json.loads(policy_bytes, object_pairs_hook=unique_keys)
+        if (policy["repositories"]["AyobamiH/clawsweeper"]["enrolled_head"]
+                != enrolled_sha or
+                policy["execution_hosts"]["AyobamiH/clawsweeper"]
+                != os.uname().nodename):
+            raise RuntimeError("split_source_not_enrolled_in_live_policy")
+    except (ValueError, TypeError, KeyError, UnicodeError) as exc:
+        raise RuntimeError("unreadable_split_source_fleet_policy") from exc
+
+
+def load_split_source_claim(file: Path, *, enrolled_sha: str):
+    """Production entry point: no injected queue adapter or trust bypass."""
+    return _load_split_source_claim(file, enrolled_sha=enrolled_sha)
+
+
+def _load_split_source_claim(file: Path, *, enrolled_sha: str, adapter=None):
+    """Bind a verified claim to the EXECUTION tree; injections are test-only."""
+    doc = read_split_source_release(file)
+    verify_split_source_release(doc, enrolled_sha=enrolled_sha)
+    if adapter is None:
+        names = ("direct_local_provider_ref", "direct_local_distinct_admission",
+                 "direct_local_fleet_claim", "direct_local_event_admission",
+                 "direct_local_workflow", "estate_policy")
+        if any(name in sys.modules for name in names):
+            raise RuntimeError("cached_unverified_split_source_module")
+        module_dir = str(Path(doc["implementation_checkout"]) / "scripts" / "ci")
+        previous = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, module_dir)
+        try:
+            provider = importlib.import_module("direct_local_provider_ref")
+            importlib.import_module("direct_local_distinct_admission")
+            adapter = provider.claim_distinct_with_fresh_provider_readback
+        finally:
+            sys.path.remove(module_dir)
+            sys.dont_write_bytecode = previous
+
+    def claim(*, body: bytes, event_name: str, signature: str,
+              delivery_id: str, secret: bytes) -> dict:
+        if read_split_source_release(file) != doc:
+            raise RuntimeError("split_source_release_revoked_or_changed")
+        verify_split_source_release(doc, enrolled_sha=enrolled_sha)
+        return adapter(
+            checkout=Path(doc["execution_checkout"]),
+            fleet_root=Path(doc["fleet_root"]),
+            body=body, event_name=event_name, signature=signature,
+            delivery_id=delivery_id, secret=secret)
+    return claim
