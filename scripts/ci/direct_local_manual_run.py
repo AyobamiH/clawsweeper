@@ -43,6 +43,43 @@ FIELDS = frozenset((
 HEX32 = re.compile(r"[a-f0-9]{32}\Z")
 
 
+# The owner-signed intent verifier runs BEFORE any request is admitted. Never
+# resolve its trust roots through an inherited PATH or executable shim.
+def _trusted_system_binary(name: str) -> str:
+    path = Path("/usr/bin") / name
+    try:
+        st = path.lstat()
+    except OSError as exc:
+        raise Hold("owner_trust_binary_missing") from exc
+    if (path.is_symlink() or not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+            or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not st.st_mode & stat.S_IXUSR):
+        raise Hold("owner_trust_binary_untrusted")
+    return str(path)
+
+
+def _trusted_github_env() -> dict[str, str]:
+    home = Path.home()
+    cfg = home / ".config" / "gh"
+    try:
+        st = cfg.lstat()
+    except OSError as exc:
+        raise Hold("owner_github_config_missing") from exc
+    if (cfg.is_symlink() or not stat.S_ISDIR(st.st_mode)
+            or st.st_uid != os.getuid()
+            or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise Hold("owner_github_config_untrusted")
+    env = {"HOME": str(home), "GH_CONFIG_DIR": str(cfg),
+           "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1",
+           "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+    # Preserve only the documented token variables needed by an authorised
+    # non-interactive GitHub GET; never inherit GH_HOST/config, preload or PATH.
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    return env
+
+
 def owner_bytes(path: Path, limit: int, private: bool = True) -> bytes:
     p = Path(path)
     if p.is_symlink() or not p.is_file():
@@ -92,11 +129,11 @@ def verify_owner_signature_bytes(raw: bytes, sig: bytes, signers: Path) -> None:
             raise Hold("incomplete_owner_signature_descriptor")
         os.lseek(fd, 0, os.SEEK_SET)
         res = subprocess.run(
-            ["ssh-keygen", "-Y", "verify", "-f", str(signers),
-             "-I", PRINCIPAL, "-n", NAMESPACE,
+            [_trusted_system_binary("ssh-keygen"), "-Y", "verify",
+             "-f", str(signers), "-I", PRINCIPAL, "-n", NAMESPACE,
              "-s", f"/proc/self/fd/{fd}"],
             input=raw, capture_output=True, timeout=8, check=False,
-            pass_fds=(fd,),
+            pass_fds=(fd,), env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Hold("owner_signature_verifier_unavailable") from exc
@@ -143,9 +180,10 @@ def read_fresh_develop_sha() -> str:
     """One read-only GitHub ref GET; never Actions admission or status POST."""
     try:
         res = subprocess.run(
-            ["gh", "api", "--method", "GET",
-             "repos/AyobamiH/clawsweeper/git/ref/heads/develop"],
+            [_trusted_system_binary("gh"), "api", "--hostname", "github.com",
+             "--method", "GET", "repos/AyobamiH/clawsweeper/git/ref/heads/develop"],
             capture_output=True, timeout=15, check=False,
+            env=_trusted_github_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Hold("manual_source_get_unavailable") from exc

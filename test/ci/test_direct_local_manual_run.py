@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path(os.environ.get("CLAWSWEEPER_TEST_CLEAN_SOURCE", str(ROOT)))
@@ -126,6 +127,46 @@ class OwnerSignedManualRunTests(unittest.TestCase):
         self.assertNotIn("fresh_source_sha", parameters)
         self.assertNotIn("signature_verifier", parameters)
         self.assertNotIn("now", parameters)
+
+    def test_hostile_path_cannot_forge_owner_signature_before_queue(self):
+        with tempfile.TemporaryDirectory(prefix="manual-hostile-path-") as tmp:
+            directory = Path(tmp)
+            marker = directory / "shim-ran"
+            shim = directory / "ssh-keygen"
+            shim.write_text("#!/bin/sh\nprintf spoofed > " + str(marker) + "\nexit 0\n")
+            shim.chmod(0o700)
+            bogus = (b"-----BEGIN SSH SIGNATURE-----\nZm9v\n"
+                     b"-----END SSH SIGNATURE-----\n")
+            with mock.patch.dict(os.environ, {
+                "PATH": str(directory) + os.pathsep + os.environ["PATH"],
+                "LD_PRELOAD": str(directory / "not-a-library.so"),
+            }):
+                with self.assertRaisesRegex(Hold, "untrusted_owner_signature"):
+                    manual.verify_owner_signature_bytes(
+                        b"not signed", bogus, self.signers)
+            self.assertFalse(marker.exists(), "hostile PATH program ran")
+
+    def test_github_readback_pins_binary_host_and_sealed_environment(self):
+        payload = {"ref": "refs/heads/develop",
+                   "object": {"type": "commit", "sha": self.sha}}
+        fake = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(payload).encode(), stderr=b"")
+        with tempfile.TemporaryDirectory(prefix="manual-gh-shim-") as tmp:
+            with mock.patch.dict(os.environ, {
+                "PATH": str(tmp) + os.pathsep + os.environ["PATH"],
+                "GH_HOST": "attacker.example",
+                "GH_CONFIG_DIR": str(tmp),
+                "LD_PRELOAD": str(Path(tmp) / "evil.so"),
+            }), mock.patch.object(manual.subprocess, "run", return_value=fake) as run:
+                self.assertEqual(manual.read_fresh_develop_sha(), self.sha)
+                argv = run.call_args.args[0]
+                env = run.call_args.kwargs["env"]
+                self.assertEqual(argv[0], "/usr/bin/gh")
+                self.assertEqual(argv[1:4], ["api", "--hostname", "github.com"])
+                self.assertEqual(env["GH_HOST"], "github.com")
+                self.assertEqual(env["PATH"], "/usr/bin:/bin")
+                self.assertNotEqual(env["GH_CONFIG_DIR"], str(tmp))
+                self.assertNotIn("LD_PRELOAD", env)
 
     def test_real_ssh_signature_one_durable_queue_row_and_replay(self):
         first = self.claim()
