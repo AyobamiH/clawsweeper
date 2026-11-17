@@ -578,3 +578,72 @@ def compile_distinct_v2_installed_upgrade(
         "proposed_sha256": sha(output),
         "content": output,
     }
+
+
+V3_SCHEMA = "clawsweeper.existing-fleet-split-source-controller-upgrade.v3"
+V3_MARKER = b"    # Signed v3 distinct execution: implementation and CI commits are separate.\n"
+
+
+def compile_split_v3_installed_upgrade(
+    current: bytes, *, expected_sha256: str,
+) -> dict:
+    """Render exact installed v1 -> reviewed v2 -> pinned v3, without installing.
+
+    The immutable implementation checkout supplies authenticated code; the
+    separately enrolled execution checkout supplies the CI source. Verify
+    BOTH against the installed policy before any ingress or detached effect.
+    A v1 aggregate release cannot silently become a split-source release.
+    """
+    v2 = compile_distinct_v2_installed_upgrade(
+        current, expected_sha256=expected_sha256)
+    output = v2["content"]
+    patterns = (
+        (b"_dl_mod.read_distinct_release(_dl_bound)",
+         b"_dl_mod.read_split_source_release(_dl_bound)"),
+        (b"_dl_verifier.read_distinct_release(_dl_bound)",
+         b"_dl_verifier.read_split_source_release(_dl_bound)"),
+        (b"_dl_doc.get('commit')",
+         b"_dl_doc.get('execution_commit')"),
+        (b"profile='distinct')", b"profile='split')"),
+    )
+    for old, new in patterns:
+        expected_count = 2 if old == b"_dl_doc.get('commit')" else 1
+        if output.count(old) != expected_count or current.count(new):
+            raise RuntimeError("split_v3_unrecognised_v2_release_shape")
+        output = output.replace(old, new)
+    for kind in (b"_dl_mod", b"_dl_verifier"):
+        old = (kind + b".verify_distinct_release(_dl_doc)\n"
+               + (b" " * (12 if kind == b"_dl_mod" else 16))
+               + b"_dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')")
+        new = (b"_dl_cfg = policy['repositories'].get('AyobamiH/clawsweeper')")
+        if output.count(old) != 1:
+            raise RuntimeError("split_v3_unreviewed_verify_order")
+        output = output.replace(old, new, 1)
+        indent = b" " * (12 if kind == b"_dl_mod" else 16)
+        error = (b"clawsweeper_worker_source_policy_pin_mismatch" if kind == b"_dl_mod"
+                 else b"clawsweeper_existing_fleet_policy_pin_mismatch")
+        boundary = b"raise RuntimeError('" + error + b"')"
+        if output.count(boundary) != 1:
+            raise RuntimeError("split_v3_unreviewed_policy_guard")
+        output = output.replace(
+            boundary, boundary + b"\n" + indent
+            + kind + b".verify_split_source_release(\n"
+            + indent + b"    _dl_doc, enrolled_sha=_dl_cfg['enrolled_head'])", 1)
+    if output.count(V2_MARKER) != 1 or V3_MARKER in output:
+        raise RuntimeError("split_v3_upgrade_marker_collision")
+    output = output.replace(V2_MARKER, V3_MARKER, 1)
+    ast.parse(output.decode("utf-8"))
+    if (output.count(V3_MARKER) != 1
+            or b"verify_distinct_release(_dl_doc)" in output
+            or b"read_distinct_release(_dl_bound)" in output
+            or b"profile='distinct')" in output
+            or output.count(b"verify_split_source_release(") != 2
+            or output.count(b"read_split_source_release(_dl_bound)") != 2
+            or output.count(b"with core.lock():") != 1):
+        raise RuntimeError("split_v3_legacy_fallback_detected")
+    return {
+        "schema": V3_SCHEMA, "state": "source_only_not_installed",
+        "original_sha256": expected_sha256,
+        "v2_intermediate_sha256": v2["proposed_sha256"],
+        "proposed_sha256": sha(output), "content": output,
+    }
