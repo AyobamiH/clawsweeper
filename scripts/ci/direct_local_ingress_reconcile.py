@@ -9,16 +9,131 @@ Do not install a separate service or run it as a standalone job driver.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import importlib.util
+import json
 import os
 import re
 from pathlib import Path
 import stat
+import subprocess
 import sys
+import types
 
 MAX_BATCH = 8
 SCHEMA = "clawsweeper.existing-fleet-ingress-reconcile.v1"
 DISTINCT_SCHEMA = "clawsweeper.existing-fleet-distinct-ingress-reconcile.v1"
+SPLIT_SCHEMA = "clawsweeper.existing-fleet-split-source-ingress-reconcile.v1"
+
+
+def _preverified_release_verifier(release_file: Path, sidecar_path: Path,
+                                  profile: str):
+    """Authenticate executable verifier BYTES before compiling any of them.
+
+    The existing owner-private release pins an immutable implementation Git
+    commit. Read that manifest with built-ins, fetch its exact verifier blob
+    through sealed, absolute Git, and execute only those verified bytes. No
+    ambient Python import path, filesystem race or Git executable is trusted.
+    This is a pre-import boundary; the verifier still checks the full release,
+    source closure and live fleet policy before any claim.
+    """
+    file = Path(release_file)
+    if file.is_symlink() or not file.is_file():
+        raise RuntimeError("unsafe_preimport_owner_release")
+    fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if (info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not 0 < info.st_size <= 8192):
+            raise RuntimeError("unsafe_preimport_owner_release")
+        raw = os.read(fd, info.st_size + 1)
+        if len(raw) != info.st_size:
+            raise RuntimeError("changed_preimport_owner_release")
+    finally:
+        os.close(fd)
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise RuntimeError("duplicate_preimport_release_key")
+            result[key] = value
+        return result
+
+    try:
+        doc = json.loads(raw, object_pairs_hook=unique)
+        schema = {
+            "aggregate": "clawsweeper.direct-local-owner-release.v1",
+            "distinct": "clawsweeper.direct-local-owner-release.v2-distinct",
+            "split": "clawsweeper.direct-local-owner-release.v3-split",
+        }[profile]
+        if (not isinstance(doc, dict) or doc.get("schema") != schema
+                or doc.get("repo") != "AyobamiH/clawsweeper"):
+            raise RuntimeError("unapproved_preimport_release_identity")
+        commit_key = ("implementation_commit" if profile == "split" else "commit")
+        checkout_key = ("implementation_checkout" if profile == "split" else "checkout")
+        commit = doc[commit_key]
+        checkout = doc[checkout_key]
+        if (not isinstance(commit, str)
+                or not re.fullmatch(r"[a-f0-9]{40}", commit)
+                or not isinstance(checkout, str) or not checkout.startswith("/")):
+            raise RuntimeError("unapproved_preimport_release_identity")
+    except (ValueError, TypeError, KeyError, UnicodeError, AttributeError) as exc:
+        raise RuntimeError("invalid_preimport_release") from exc
+
+    root = Path(checkout)
+    if (root.is_symlink() or not root.is_dir()
+            or root.stat().st_uid != os.getuid()
+            or root.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or any(parent.is_symlink() for parent in root.parents)):
+        raise RuntimeError("untrusted_preimport_implementation_checkout")
+    binary = Path("/usr/bin/git")
+    if (binary.is_symlink() or not binary.is_file()
+            or binary.stat().st_uid != 0
+            or binary.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise RuntimeError("untrusted_preimport_git_binary")
+    sidecar = Path(sidecar_path)
+    if sidecar.is_symlink() or not sidecar.is_file():
+        raise RuntimeError("untrusted_preimport_release_verifier")
+    fd = os.open(sidecar, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if (info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode)
+                or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                or not 0 < info.st_size <= 131072):
+            raise RuntimeError("untrusted_preimport_release_verifier")
+        candidate = os.read(fd, info.st_size + 1)
+        if len(candidate) != info.st_size:
+            raise RuntimeError("changed_preimport_release_verifier")
+    finally:
+        os.close(fd)
+    env = {
+        "PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+    }
+    try:
+        expected = subprocess.run(
+            [str(binary), "-c", "core.fsmonitor=false", "-C", str(root),
+             "show", "--no-ext-diff",
+             commit + ":scripts/ci/direct_local_receiver_integration.py"],
+            env=env, capture_output=True, timeout=6, check=True).stdout
+        head = subprocess.run(
+            [str(binary), "-c", "core.fsmonitor=false", "-C", str(root),
+             "rev-parse", "--verify", "HEAD^{commit}"],
+            env=env, capture_output=True, timeout=6, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("unavailable_preimport_signed_source") from exc
+    if (head != commit.encode("ascii")
+            or hashlib.sha256(candidate).digest() != hashlib.sha256(expected).digest()):
+        raise RuntimeError("unverified_preimport_release_verifier")
+    # Compile the verified byte snapshot, never reopen a mutable file.
+    module = types.ModuleType("fleet_bound_direct_local_release")
+    module.__file__ = str(sidecar)
+    exec(compile(candidate, str(sidecar), "exec"), module.__dict__)
+    return module
 
 
 def _verified_distinct_queue_receipt(result: dict, event: str) -> bool:
@@ -137,7 +252,7 @@ def reconcile_existing_fleet_ingress(
     A failed GET/queue claim remains staged and is not automatically replayed as
     a new provider effect. The queue itself deduplicates eventual local claims.
     """
-    if profile not in ("aggregate", "distinct"):
+    if profile not in ("aggregate", "distinct", "split"):
         raise RuntimeError("unsupported_local_ingress_profile")
     if type(batch_limit) is not int or not 1 <= batch_limit <= MAX_BATCH:
         raise RuntimeError("unsafe_ingress_reconciliation_batch")
@@ -145,21 +260,18 @@ def reconcile_existing_fleet_ingress(
     # production: a non-injected claim loads only the existing owner release.
     # Load the pre-existing source-bound release verifier from THIS module's
     # owned repository directory, not ambient PYTHONPATH or a user checkout.
-    sidecar_path = Path(__file__).with_name("direct_local_receiver_integration.py")
-    if sidecar_path.is_symlink() or not sidecar_path.is_file():
-        raise RuntimeError("unsafe_local_fleet_release_verifier")
-    spec = importlib.util.spec_from_file_location(
-        "fleet_bound_direct_local_release", sidecar_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("unloadable_owner_release_verifier")
-    release = importlib.util.module_from_spec(spec)
-    prior_bytecode = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
-        spec.loader.exec_module(release)
-    finally:
-        sys.dont_write_bytecode = prior_bytecode
-    if profile == "distinct":
+    release = _preverified_release_verifier(
+        Path(release_file),
+        Path(__file__).with_name("direct_local_receiver_integration.py"),
+        profile,
+    )
+    if profile == "split":
+        doc = release.read_split_source_release(Path(release_file))
+        # This also verifies the REAL installed fleet-policy enrolment, not
+        # just a caller-supplied execution SHA or in-memory proposal.
+        release.verify_split_source_release(
+            doc, enrolled_sha=doc["execution_commit"])
+    elif profile == "distinct":
         doc = release.read_distinct_release(Path(release_file))
         release.verify_distinct_release(doc)
     else:
@@ -179,11 +291,19 @@ def reconcile_existing_fleet_ingress(
             or not (expected_ledger / "deliveries.sqlite3").is_file()):
         raise RuntimeError("missing_existing_webhook_ingress_ledger")
     if claim is None:
-        claim = (release.load_released_distinct_claim(Path(release_file))
-                 if profile == "distinct"
-                 else release.load_released_claim(Path(release_file)))
+        if profile == "split":
+            claim = release.load_split_source_claim(
+                Path(release_file), enrolled_sha=doc["execution_commit"])
+        elif profile == "distinct":
+            claim = release.load_released_distinct_claim(Path(release_file))
+        else:
+            claim = release.load_released_claim(Path(release_file))
     secret = _private_secret(Path(secret_file))
-    module = Path(doc["checkout"]) / "scripts" / "ci-webhook-deliveries.py"
+    # The journal decoder belongs to the verified IMPLEMENTATION tree, never
+    # a mutable or separately enrolled execution checkout.
+    source_checkout = (doc["implementation_checkout"] if profile == "split"
+                       else doc["checkout"])
+    module = Path(source_checkout) / "scripts" / "ci-webhook-deliveries.py"
     if module.is_symlink() or not module.is_file() or module.stat().st_uid != os.getuid():
         raise RuntimeError("unsafe_released_ingress_ledger_module")
     # SOURCE is exact clean Git HEAD; import from the pinned owner checkout.
@@ -210,8 +330,13 @@ def reconcile_existing_fleet_ingress(
                 signature=record["signature"], delivery_id=record["delivery_id"],
                 secret=secret,
             )
-            if profile == "distinct":
+            if profile in ("distinct", "split"):
                 authenticated = _verified_distinct_queue_receipt(result, record["event"])
+                if profile == "split":
+                    # A valid-looking local queue identity from ANOTHER source
+                    # cannot consume this release's enrolled execution event.
+                    authenticated = (authenticated and
+                                     result["source_sha"] == doc["execution_commit"])
             else:
                 authenticated = (
                     isinstance(result, dict)
@@ -231,7 +356,8 @@ def reconcile_existing_fleet_ingress(
             # and is retried by the already-installed fleet timer, never by a
             # new queue/service. The claim's SQLite dedup handles interruption.
             counters["held"] += 1
-    return {"schema": (DISTINCT_SCHEMA if profile == "distinct" else SCHEMA),
+    return {"schema": (SPLIT_SCHEMA if profile == "split" else
+                       DISTINCT_SCHEMA if profile == "distinct" else SCHEMA),
             "kind": "source_bound_queue_admission_only",
             "job_execution_proved": False, "github_actions_check_proved": False,
             **counters}

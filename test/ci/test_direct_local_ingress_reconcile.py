@@ -40,6 +40,12 @@ class ExistingFleetIngressTests(unittest.TestCase):
         source.mkdir()
         (source / "ci-webhook-deliveries.py").write_bytes(
             (HERE / "scripts" / "ci-webhook-deliveries.py").read_bytes())
+        # Include the REAL trusted pre-import release verifier in the
+        # immutable fixture commit; no independently mocked verifier digest.
+        verifier = self.checkout / "scripts/ci/direct_local_receiver_integration.py"
+        verifier.parent.mkdir(parents=True, exist_ok=True)
+        verifier.write_bytes(
+            (SCRIPT_DIR / "direct_local_receiver_integration.py").read_bytes())
         for name in release.SOURCE_FILES:
             path = self.checkout / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,3 +303,159 @@ class ExistingFleetIngressTests(unittest.TestCase):
                 claim=lambda **_kw: self.accepted_distinct(),
                 profile="distinct")
         self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+
+    def make_split_profile(self, *, distinct_ready=False):
+        """Freeze two different source roots; enrol only the CI target."""
+        if not distinct_ready:
+            self.make_distinct_profile()
+        implementation = json.loads(self.release_file.read_text())
+        target = self.root / "frozen-execution"
+        target.mkdir()
+        (target / "README.md").write_text("independent CI execution\n")
+        subprocess.run(["/usr/bin/git", "-C", str(target), "init", "-q"],
+                       check=True)
+        subprocess.run(["/usr/bin/git", "-C", str(target), "add", "."],
+                       check=True)
+        subprocess.run(
+            ["/usr/bin/git", "-C", str(target), "-c",
+             "commit.gpgsign=false", "-c", "user.name=Fixture",
+             "-c", "user.email=test@example.invalid", "commit",
+             "-qm", "frozen target"], check=True)
+        target_head = subprocess.check_output(
+            ["/usr/bin/git", "-C", str(target), "rev-parse", "HEAD"],
+            text=True).strip()
+        self.assertNotEqual(implementation["commit"], target_head)
+        self.target = target
+        self.target_head = target_head
+        self.policy_file = self.fleet / "fleet-policy.json"
+        self.policy = {
+            "repositories": {"AyobamiH/clawsweeper": {
+                "enrolled_head": target_head}},
+            "execution_hosts": {"AyobamiH/clawsweeper": os.uname().nodename},
+        }
+        self.save_split_policy()
+        split = {
+            "schema": release.SPLIT_SOURCE_SCHEMA,
+            "repo": "AyobamiH/clawsweeper",
+            "implementation_checkout": str(self.checkout),
+            "implementation_commit": implementation["commit"],
+            "execution_checkout": str(target),
+            "execution_commit": target_head, "execution_ref": "develop",
+            "fleet_root": str(self.fleet),
+            "sha256": implementation["sha256"],
+        }
+        self.release_file.write_text(json.dumps(split))
+        self.release_file.chmod(0o600)
+
+    def save_split_policy(self):
+        self.policy_file.write_text(json.dumps(self.policy))
+        self.policy_file.chmod(0o600)
+
+    def drain_split(self, claim):
+        return bridge.reconcile_existing_fleet_ingress(
+            ledger_dir=self.ledger_dir, release_file=self.release_file,
+            secret_file=self.secret_file, profile="split", claim=claim)
+
+    def test_split_source_ingress_consumes_only_distinct_verified_queue_proof(self):
+        self.make_split_profile()
+        self.stage()
+        called = []
+        def fake(**kwargs):
+            called.append(kwargs)
+            return {**self.accepted_distinct(), "source_sha": self.target_head}
+        receipt = self.drain_split(fake)
+        self.assertEqual(receipt["schema"], bridge.SPLIT_SCHEMA)
+        self.assertEqual(receipt["consumed"], 1)
+        self.assertFalse(receipt["job_execution_proved"])
+        self.assertEqual(len(called), 1)
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+        self.assertEqual(self.drain_split(fake)["inspected"], 0)
+
+    def test_split_source_never_implicitly_upgrades_v2_or_accepts_aggregate(self):
+        self.make_distinct_profile()
+        self.stage()
+        seen = []
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            bridge.reconcile_existing_fleet_ingress(
+                ledger_dir=self.ledger_dir, release_file=self.release_file,
+                secret_file=self.secret_file, profile="split",
+                claim=lambda **kwargs: seen.append(kwargs))
+        self.assertEqual(seen, [])
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+        self.make_split_profile(distinct_ready=True)
+        held = self.drain_split(lambda **kwargs: self.accepted())
+        self.assertEqual(held["held"], 1)
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+
+    def test_split_source_enrolment_and_source_drift_hold_before_claim(self):
+        self.make_split_profile()
+        self.stage()
+        seen = []
+        fake = lambda **kw: seen.append(kw) or self.accepted_distinct()
+        self.policy["repositories"]["AyobamiH/clawsweeper"][
+            "enrolled_head"] = "f" * 40
+        self.save_split_policy()
+        with self.assertRaisesRegex(RuntimeError, "not_enrolled_in_live_policy"):
+            self.drain_split(fake)
+        self.policy["repositories"]["AyobamiH/clawsweeper"][
+            "enrolled_head"] = self.target_head
+        self.save_split_policy()
+        # A modified execution tree must be refused before the journal or GET.
+        (self.target / "README.md").write_text("unreviewed target\n")
+        with self.assertRaisesRegex(RuntimeError, "not_exact_clean_head"):
+            self.drain_split(fake)
+        self.assertEqual(seen, [])
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+
+
+    def test_split_source_mismatched_execution_sha_never_consumes(self):
+        self.make_split_profile()
+        self.stage()
+        seen = []
+        def other_source(**kw):
+            seen.append(kw)
+            return self.accepted_distinct()
+        result = self.drain_split(other_source)
+        self.assertEqual(result["held"], 1)
+        self.assertEqual(result["consumed"], 0)
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+        self.assertEqual(len(seen), 1)
+        verified = self.drain_split(
+            lambda **_kw: {**self.accepted_distinct(),
+                           "source_sha": self.target_head})
+        self.assertEqual(verified["consumed"], 1)
+        self.assertEqual(self.ledger.staged_ordinary(), [])
+
+    def test_tampered_release_verifier_cannot_execute_import_side_effect(self):
+        self.stage()
+        foreign = self.root / "foreign-bootstrap"
+        foreign.mkdir()
+        marker = self.root / "verifier-executed-marker"
+        (foreign / "direct_local_receiver_integration.py").write_text(
+            "from pathlib import Path\n"
+            + f"Path({str(marker)!r}).write_text('UNTRUSTED_IMPORT')\n"
+        )
+        seen = []
+        with patch.object(bridge, "__file__",
+                          str(foreign / "direct_local_ingress_reconcile.py")):
+            with self.assertRaisesRegex(
+                    RuntimeError, "unverified_preimport_release_verifier"):
+                self.drain(lambda **kw: seen.append(kw))
+        self.assertFalse(marker.exists())
+        self.assertEqual(seen, [])
+        self.assertEqual(len(self.ledger.staged_ordinary()), 1)
+
+    def test_preimport_git_rejects_hostile_path_without_running_shim(self):
+        self.stage()
+        hostile = self.root / "hostile-path"
+        hostile.mkdir()
+        marker = self.root / "hostile-git-executed"
+        git = hostile / "git"
+        git.write_text("#!/bin/sh\n" +
+                       f"echo bypass > {str(marker)!r}\nexit 1\n")
+        git.chmod(0o755)
+        with patch.dict(os.environ, {"PATH": str(hostile),
+                                      "GIT_CONFIG_GLOBAL": "/tmp/bad"}):
+            result = self.drain(lambda **kw: self.accepted())
+        self.assertEqual(result["consumed"], 1)
+        self.assertFalse(marker.exists())
