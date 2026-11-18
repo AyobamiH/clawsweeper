@@ -90,10 +90,20 @@ def unique(pairs):
 def safe_path(path):
     path = Path(path)
     require(path.is_absolute(), 'relative_path')
+    # PrivateUsers may expose the host's root-owned system ancestors under the
+    # namespace's overflow UID. Derive that UID from this namespace's root;
+    # never treat it as an alternative owner for the managed home or its files.
+    namespace_root = Path('/').lstat()
+    require(stat.S_ISDIR(namespace_root.st_mode) and not namespace_root.st_mode & 0o022,
+            'unsafe_namespace_root')
+    namespace_root_uid = namespace_root.st_uid
     for item in reversed([path, *path.parents]):
         info = item.lstat()
         require(not stat.S_ISLNK(info.st_mode), 'symlink:' + item.name)
-        require(info.st_uid in (0, os.getuid()), 'foreign_owner:' + item.name)
+        owner_path = item == OWNER or OWNER in item.parents
+        require(info.st_uid == OWNER_UID if owner_path else
+                info.st_uid in (namespace_root_uid, os.getuid()),
+                'foreign_owner:' + item.name)
         require(not info.st_mode & 0o002, 'world_writable:' + item.name)
         if info.st_mode & 0o020:
             members = set(grp.getgrgid(info.st_gid).gr_mem)

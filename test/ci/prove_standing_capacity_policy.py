@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -216,6 +217,38 @@ class StandingCapacityTests(unittest.TestCase):
     def test_cli_argument_failure_is_255(self):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(guard.main([]),255)
+
+    def namespace_path(self, root_uid, owner_uid=1000, home_uid=None):
+        """Model only lstat metadata; no namespaces, chown or live files change."""
+        path=Path('/home/johnh/.config/capacity/policy.json')
+        records={}
+        for item in [path,*path.parents]:
+            is_file=item == path
+            uid=owner_uid if item == guard.OWNER or guard.OWNER in item.parents else root_uid
+            if item == Path('/home') and home_uid is not None:uid=home_uid
+            mode=(stat.S_IFREG|0o600) if is_file else (stat.S_IFDIR|0o755)
+            records[item]=os.stat_result((mode,1,1,1,uid,1000,100,0,0,0))
+        with patch.object(Path,'lstat',lambda p:records[p]), \
+             patch.object(Path,'resolve',lambda p:p):
+            guard.safe_path(path)
+
+    def test_normal_root_ancestors_accepted(self):
+        self.namespace_path(0)
+
+    def test_namespace_mapped_root_ancestors_accepted(self):
+        self.namespace_path(65534)
+
+    def test_foreign_system_ancestor_rejected(self):
+        with self.assertRaisesRegex(ValueError,'foreign_owner'):
+            self.namespace_path(65534,home_uid=12345)
+
+    def test_mapped_root_does_not_authorise_owner_home(self):
+        with self.assertRaisesRegex(ValueError,'foreign_owner'):
+            self.namespace_path(65534,owner_uid=65534)
+
+    def test_normal_root_does_not_authorise_owner_home(self):
+        with self.assertRaisesRegex(ValueError,'foreign_owner'):
+            self.namespace_path(0,owner_uid=0)
 
 
 if __name__=='__main__':
