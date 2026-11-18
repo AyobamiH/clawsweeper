@@ -1,5 +1,21 @@
 # ClawSweeper: billing-independent, direct-local workflow migration
 
+## Current standing capacity policy (18 November 2026)
+
+The owner requires the installed lower-capacity policy to persist across service
+restarts, successor releases and recovery. The authoritative current contract is
+[the standing web disk policy](CI-EXECUTION-POLICY.md#standing-web-disk-policy-18-november-2026):
+**2 GiB running-job stop threshold, 4 GiB generic admission minimum, one detached
+worker**, with existing per-job allowances unchanged. Current 4096 MiB writable
+profiles require **6.5 GiB**.
+
+References below to 12 GiB, 14 GiB, 16.5 GiB or two workers describe historical
+checkpoints. They do not authorise restoring those settings. Retain the separate
+signed standing-policy startup condition when replacing application preflights
+or preparing a recovery package. Historical signed rollback bytes remain
+unchanged; they must not silently become the active capacity policy.
+
+
 - Status: **proposed** (source-only bridge; not an installed runner)
 - Owner: ClawSweeper / existing `web` local-CI fleet
 - Source of truth: `scripts/ci/direct_local_workflow.py`, `config/ci-workflow-estate.json`, existing installed `fleet-policy.json`
@@ -414,10 +430,11 @@ canonical hashing contract and that no queue row is created.
 does not enqueue or execute them. The separate bounded release must check
 the exact frozen controller/installer, acquire exclusive fleet ownership,
 install a reviewed identical candidate policy and authenticated event path,
-preserve byte-verified rollback and the existing 12 GiB stop reserve,
+preserve byte-verified rollback and the standing host capacity policy,
 then collect two *distinct* source/intent-bound sandbox/container identities
-and terminal receipts. Current C: headroom is below the 16.5 GiB requirement
-for even one full per-definition ClawSweeper job. Do not trigger GitHub Actions,
+and terminal receipts. At this historical checkpoint, C: headroom was below
+the then-current 16.5 GiB requirement. That threshold and its 12 GiB reserve
+were superseded by the standing policy recorded above on 18 November. Do not trigger GitHub Actions,
 rewrite the original aggregate historical receipt or count the two commands
 inside it as two independently accepted jobs.
 
@@ -470,8 +487,9 @@ cutover. The current installed controller is already instrumented with its
 older direct-local prelock hook; do NOT try to reapply that hook to it.
 Run the new container-capture renderer against the verified installed
 controller source directly (and any subsequent exact-source split admission
-patch), rather than stacking duplicate prelock hooks. The existing 12 GiB
-physical stop reserve and the 16.5 GiB admission floor remain unchanged.
+patch), rather than stacking duplicate prelock hooks. The 12 GiB physical
+stop reserve and 16.5 GiB admission floor applied at this 16 November checkpoint;
+they are historical and superseded by the 18 November standing policy above.
 No provider-required CodeQL checks are satisfied by this proposal.
 
 ### Exact-source distinct ingress release — source only (16 November 2026)

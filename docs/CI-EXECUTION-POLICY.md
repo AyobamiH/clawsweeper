@@ -5,6 +5,55 @@ Cloudflare Worker/R2, GitHub apply, Codex sign-in and customer-facing operations
 **not** replaced by this policy. All agents working on either home machine must
 read this file and the root `AGENTS.md` before changing CI, release or runners.
 
+## Standing web disk policy (18 November 2026)
+
+The owner-approved capacity policy on `web` is permanent until the owner
+deliberately changes it. The one-use installation authorisation limits replay
+of a transaction; it does not make the installed lower policy expire.
+
+| Setting | Standing value |
+|---|---:|
+| Physical free-space stop threshold while a job runs | 2 GiB |
+| Generic minimum free space before admission | 4 GiB |
+| Maximum detached fleet workers | 1 |
+| Execution mode | detached |
+
+Existing per-job writable limits and the additional 512 MiB reservation remain
+unchanged. Admission is the larger of the generic minimum and the 2 GiB stop
+threshold plus that job's reservation. A 4096 MiB writable job therefore needs
+**6.5 GiB**, not the superseded 16.5 GiB. Memory, CPU, logs, ownership, source
+identity and account/spending limits retain their existing checks.
+
+`scripts/ci/standing_capacity_policy.py` enforces the signed owner contract
+independently of an application release's preflight. The existing fleet and
+webhook units retain a separate `90-standing-capacity-policy.conf` condition.
+The check reads configuration and capacity-related Python syntax; it never
+imports or executes candidate runtime code. It rejects missing configuration,
+the historical 12/14 GiB settings, two-worker admission and reintroduced
+hardcoded reserves. Unrelated controller changes, including Docker inspection
+corrections, do not require a capacity-policy change.
+
+All future installers, rebuilds and routine recovery must preserve this
+condition and verify the standing contract against the candidate and installed
+runtime. A changed application verifier or `20-direct-local.conf` must not
+remove it. Run the relevant behavioural admission, watchdog and detached-lease
+proof as well; a configuration-only check cannot detect hardcoded code drift.
+Restore configuration only from the currently approved signed release after
+reconciling ownership and uncertain effects. Do not replay a consumed installer,
+reset queues or ask for renewed permission merely to retain these same settings.
+
+Older signed releases and rollback files remain immutable historical recovery
+material. Their old capacity settings are not current steady-state authority.
+A recovery to older application code must retain the standing capacity behaviour
+through a reviewed coherent release; do not silently restore 12/14 GiB or remove
+the condition to make an obsolete package pass.
+
+The existing automation checks this contract and the loaded condition on each
+run. Report actual policy drift with its current source and restore the same
+approved policy through the existing release/recovery procedure. No additional
+scheduler or daemon is needed. Genuine disk or RAM exhaustion remains a resource
+hold; this contract prevents the obsolete policy from silently returning.
+
 ## Verified activation checkpoint (2 November 2026)
 
 The guarded CircleCI Free **Linux** fallback is enabled in the home-machine
