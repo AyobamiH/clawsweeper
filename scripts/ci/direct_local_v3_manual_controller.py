@@ -41,6 +41,102 @@ def _replace_function(source: str, name: str, body: str) -> str:
     ast.parse(result)
     return result
 
+def _bind_v3_ingress_to_verified_release(src: str) -> str:
+    """Repair pre-lock v3 module provenance; never execute obsolete r7/v1 code.
+
+    The already-verified frozen v3 helper supplies the release verifier. The
+    ingress adapter must come from the SAME immutable implementation commit,
+    byte-checked against a sealed Git blob before any of its code executes.
+    Keep the established pre-lock, queue and webhook ownership unchanged.
+    """
+    verifier_start = "                _dl_files = (\n"
+    verifier_end = ("                _dl_doc = "
+                    "_dl_verifier.read_split_source_release(_dl_bound)\n")
+    if src.count(verifier_start) != 1 or src.count(verifier_end) != 1:
+        raise RuntimeError("v3_ingress_unrecognised_legacy_verifier_block")
+    begin = src.index(verifier_start)
+    finish = src.index(verifier_end, begin) + len(verifier_end)
+    trusted_verifier = """                _verified_local_manual_worker()
+                _dl_verifier_entry = _MANUAL_LIB / 'direct_local_receiver_integration.py'
+                _dl_verified_bytes = _dl_verifier_entry.read_bytes()
+                if (hashlib.sha256(_dl_verified_bytes).hexdigest()
+                        != _MANUAL_HASHES['direct_local_receiver_integration.py']):
+                    raise RuntimeError('v3_frozen_release_verifier_changed')
+                _dl_verifier = _dl_types.ModuleType('verified_clawsweeper_release_pin')
+                _dl_verifier.__file__ = str(_dl_verifier_entry)
+                exec(compile(_dl_verified_bytes, str(_dl_verifier_entry), 'exec'),
+                     _dl_verifier.__dict__)
+                _dl_doc = _dl_verifier.read_split_source_release(_dl_bound)
+"""
+    src = src[:begin] + trusted_verifier + src[finish:]
+    legacy_ingress = """                _dl_entry = ROOT / 'direct_local_ingress_reconcile.py'
+                _dl_module = _dl_types.ModuleType('verified_clawsweeper_local_ingress')
+                _dl_module.__file__ = str(_dl_entry)
+                exec(compile(_dl_bytes[_dl_entry.name], str(_dl_entry), 'exec'),
+                     _dl_module.__dict__)
+"""
+    trusted_ingress = """                # Exact clean implementation checkout was verified above.
+                # Confirm the adapter's bytes against its signed Git object
+                # before compiling: no mutable runtime module or ambient PATH.
+                _dl_entry = (pathlib.Path(_dl_doc['implementation_checkout'])
+                             / 'scripts/ci/direct_local_ingress_reconcile.py')
+                _dl_git = _dl_verifier.trusted_git_source()
+                _dl_env = _dl_verifier.trusted_git_env()
+                _dl_object = (_dl_doc['implementation_commit']
+                              + ':scripts/ci/direct_local_ingress_reconcile.py')
+                _dl_result = subprocess.run(
+                    [_dl_git, '-c', 'core.fsmonitor=false', '-C',
+                     _dl_doc['implementation_checkout'], 'show',
+                     '--no-ext-diff', _dl_object],
+                    env=_dl_env, capture_output=True, timeout=8, check=True)
+                _dl_ingress_bytes = _dl_result.stdout
+                if (not 0 < len(_dl_ingress_bytes) <= 262144
+                        or _dl_entry.is_symlink() or not _dl_entry.is_file()
+                        or _dl_entry.stat().st_uid != os.getuid()
+                        or _dl_entry.stat().st_mode
+                           & (_dl_stat.S_IWGRP | _dl_stat.S_IWOTH)
+                        or hashlib.sha256(_dl_entry.read_bytes()).digest()
+                           != hashlib.sha256(_dl_ingress_bytes).digest()):
+                    raise RuntimeError('v3_ingress_not_exact_signed_source')
+                _dl_module = _dl_types.ModuleType('verified_clawsweeper_local_ingress')
+                _dl_module.__file__ = str(_dl_entry)
+                exec(compile(_dl_ingress_bytes, str(_dl_entry), 'exec'),
+                     _dl_module.__dict__)
+"""
+    if src.count(legacy_ingress) != 1:
+        raise RuntimeError("v3_ingress_unrecognised_legacy_ingress_block")
+    src = src.replace(legacy_ingress, trusted_ingress, 1)
+    # Detached workers also used the old verifier, even if pre-lock succeeded.
+    # Replace their verifier before any container or claim effect.
+    worker_start = "            _dl_file = ROOT / 'direct_local_receiver_integration.py'\n"
+    worker_end = "            _dl_doc = _dl_mod.read_split_source_release(_dl_bound)\n"
+    if src.count(worker_start) != 1 or src.count(worker_end) != 1:
+        raise RuntimeError("v3_worker_unrecognised_legacy_verifier_block")
+    begin = src.index(worker_start)
+    finish = src.index(worker_end, begin) + len(worker_end)
+    trusted_worker = """            _verified_local_manual_worker()
+            _dl_file = _MANUAL_LIB / 'direct_local_receiver_integration.py'
+            _dl_data = _dl_file.read_bytes()
+            if (hashlib.sha256(_dl_data).hexdigest()
+                    != _MANUAL_HASHES['direct_local_receiver_integration.py']):
+                raise RuntimeError('clawsweeper_v3_worker_release_verifier_changed')
+            _dl_mod = _dl_types.ModuleType('clawsweeper_worker_release_verifier')
+            _dl_mod.__file__ = str(_dl_file)
+            exec(compile(_dl_data, str(_dl_file), 'exec'), _dl_mod.__dict__)
+            _dl_doc = _dl_mod.read_split_source_release(_dl_bound)
+"""
+    src = src[:begin] + trusted_worker + src[finish:]
+    leftovers = (
+        "_dl_bytes[", "_dl_files = (",
+        "ROOT / 'direct_local_receiver_integration.py'",
+        "ROOT / 'direct_local_ingress_reconcile.py'",
+    )
+    if any(item in src for item in leftovers):
+        raise RuntimeError("v3_ingress_legacy_module_fallback_remains:" +
+                           ",".join(item for item in leftovers if item in src))
+    ast.parse(src)
+    return src
+
 def compile_v3_manual_controller(current: bytes, *, expected_sha256: str,
                                  reviewed_frozen_sources: dict[str, bytes]) -> dict:
     """Exact installed source -> v3 + split-policy + sandbox capture + signed-manual."""
@@ -59,6 +155,10 @@ def compile_v3_manual_controller(current: bytes, *, expected_sha256: str,
     capture=wiring.compile_distinct_sandbox_evidence_source(
         src,expected_sha256=_hash(src))
     src=capture["content"].decode("utf-8")
+    # The original v3 renderer retained an r7/v1 verifier and ingress adapter
+    # at pre-lock, causing a real installed AttributeError and blocking both jobs.
+    # Repair only the signed v3 path; never modify the live installed controller.
+    src=_bind_v3_ingress_to_verified_release(src)
     old_lib="_MANUAL_LIB = ROOT / \"clawsweeper-manual-code-v1\""
     if src.count(old_lib)!=1:
         raise RuntimeError("v3_manual_unreviewed_old_library")

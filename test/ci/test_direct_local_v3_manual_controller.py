@@ -4,7 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
+import types
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -14,14 +16,21 @@ sys.path.insert(0,str(ROOT/"scripts/ci"))
 import direct_local_v3_manual_controller as integration
 
 INSTALLED=Path("/home/johnh/.local/share/local-ci/fleet_ci.py")
+ORIGINAL_ROLLBACK=Path(
+    "/home/johnh/.local/state/agent-worktrees/evidence/"
+    "clawsweeper-distinct-admission-20261116/"
+    "v3-signed-integrity-package-bfff23836-20261117/"
+    "rollback-r8p3/runtime/fleet_ci.py")
 PIN="0a1e52cc1fb1e8f582b8032abaffed1e3d1f49cf08ec39dd63d3fab8208203da"
 
 class V3ManualIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.old=INSTALLED.read_bytes()
+        # Live r8p3 was intentionally replaced by owner-approved v3.
+        # Reuse the byte-verified original rollback fixture, not mutable runtime.
+        cls.old=ORIGINAL_ROLLBACK.read_bytes()
         if hashlib.sha256(cls.old).hexdigest()!=PIN:
-            raise unittest.SkipTest("current installed controller changed; no stale rendering")
+            raise AssertionError("original r8p3 rollback fixture drifted")
         cls.frozen={
             k:(ROOT/"scripts/ci"/k).read_bytes() for k in integration.FILES}
         cls.candidate=integration.compile_v3_manual_controller(
@@ -88,6 +97,72 @@ class V3ManualIntegrationTests(unittest.TestCase):
         self.assertIn("if _dl_ref == 'main':",auth)
         self.assertIn("direct-local-distinct:%",auth)
         self.assertNotIn("direct-local:%' LIMIT 2049",auth)
+
+    def test_prelock_and_worker_cannot_import_obsolete_r7_verifier(self):
+        """Regression for the observed installed v3 AttributeError hold."""
+        for name in ("_dl_verifier", "_dl_mod"):
+            self.assertIn(name+".read_split_source_release(_dl_bound)", self.src)
+            self.assertIn(name+".verify_split_source_release(", self.src)
+        self.assertIn(
+            "_dl_verifier_entry = _MANUAL_LIB / 'direct_local_receiver_integration.py'",
+            self.src)
+        self.assertIn(
+            "_dl_file = _MANUAL_LIB / 'direct_local_receiver_integration.py'",
+            self.src)
+        self.assertNotIn("ROOT / 'direct_local_receiver_integration.py'", self.src)
+        self.assertNotIn("ROOT / 'direct_local_ingress_reconcile.py'", self.src)
+        self.assertIn(
+            "_dl_doc['implementation_checkout']", self.src)
+        self.assertIn(
+            "_dl_doc['implementation_commit']", self.src)
+        self.assertIn(
+            "hashlib.sha256(_dl_ingress_bytes).digest()", self.src)
+        self.assertIn(
+            "profile='split')", self.src)
+        self.assertNotIn("_dl_bytes[", self.src)
+        self.assertGreaterEqual(self.src.count(
+            "_verified_local_manual_worker()"), 4)
+        # The reviewed adapter provides the split contract; r7 does not.
+        sidecar=self.frozen["direct_local_receiver_integration.py"].decode()
+        self.assertIn("def read_split_source_release(",sidecar)
+        self.assertIn("def verify_split_source_release(",sidecar)
+        adapter=(ROOT/"scripts/ci/direct_local_ingress_reconcile.py").read_text()
+        self.assertIn('profile: str = "aggregate"',adapter)
+        self.assertIn('if profile == "split":',adapter)
+
+    def test_signed_implementation_blob_provides_actual_split_adapter(self):
+        """Use the archived exact signed source, not today's mutable checkout."""
+        descriptor_path=(ORIGINAL_ROLLBACK.parents[3] /
+            "v3-preinstall-frozen-signed-sources-bfff23836-20261117"
+            "/SOURCE_RELEASE_CANDIDATE.json")
+        doc=json.loads(descriptor_path.read_text())
+        root=Path(doc["implementation_checkout"])
+        rel="scripts/ci/direct_local_ingress_reconcile.py"
+        env={"PATH":"/usr/bin:/bin","HOME":"/nonexistent",
+             "GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":"/dev/null",
+             "GIT_NO_REPLACE_OBJECTS":"1","GIT_OPTIONAL_LOCKS":"0",
+             "GIT_TERMINAL_PROMPT":"0","LC_ALL":"C"}
+        cmd=["/usr/bin/git","-c","core.fsmonitor=false","-C",str(root),
+             "show","--no-ext-diff",doc["implementation_commit"]+":"+rel]
+        blob=subprocess.run(cmd,env=env,capture_output=True,
+                            check=True,timeout=8).stdout
+        self.assertEqual(blob,(root/rel).read_bytes())
+        self.assertIn(b'profile: str = "aggregate"',blob)
+        self.assertIn(b'if profile == "split":',blob)
+        module=types.ModuleType("signed_immutable_ingress_test")
+        module.__file__=str(root/rel)
+        exec(compile(blob,module.__file__,"exec"),module.__dict__)
+        import inspect
+        self.assertIn("profile",inspect.signature(
+            module.reconcile_existing_fleet_ingress).parameters)
+
+    def test_unreviewed_prelock_shape_holds_instead_of_falling_back(self):
+        source=self.src.replace(
+            "                _dl_verifier_entry = _MANUAL_LIB",
+            "                _dl_verifier_entry = ROOT",1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "unrecognised_legacy_verifier_block"):
+            integration._bind_v3_ingress_to_verified_release(source)
 
     def test_new_claim_validates_two_distinct_ids_not_legacy_aggregate(self):
         jobs=[
