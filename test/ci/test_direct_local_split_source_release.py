@@ -93,6 +93,26 @@ class SplitExecutionReleaseTests(unittest.TestCase):
         self.assertEqual(observed[0]["fleet_root"], self.fleet)
         self.assertEqual(list(self.fleet.iterdir()), [self.policy_file])
 
+    def test_installed_webhook_entrypoint_accepts_exact_split_release_without_effects(self):
+        # Same loader the existing fleet_webhook_server invokes at startup.
+        before = sorted(p.name for p in self.fleet.iterdir())
+        hook = release.load_released_ingress(self.file)
+        self.assertTrue(hook())
+        self.assertEqual(sorted(p.name for p in self.fleet.iterdir()), before)
+        self.policy["repositories"]["AyobamiH/clawsweeper"]["enrolled_head"] = "f" * 40
+        self.save_policy()
+        with self.assertRaisesRegex(RuntimeError, "not_enrolled_in_live_policy"):
+            hook()
+
+    def test_installed_webhook_split_release_revocation_blocks_before_wake(self):
+        hook = release.load_released_ingress(self.file)
+        self.doc["execution_ref"] = "main"
+        self.save()
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            hook()
+        self.assertEqual(sorted(p.name for p in self.fleet.iterdir()),
+                         ["fleet-policy.json"])
+
     def test_production_entrypoint_does_not_accept_an_injected_claim(self):
         with self.assertRaises(TypeError):
             release.load_split_source_claim(

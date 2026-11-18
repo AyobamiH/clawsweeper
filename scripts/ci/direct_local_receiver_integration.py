@@ -175,6 +175,23 @@ def load_released_ingress(file: Path):
     its existing ledger. The separately released fleet cycle owns GitHub GET,
     canonical lock, SQLite admission and eventual event consumption.
     """
+    # The installed v3 manual fleet keeps implementation and execution as
+    # distinct signed Git objects. Route only that exact schema through the
+    # existing split-source verifier, including the ACTUAL live fleet policy.
+    # Never reinterpret a v1/v2 descriptor as a split-source release.
+    identity = json.loads(_owned_file(Path(file)), object_pairs_hook=unique_keys)
+    if isinstance(identity, dict) and identity.get("schema") == SPLIT_SOURCE_SCHEMA:
+        doc = read_split_source_release(file)
+        verify_split_source_release(doc, enrolled_sha=doc["execution_commit"])
+
+        def verify_split() -> bool:
+            if read_split_source_release(file) != doc:
+                raise RuntimeError("split_source_release_revoked_or_changed")
+            verify_split_source_release(doc, enrolled_sha=doc["execution_commit"])
+            return True
+
+        return verify_split
+
     doc = read_release(file)
     verify_release(doc)
 
