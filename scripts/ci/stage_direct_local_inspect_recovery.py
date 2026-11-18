@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare ONE signed, staged, rollback-rehearsed Docker inspection release.
+"""Prepare ONE signed, staged, rollback-rehearsed receiver + inspection release.
 
 Source-only: no live runtime, services, queue, GitHub or remote process effects.
 Production installation of this new release needs distinct exact owner authority.
@@ -16,7 +16,7 @@ import direct_local_inspect_timeout_recovery as renderer
 
 SOURCE=Path("/home/johnh/.local/share/agent-worktrees/clawsweeper/direct-local-event-bridge-20261113")
 EVIDENCE=Path("/home/johnh/.local/state/agent-worktrees/evidence/clawsweeper-distinct-admission-20261116")
-STAGE=EVIDENCE/"inspect-retry-owner-staged-20261118"
+STAGE=EVIDENCE/"receiver-inspect-owner-staged-20261118"
 PUB=Path("/home/johnh/.ssh/github-signing-2026.pub")
 SOCK="/run/user/1000/owner-git-signing/agent.sock"
 NAMESPACE="clawsweeper-local-fleet-release"
@@ -63,6 +63,7 @@ def source_sha():
     run(git+["-c","gpg.ssh.allowedSignersFile="+str(gate.SIGNERS),"verify-commit",head])
     # Strictly bind the staging inputs to reviewed git objects, not worktree drift.
     for rel in ("scripts/ci/direct_local_inspect_timeout_recovery.py",
+                "scripts/ci/direct_local_receiver_integration.py",
                 "scripts/ci/direct_local_inspect_recovery_integrity.py"):
         actual=(SOURCE/rel).read_bytes()
         if actual!=run(git+["show",head+":"+rel]):
@@ -81,14 +82,23 @@ def main():
         raise RuntimeError("current_runtime_not_signed_capacity_successor")
     old=cap.regular(gate.CAPACITY_RELEASE/"frozen/fleet_ci.py")
     candidate=renderer.render(old)
+    old_receiver=cap.regular(gate.RUNTIME/gate.RECEIVER_RUNTIME)
+    candidate_receiver=(SOURCE/"scripts/ci/direct_local_receiver_integration.py").read_bytes()
+    if sha(old_receiver)!=inventory[gate.RECEIVER_RUNTIME]:
+        raise RuntimeError("live_receiver_changed_during_review")
+    if sha(old_receiver)==sha(candidate_receiver):
+        raise RuntimeError("receiver_repair_not_in_candidate")
     if sha(cap.regular(gate.RUNTIME/"fleet_ci.py"))!=sha(old):
         raise RuntimeError("live_controller_changed_during_review")
     if STAGE.exists():raise RuntimeError("do_not_duplicate_stage")
     STAGE.mkdir(mode=0o700)
     persist(STAGE/"frozen/fleet_ci.py",candidate)
+    persist(STAGE/"frozen"/gate.RECEIVER_RUNTIME,candidate_receiver)
     persist(STAGE/"rollback/runtime/fleet_ci.py",old)
+    persist(STAGE/"rollback/runtime"/gate.RECEIVER_RUNTIME,old_receiver)
     for name,rel in ((gate.CONTROL,"scripts/ci/direct_local_inspect_recovery_integrity.py"),
-                     (gate.BUILDER,"scripts/ci/direct_local_inspect_timeout_recovery.py")):
+                     (gate.BUILDER,"scripts/ci/direct_local_inspect_timeout_recovery.py"),
+                     (gate.RECEIVER_SOURCE,"scripts/ci/direct_local_receiver_integration.py")):
         persist(STAGE/name,(SOURCE/rel).read_bytes())
     for label,installed in (("fleet",gate.FLEET_UNIT),("webhook",gate.WEBHOOK_UNIT)):
         oldunit=cap.regular(installed)
@@ -120,13 +130,33 @@ def main():
             persist(p,(STAGE/"unit"/(label+"-20-direct-local.conf.candidate")).read_bytes())
             fake_units[label]=p
         # Production-like exact new file, no fleet DB copied/mutated.
-        (fake_runtime/"fleet_ci.py").unlink()
-        persist(fake_runtime/"fleet_ci.py",candidate)
+        for name,updated in (("fleet_ci.py",candidate),
+                             (gate.RECEIVER_RUNTIME,candidate_receiver)):
+            (fake_runtime/name).unlink()
+            persist(fake_runtime/name,updated)
         installed=gate.verify("installed",STAGE,fake_runtime,
                               fake_units["fleet"],fake_units["webhook"],gate.SIGNERS,head)
         if not installed["runtime_installed"]:raise RuntimeError("disposable_install_unverified")
-        (fake_runtime/"fleet_ci.py").unlink()
-        persist(fake_runtime/"fleet_ci.py",old)
+        # The signed permanent capacity condition also verifies the combined
+        # candidate. This is a read-only condition, NOT a new fleet process.
+        run(["/usr/bin/python3","-I","-B",
+             str(gate.STANDING_ROOT/"standing_capacity_policy.py"),
+             "--policy",str(gate.STANDING_ROOT/"policy.json"),
+             "--runtime",str(fake_runtime),
+             "--signers",str(gate.SIGNERS)])
+        # Exact live v3 descriptor: verify the corrected receiver module in a
+        # disposable copy without opening a socket or ingesting an event.
+        from importlib.machinery import SourceFileLoader
+        receiver=SourceFileLoader("signed_disposable_receiver",
+                                  str(fake_runtime/gate.RECEIVER_RUNTIME)).load_module()
+        check=receiver.load_released_ingress(
+            gate.RUNTIME/"secrets/clawsweeper-direct-local-release.json")
+        if check() is not True:
+            raise RuntimeError("disposable_split_v3_receiver_not_accepted")
+        for name,previous in (("fleet_ci.py",old),
+                              (gate.RECEIVER_RUNTIME,old_receiver)):
+            (fake_runtime/name).unlink()
+            persist(fake_runtime/name,previous)
         for label in ("fleet","webhook"):
             fake_units[label].unlink()
             persist(fake_units[label],(STAGE/"rollback/unit"/
@@ -137,14 +167,18 @@ def main():
     # Live runtime must remain byte-for-byte identical, still signed and healthy.
     cap.verify("installed",gate.CAPACITY_RELEASE,gate.RUNTIME,
                gate.FLEET_UNIT,gate.WEBHOOK_UNIT,gate.SIGNERS,manifest["source_head"])
-    report={"schema":"clawsweeper.inspect-retry-signed-staged.v1",
+    report={"schema":"clawsweeper.receiver-inspect-signed-staged.v1",
             "at_utc":datetime.now(timezone.utc).isoformat(),
             "source_head":head,
             "stage":str(STAGE),
             "signed_manifest_sha256":staged["signed_manifest_sha256"],
             "signature_sha256":{"control":signed_control,"manifest":signed_manifest},
             "candidate_controller_sha256":sha(candidate),
+            "candidate_receiver_sha256":sha(candidate_receiver),
             "rollback_controller_sha256":sha(old),
+            "rollback_receiver_sha256":sha(old_receiver),
+            "disposable_split_v3_receiver_verified":True,
+            "standing_capacity_guard_verified":True,
             "staged_verified":True,"disposable_installed_verified":True,
             "disposable_rollback_verified":True,
             "live_installed_capacity_release_preserved":True,

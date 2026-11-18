@@ -1,4 +1,4 @@
-"""Read-only signed-parent and exact one-file scope proof for a new staged gate."""
+"""Read-only signed-parent and exact two-file recovery scope proof."""
 import importlib.util,json,os
 from pathlib import Path
 import tempfile,unittest
@@ -37,23 +37,43 @@ class ParentIntegrity(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,"parent_verifier_digest_changed"):
                 gate.owner_parent(gate.SIGNERS)
 
-    def test_only_one_controller_file_is_allowed_by_release_schema(self):
+    def test_exact_controller_and_receiver_are_the_only_changed_files(self):
         self.assertEqual(gate.CONTROL,"control/direct_local_inspect_recovery_integrity.py")
         self.assertEqual(gate.BUILDER,"source/direct_local_inspect_timeout_recovery.py")
         cap,parent,inventory=gate.owner_parent(gate.SIGNERS)
         with tempfile.TemporaryDirectory(prefix="claw-inspect-test-") as temp:
             directory=Path(temp)
-            for rel in (gate.CONTROL,gate.BUILDER,"frozen/fleet_ci.py"):
+            source_map={
+                gate.CONTROL:HERE/"direct_local_inspect_recovery_integrity.py",
+                gate.BUILDER:HERE/"direct_local_inspect_timeout_recovery.py",
+                gate.RECEIVER_SOURCE:HERE/"direct_local_receiver_integration.py",
+                "frozen/fleet_ci.py":gate.CAPACITY_RELEASE/"frozen/fleet_ci.py",
+                "frozen/"+gate.RECEIVER_RUNTIME:HERE/"direct_local_receiver_integration.py",
+            }
+            for rel,source in source_map.items():
                 path=directory/rel;path.parent.mkdir(parents=True,exist_ok=True)
-                if rel==gate.CONTROL:source=HERE/"direct_local_inspect_recovery_integrity.py"
-                elif rel==gate.BUILDER:source=HERE/"direct_local_inspect_timeout_recovery.py"
-                else:source=gate.CAPACITY_RELEASE/"frozen/fleet_ci.py"
-                path.write_bytes(source.read_bytes());path.chmod(0o600)
+                raw=source.read_bytes()
+                if rel=="frozen/fleet_ci.py":
+                    spec=importlib.util.spec_from_file_location(
+                        "renderer",HERE/"direct_local_inspect_timeout_recovery.py")
+                    renderer=importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(renderer)
+                    raw=renderer.render(raw)
+                path.write_bytes(raw);path.chmod(0o600)
             doc=gate.expected(directory,"a"*40,cap,parent,inventory)
-            self.assertEqual(set(doc["changed_runtime"]),{"fleet_ci.py"})
-            self.assertEqual(set(doc["rollback_runtime"]),{"fleet_ci.py"})
+            self.assertEqual(set(doc["changed_runtime"]),{"fleet_ci.py",gate.RECEIVER_RUNTIME})
+            self.assertEqual(set(doc["rollback_runtime"]),{"fleet_ci.py",gate.RECEIVER_RUNTIME})
             self.assertEqual(set(doc["rollback_units"]),{"fleet","webhook"})
-            self.assertEqual(doc["unchanged_runtime_files"],68)
+            self.assertEqual(doc["unchanged_runtime_files"],67)
+            self.assertEqual(doc["receiver_source_sha256"],doc["changed_runtime"][gate.RECEIVER_RUNTIME])
+            self.assertEqual(doc["parent_receiver_sha256"],inventory[gate.RECEIVER_RUNTIME])
             self.assertFalse(doc["github_actions_dispatched"])
+            candidate=gate.candidate_bytes(directory,parent)
+            self.assertEqual(set(candidate),set(doc["changed_runtime"]))
+            self.assertEqual(gate.sha(candidate["fleet_ci.py"]),doc["changed_runtime"]["fleet_ci.py"])
+            self.assertEqual(gate.sha(candidate[gate.RECEIVER_RUNTIME]),doc["changed_runtime"][gate.RECEIVER_RUNTIME])
+            (directory/"frozen"/gate.RECEIVER_RUNTIME).write_bytes(b"unsafe receiver")
+            with self.assertRaisesRegex(RuntimeError,"receiver_candidate_not_frozen_exact_source"):
+                gate.candidate_bytes(directory,parent)
 
 if __name__=="__main__":unittest.main()
