@@ -54,6 +54,19 @@ class OwnerReleaseTests(unittest.TestCase):
         self.release.write_text(json.dumps(self.doc, sort_keys=True))
         self.release.chmod(0o600)
 
+    def test_trusted_git_root_uid_mapping_is_fail_closed(self):
+        check = module._trusted_git_owner
+        self.assertTrue(check(0, "0 0 4294967295\n", 65534, 1000))
+        self.assertTrue(check(65534, "1000 1000 1\n", 65534, 1000))
+        self.assertFalse(check(65534, "0 0 4294967295\n", 65534, 1000))
+        self.assertFalse(check(65534, "1000 1001 1\n", 65534, 1000))
+        self.assertFalse(check(65534, "1000 1000 1\n", 65534, 0))
+        self.assertFalse(check(65533, "1000 1000 1\n", 65534, 1000))
+        self.assertFalse(check(65534, "malformed\n", 65534, 1000))
+        self.assertFalse(check(65534, "1000 1000 0\n", 65534, 1000))
+        self.assertFalse(check(65534, "1000 1000 1\n0 0 1\n", 65534, 1000))
+        self.assertEqual(module.trusted_git_source(), "/usr/bin/git")
+
     def test_verified_local_owner_release_invokes_existing_claim_only(self):
         calls = []
         def adapter(**kwargs):

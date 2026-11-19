@@ -44,11 +44,52 @@ def trusted_git_env() -> dict:
     }
 
 
+def _trusted_git_owner(uid: int, uid_map: str, overflow_uid: int,
+                       caller_uid: int) -> bool:
+    """Accept remapped root only when the caller's own identity is mapped.
+
+    A systemd --user service with ProtectSystem=strict can expose host-root
+    binaries as kernel overflowuid (65534), not uid 0. Reject overflowuid
+    outside that specific root-unmapped user namespace.
+    """
+    if uid == 0:
+        return True
+    if uid != overflow_uid or caller_uid == 0:
+        return False
+    try:
+        mappings = [tuple(map(int, line.split())) for line in uid_map.splitlines()]
+    except ValueError:
+        return False
+    if not mappings or any(len(row) != 3 or min(row) < 0 or row[2] < 1
+                           for row in mappings):
+        return False
+    root_mapped = any(host <= 0 < host + count
+                      for _, host, count in mappings)
+    caller_mapped = any(ns <= caller_uid < ns + count
+                        and host + caller_uid - ns == caller_uid
+                        for ns, host, count in mappings)
+    return not root_mapped and caller_mapped
+
+
 def trusted_git_source() -> str:
     binary = Path(TRUSTED_GIT)
-    if (binary.is_symlink() or not binary.is_file()
-            or binary.stat().st_uid != 0
-            or binary.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+    if binary.is_symlink() or not binary.is_file():
+        raise RuntimeError("untrusted_absolute_git_binary")
+    details = binary.stat()
+    owner_ok = details.st_uid == 0
+    if not owner_ok:
+        try:
+            uid_map = Path("/proc/self/uid_map").read_text()
+            overflow_uid = int(Path("/proc/sys/kernel/overflowuid").read_text())
+            owner_ok = _trusted_git_owner(details.st_uid, uid_map,
+                                          overflow_uid, os.getuid())
+        except (OSError, ValueError):
+            owner_ok = False
+    parents_safe = all(p.is_dir() and not p.is_symlink()
+                       and not p.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                       for p in (binary.parent, binary.parent.parent))
+    if (not owner_ok or not parents_safe
+            or details.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
         raise RuntimeError("untrusted_absolute_git_binary")
     return str(binary)
 
