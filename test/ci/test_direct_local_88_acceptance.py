@@ -85,6 +85,23 @@ class AcceptanceTests(unittest.TestCase):
                             and j["local_proof"] is None and not j["github_provider_accepted"]
                             for j in result["jobs"] if j not in accepted))
 
+    def test_historical_ci_source_drift_fails_closed(self):
+        # A valid signed 2/2 receipt is insufficient if future ci.yml changes.
+        with patch.object(ledger, "historical_ci_bytes",
+                          return_value=b"different historical ci.yml bytes"):
+            with patch.object(ledger, "read_signed_receipt",
+                              return_value=signed_fixture()):
+                with self.assertRaisesRegex(Hold, "historical_ci_workflow_source_drift"):
+                    ledger.compile_acceptance(
+                        root=ROOT, receipt=Path("unused"),
+                        expected_digest="a" * 64, signers=Path("unused"))
+
+    def test_missing_historical_git_blob_fails_closed(self):
+        with patch.object(ledger.subprocess, "run",
+                          side_effect=OSError("no historical commit")):
+            with self.assertRaisesRegex(Hold, "historical_ci_workflow_unavailable"):
+                ledger.historical_ci_bytes(ROOT)
+
     def test_invalid_history_fails_closed(self):
         changes = [
             lambda x: x.update({"source_sha": "a" * 40}),

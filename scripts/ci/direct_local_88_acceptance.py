@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import re
 
 import direct_local_manual_auth as owner
@@ -159,13 +160,38 @@ def verify_two(doc: dict) -> dict[str, dict]:
     return verified
 
 
+def historical_ci_bytes(root: Path) -> bytes:
+    """Read the original execution commit's workflow blob, never check it out."""
+    try:
+        blob = subprocess.run(
+            ["/usr/bin/git", "-C", str(root), "show",
+             f"{EXECUTION_SHA}:.github/workflows/ci.yml"],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Hold("historical_ci_workflow_unavailable") from exc
+    require(0 < len(blob) <= 1024 * 1024,
+            "historical_ci_workflow_invalid_size")
+    return blob
+
+
+def verify_historical_ci_workflow(root: Path, observed: dict[str, str]) -> None:
+    """Never carry 2 historical acceptances into a changed CI workflow."""
+    workflow = ".github/workflows/ci.yml"
+    require(workflow in observed, "historical_ci_workflow_not_in_manifest")
+    require(hashlib.sha256(historical_ci_bytes(root)).hexdigest()
+            == observed[workflow], "historical_ci_workflow_source_drift")
+
+
 def compile_acceptance(*, root: Path, receipt: Path, expected_digest: str,
                        signers: Path) -> dict:
     """A signed past acceptance is evidence, not fresh provider acceptance."""
     root = root.resolve(strict=True)
     manifest = load_manifest(root / "config/ci-workflow-estate.json")
-    mapping.source_check(manifest, root)
+    observed = mapping.source_check(manifest, root)
     mapping.dag_check(manifest)
+    verify_historical_ci_workflow(root, observed)
     source_catalogue_head = mapping.git_head(root)
     signed = read_signed_receipt(receipt, expected_digest, signers)
     accepted = verify_two(signed)
