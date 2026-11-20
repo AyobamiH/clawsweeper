@@ -199,6 +199,42 @@ class TestGenerationAwareRetention(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b"immutable unrelated private data")
         self.assertFalse(other.is_symlink())
 
+    def test_pending_drift_is_rejected_before_any_source_move(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt4"
+        target.mkdir(parents=True)
+        sources = [self.receipt_path(), self.log_path()]
+        files = [ret._stored_entry(self.root, JOB, p) for p in sources]
+        plan = {"version": 2, "job": JOB, "repo": REPO, "sha": "0" * 40,
+                "suite": SUITE, "attempt": 4,
+                "previous_plan_sha256": ret.sha256(self.legacy / "plan.json"),
+                "files": files}
+        ret.write_once(target / "plan.json", plan)
+        with self.assertRaisesRegex(ret.RetentionError, "generation_pending_source_drift"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertTrue(ret.regular(self.receipt_path()))
+        self.assertTrue(ret.regular(self.log_path()))
+        self.assertFalse((target / (JOB + ".json")).exists())
+
+    def test_pending_log_corruption_cannot_partially_move_receipt(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt4"
+        target.mkdir(parents=True)
+        sources = [self.receipt_path(), self.log_path()]
+        files = [ret._stored_entry(self.root, JOB, p) for p in sources]
+        plan = {"version": 2, "job": JOB, "repo": REPO, "sha": SHA,
+                "suite": SUITE, "attempt": 4,
+                "previous_plan_sha256": ret.sha256(self.legacy / "plan.json"),
+                "files": files}
+        ret.write_once(target / "plan.json", plan)
+        self.log_path().write_bytes(b"changed after pending plan was signed")
+        with self.assertRaisesRegex(ret.RetentionError, "archive_blob_integrity_failure"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertTrue(ret.regular(self.receipt_path()))
+        self.assertFalse((target / (JOB + ".json")).exists())
+
     def test_attempt_snapshot_drift_is_rejected(self):
         self.first_archive()
         self.newer()

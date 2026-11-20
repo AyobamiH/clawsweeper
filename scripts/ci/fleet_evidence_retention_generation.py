@@ -266,6 +266,38 @@ def _receipt_generation(root: Path, row: dict, *, after: int) -> tuple[int, list
     return attempt, files
 
 
+
+
+def _preflight_pending_generation(root: Path, directory: Path, row: dict, plan: dict) -> None:
+    for field in ("id", "repo", "sha", "suite"):
+        key = "job" if field == "id" else field
+        if plan.get(key) != row[field]:
+            raise RetentionError("generation_pending_source_drift")
+    if not isinstance(plan.get("files"), list) or not plan["files"]:
+        raise RetentionError("generation_pending_empty")
+    seen = set()
+    for item in plan["files"]:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise RetentionError("generation_pending_invalid_blob")
+        rel = item["path"]
+        src = _expected_source(root, row["id"], rel)
+        dest = directory / Path(rel).name
+        if dest.name in seen:
+            raise RetentionError("generation_pending_duplicate_blob")
+        seen.add(dest.name)
+        if src.is_symlink():
+            if src.resolve(strict=False) != dest:
+                raise RetentionError("generation_pending_wrong_target")
+            _verify_blob(dest, item)
+        elif regular(src):
+            if dest.exists() or dest.is_symlink():
+                raise RetentionError("generation_pending_duplicate_destination")
+            _verify_blob(src, item)
+        elif not src.exists() and regular(dest):
+            _verify_blob(dest, item)
+        else:
+            raise RetentionError("generation_pending_missing_blob")
+
 def _generation_archive(root: Path, cold: Path, row: dict) -> dict | None:
     ident = row["id"]
     folder = cold / ident
@@ -306,8 +338,9 @@ def _generation_archive(root: Path, cold: Path, row: dict) -> dict | None:
                 or plan.get("previous_plan_sha256") != previous_hash):
             raise RetentionError("generation_chain_drift")
         if not (directory / "COMPLETED.json").exists():
-            # An interrupted rename/symlink is recovered only when the pinned
-            # original sources or exact archived objects still match.
+            # Preflight EVERY expected object before the first recovery rename.
+            # A forged or partly corrupted pending plan must cause zero moves.
+            _preflight_pending_generation(root, directory, row, plan)
             _repair(root, directory, plan)
             write_once(directory / "COMPLETED.json", {
                 "version": 2, "job": ident, "attempt": attempt,
