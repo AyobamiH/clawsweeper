@@ -183,6 +183,28 @@ class TestGenerationAwareRetention(unittest.TestCase):
         with self.assertRaisesRegex(ret.RetentionError, "archive_blob_integrity_failure"):
             ret.heal(self.db, root=self.root, cold=self.cold)
 
+    def test_new_generation_marker_attempt_drift_is_rejected(self):
+        self.first_archive()
+        self.newer()
+        ret.heal(self.db, root=self.root, cold=self.cold)
+        marker = self.legacy / "generations" / "attempt4" / "COMPLETED.json"
+        done = json.loads(marker.read_text())
+        done["attempt"] = 99
+        marker.write_text(json.dumps(done))
+        with self.assertRaisesRegex(ret.RetentionError, "generation_marker_identity_mismatch"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+
+    def test_new_generation_marker_link_claim_drift_is_rejected(self):
+        self.first_archive()
+        self.newer()
+        ret.heal(self.db, root=self.root, cold=self.cold)
+        marker = self.legacy / "generations" / "attempt4" / "COMPLETED.json"
+        done = json.loads(marker.read_text())
+        done["original_paths_symlinked"] = False
+        marker.write_text(json.dumps(done))
+        with self.assertRaisesRegex(ret.RetentionError, "generation_marker_identity_mismatch"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+
     def test_untrusted_generations_directory_is_rejected(self):
         self.first_archive()
         self.newer()

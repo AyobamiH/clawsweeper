@@ -225,6 +225,12 @@ def _sealed_plan(root: Path, directory: Path, row: dict, *, version: int) -> dic
     if (done.get("manifest_sha256") != sha256(manifest)
             or done.get("verified_files") != len(plan["files"])):
         raise RetentionError("generation_marker_mismatch")
+    if version == 2 and (
+            done.get("version") != 2
+            or done.get("job") != row["id"]
+            or done.get("attempt") != plan.get("attempt")
+            or done.get("original_paths_symlinked") is not True):
+        raise RetentionError("generation_marker_identity_mismatch")
     return plan
 
 
