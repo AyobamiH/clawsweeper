@@ -139,6 +139,51 @@ class TestGenerationAwareRetention(unittest.TestCase):
         with self.assertRaisesRegex(ret.RetentionError, "generation_mixed_or_untrusted_sources|generation_current_link_drift"):
             ret.heal(self.db, root=self.root, cold=self.cold)
 
+    def test_crash_after_generation_directory_before_plan_recovers_without_deletion(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt4"
+        target.mkdir(parents=True, mode=0o700)
+        self.assertFalse(any(target.iterdir()))
+        result = ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertEqual(result["archived_jobs"], 1)
+        self.assertEqual(ret.sha256(self.legacy / "plan.json"), self.legacy_hash)
+        self.assertTrue((target / "COMPLETED.json").is_file())
+        self.assertEqual(ret.heal(self.db, root=self.root, cold=self.cold)["archived_jobs"], 0)
+
+    def test_nonempty_orphan_generation_fails_closed_before_any_moves(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt4"
+        target.mkdir(parents=True, mode=0o700)
+        (target / "unrecognised-evidence.txt").write_bytes(b"preserve evidence")
+        with self.assertRaisesRegex(ret.RetentionError, "generation_directory_without_plan"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertTrue(ret.regular(self.receipt_path()))
+        self.assertTrue(ret.regular(self.log_path()))
+        self.assertEqual((target / "unrecognised-evidence.txt").read_bytes(),
+                         b"preserve evidence")
+
+    def test_orphan_for_different_attempt_cannot_be_reused(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt5"
+        target.mkdir(parents=True, mode=0o700)
+        with self.assertRaisesRegex(ret.RetentionError, "generation_directory_without_plan"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertTrue(ret.regular(self.receipt_path()))
+        self.assertFalse((self.legacy / "generations" / "attempt4").exists())
+
+    def test_untrusted_orphan_directory_mode_rejected(self):
+        self.first_archive()
+        self.newer()
+        target = self.legacy / "generations" / "attempt4"
+        target.mkdir(parents=True, mode=0o700)
+        target.chmod(0o755)
+        with self.assertRaisesRegex(ret.RetentionError, "generation_directory_without_plan"):
+            ret.heal(self.db, root=self.root, cold=self.cold)
+        self.assertTrue(ret.regular(self.receipt_path()))
+
     def test_interrupt_between_move_and_symlink_recovers_exact_blobs(self):
         self.first_archive()
         self.newer()

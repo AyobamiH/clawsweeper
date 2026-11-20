@@ -333,12 +333,22 @@ def _generation_archive(root: Path, cold: Path, row: dict) -> dict | None:
                 raise RetentionError("unexpected_generation_entry")
             existing.append((int(item.name[7:]), item))
         existing.sort()
+    empty_orphan = None
     for attempt, directory in existing:
         if attempt <= prior:
             raise RetentionError("generation_nonmonotonic")
         manifest = directory / "plan.json"
         if not regular(manifest):
-            raise RetentionError("generation_directory_without_plan")
+            # Crash between mkdir and the durable O_EXCL plan: no proof bytes
+            # were moved yet. Resume ONLY a completely empty, owner-created,
+            # final directory for the exact currently reported attempt.
+            meta = directory.stat()
+            if (directory != existing[-1][1] or attempt != row["attempt"]
+                    or any(directory.iterdir()) or meta.st_uid != os.getuid()
+                    or stat.S_IMODE(meta.st_mode) != 0o700):
+                raise RetentionError("generation_directory_without_plan")
+            empty_orphan = (attempt, directory)
+            continue
         plan = json.loads(manifest.read_text())
         if (plan.get("version") != 2 or plan.get("attempt") != attempt
                 or plan.get("previous_plan_sha256") != previous_hash):
@@ -358,6 +368,8 @@ def _generation_archive(root: Path, cold: Path, row: dict) -> dict | None:
         prior, previous_hash = attempt, sha256(manifest)
     current = _receipt_generation(root, row, after=prior)
     if current is None:
+        if empty_orphan is not None:
+            raise RetentionError("generation_orphan_without_current_receipt")
         receipt = root / "evidence/fleet" / (ident + ".json")
         log = root / "logs/fleet" / (ident + ".log")
         latest = existing[-1][1] if existing else folder
@@ -367,14 +379,18 @@ def _generation_archive(root: Path, cold: Path, row: dict) -> dict | None:
                 raise RetentionError("generation_current_link_drift")
         return None
     attempt, sources = current
-    if gens.exists() and (gens / ("attempt" + str(attempt))).exists():
+    target = gens / ("attempt" + str(attempt))
+    if empty_orphan is not None:
+        if empty_orphan != (attempt, target):
+            raise RetentionError("generation_orphan_attempt_drift")
+    elif target.exists() or target.is_symlink():
         raise RetentionError("generation_duplicate_attempt")
     if not gens.exists():
         gens.mkdir(mode=0o700)
         sync_dir(folder)
-    target = gens / ("attempt" + str(attempt))
-    target.mkdir(mode=0o700)
-    sync_dir(gens)
+    if empty_orphan is None:
+        target.mkdir(mode=0o700)
+        sync_dir(gens)
     files = [_stored_entry(root, ident, f) for f in sources]
     plan = {"version": 2, "job": ident, "repo": row["repo"],
             "sha": row["sha"], "suite": row["suite"], "attempt": attempt,
