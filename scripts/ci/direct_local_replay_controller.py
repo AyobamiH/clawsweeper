@@ -131,6 +131,13 @@ def render(installed: bytes, expected_sha256: str,
         "min(cfg.get('total_timeout',10800),900) "
         "if job['repo']==_MANUAL_REPO and job['ref']=='local-manual-replay' "
         "else cfg.get('total_timeout',10800))")
+    # replay_no_implicit_second_execution: this one-use owner authority is
+    # for a single real container attempt, including an error/timeout outcome.
+    source = _once(
+        source,
+        "        retry=outcome=='error' and attempt<3 and 'cleanup_error' not in receipt",
+        "        retry=(outcome=='error' and attempt<3 and 'cleanup_error' not in receipt "
+        "and not (job['repo']==_MANUAL_REPO and job['ref']=='local-manual-replay'))")
     # Source ref is neither the main-poller path nor a GitHub status ref.
     source = _once(
         source,

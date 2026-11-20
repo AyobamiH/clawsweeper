@@ -127,6 +127,40 @@ class ReplayControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,"wrong_source_ref"):
             ns["validate_job"](job, {})
 
+    def test_replay_error_is_terminal_without_implicit_second_run(self):
+        # A source-only review must not allow auto-retrying a one-use intent.
+        tree = ast.parse(self.render()["controller"])
+        fn = self.function(tree, "run_job")
+        assignment = [n for n in ast.walk(fn)
+                      if isinstance(n, ast.Assign)
+                      and any(isinstance(target, ast.Name)
+                              and target.id == "retry" for target in n.targets)]
+        self.assertEqual(len(assignment), 1)
+        code = compile(ast.Expression(body=assignment[0].value),
+                       "<candidate-replay-retry>", "eval")
+        values = {"outcome": "error", "attempt": 1, "receipt": {},
+                  "_MANUAL_REPO": c.REPO}
+        replay = dict(repo=c.REPO, ref=c.REF)
+        original = dict(repo=c.REPO, ref="local-manual")
+        self.assertFalse(eval(code, values, {"job": replay}))
+        self.assertTrue(eval(code, values, {"job": original}))
+        self.assertFalse(eval(code, dict(values, outcome="success"),
+                              {"job": original}))
+
+    def test_replay_success_requires_actual_64_character_container_id(self):
+        # The installed verifier checked only the two historical suites.
+        tree = ast.parse(self.render()["controller"])
+        fn = self.function(tree, "_verified_manual_success_receipt")
+        ns = {"re": __import__("re")}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]),
+                     "<candidate-replay-container-id>", "exec"), ns)
+        for wrong in (None, "", "fabricated", "a" * 63):
+            with self.subTest(container=wrong):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "without_real_container_id"):
+                    ns["_verified_manual_success_receipt"](
+                        {"suite": c.SUITE}, {"engine_container_id": wrong})
+
     def test_publish_success_is_local_only_and_requires_cleanup(self):
         tree = ast.parse(self.render()["controller"])
         fn = self.function(tree, "publish")
