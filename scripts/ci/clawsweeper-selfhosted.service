@@ -1,0 +1,16 @@
+[Unit]
+Description=ClawSweeper bounded one-job self-hosted workflow JIT execution
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 %h/.local/share/local-ci/clawsweeper-selfhosted/self_hosted_executor.py cycle
+WorkingDirectory=%h/.local/share/local-ci/clawsweeper-selfhosted
+TimeoutStartSec=45min
+TimeoutStopSec=35sec
+KillMode=control-group
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

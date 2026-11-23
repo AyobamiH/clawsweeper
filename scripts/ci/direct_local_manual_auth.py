@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Owner-signed local intent to existing fleet queue. NOT a GitHub Actions admission.
+
+Source-only until an independently authorised frozen controller release supports
+the new local-manual provenance and source-reference class. No new scheduler,
+runner, credential broker or provider status publishing lives in this module.
+"""
+from __future__ import annotations
+import base64
+import fcntl
+import hashlib
+import json
+import os
+import pwd
+from pathlib import Path
+import re
+import sqlite3
+import stat
+import subprocess
+import time
+import uuid
+from datetime import datetime, timezone
+
+import direct_local_fleet_claim as claims
+import direct_local_workflow as routing
+from direct_local_event_admission import unique_object
+from estate_policy import Hold
+
+REPO = "AyobamiH/clawsweeper"
+SCHEMA = "clawsweeper.owner-signed-local-manual-request.v1"
+PROOF = "owner_signed_local_manual_queue_admission_not_execution"
+REF = "local-manual"
+PROVIDER_REF = "develop"
+NAMESPACE = "clawsweeper-direct-local-manual-v1"
+PRINCIPAL = "heryourbarme@live.com"
+JOBS = (
+    ".github/workflows/ci.yml#check",
+    ".github/workflows/ci.yml#sparse-repair-builds",
+)
+FIELDS = frozenset((
+    "schema", "repo", "source_sha", "source_ref", "host", "suite",
+    "job_intents", "purpose", "nonce", "issued_at", "expires_at",
+))
+HEX32 = re.compile(r"[a-f0-9]{32}\Z")
+
+
+# The owner-signed intent verifier runs BEFORE any request is admitted. Never
+# resolve its trust roots through an inherited PATH or executable shim.
+def _trusted_system_binary(name: str) -> str:
+    path = Path("/usr/bin") / name
+    try:
+        st = path.lstat()
+    except OSError as exc:
+        raise Hold("owner_trust_binary_missing") from exc
+    if (path.is_symlink() or not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+            or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not st.st_mode & stat.S_IXUSR):
+        raise Hold("owner_trust_binary_untrusted")
+    return str(path)
+
+
+def _trusted_github_env() -> dict[str, str]:
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    cfg = home / ".config" / "gh"
+    try:
+        st = cfg.lstat()
+    except OSError as exc:
+        raise Hold("owner_github_config_missing") from exc
+    if (cfg.is_symlink() or not stat.S_ISDIR(st.st_mode)
+            or st.st_uid != os.getuid()
+            or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise Hold("owner_github_config_untrusted")
+    env = {"HOME": str(home), "GH_CONFIG_DIR": str(cfg),
+           "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1",
+           "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+    # Preserve only the documented token variables needed by an authorised
+    # non-interactive GitHub GET; never inherit GH_HOST/config, preload or PATH.
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    return env
+
+
+def owner_bytes(path: Path, limit: int, private: bool = True) -> bytes:
+    p = Path(path)
+    if p.is_symlink() or not p.is_file():
+        raise Hold("untrusted_manual_file")
+    st = p.stat()
+    mode = stat.S_IMODE(st.st_mode)
+    if (st.st_uid != os.getuid()
+            or (private and mode != 0o600)
+            or (not private and mode & (stat.S_IWGRP | stat.S_IWOTH))
+            or not 0 < st.st_size <= limit):
+        raise Hold("unsafe_manual_file_size_or_permissions")
+    fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_ino, opened.st_dev) != (st.st_ino, st.st_dev):
+            raise Hold("manual_file_replaced")
+        data = os.read(fd, limit + 1)
+        if len(data) != st.st_size:
+            raise Hold("manual_file_changed")
+        return data
+    finally:
+        os.close(fd)
+
+
+def owner_allowed_signers() -> Path:
+    """Fixed production owner identity; tests may patch the function only."""
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".config/git/allowed_signers"
+
+
+def verify_owner_signature_bytes(raw: bytes, sig: bytes, signers: Path) -> None:
+    """Reverify the original signed request without trusting mutable SQLite.
+
+    A Linux memory-backed descriptor avoids creating a second credential store,
+    a temporary signature file or a separate execution/queue service.
+    """
+    if (not isinstance(raw, bytes) or not 0 < len(raw) <= 4096
+            or not isinstance(sig, bytes) or not 0 < len(sig) <= 8192
+            or not sig.startswith(b"-----BEGIN SSH SIGNATURE-----")):
+        raise Hold("invalid_manual_signature_format")
+    owner_bytes(signers, 8192, private=False)
+    try:
+        fd = os.memfd_create("clawsweeper-owner-signed-request", flags=0)
+    except (OSError, AttributeError) as exc:
+        raise Hold("owner_signature_verifier_unavailable") from exc
+    try:
+        if os.write(fd, sig) != len(sig):
+            raise Hold("incomplete_owner_signature_descriptor")
+        os.lseek(fd, 0, os.SEEK_SET)
+        res = subprocess.run(
+            [_trusted_system_binary("ssh-keygen"), "-Y", "verify",
+             "-f", str(signers), "-I", PRINCIPAL, "-n", NAMESPACE,
+             "-s", f"/proc/self/fd/{fd}"],
+            input=raw, capture_output=True, timeout=8, check=False,
+            pass_fds=(fd,), env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("owner_signature_verifier_unavailable") from exc
+    finally:
+        os.close(fd)
+    if res.returncode:
+        raise Hold("untrusted_owner_signature")
+
+
+def verify_owner_signature(raw: bytes, signature: Path, signers: Path) -> None:
+    verify_owner_signature_bytes(raw, owner_bytes(signature, 8192), signers)
+
+
+def parse_intent(raw: bytes, now: int) -> dict:
+    try:
+        doc = json.loads(raw, object_pairs_hook=unique_object)
+    except Hold:
+        # Preserve the precise duplicate-key fail-closed diagnosis.
+        raise
+    except (ValueError, UnicodeError, TypeError) as exc:
+        raise Hold("invalid_manual_json") from exc
+    if (not isinstance(doc, dict) or set(doc) != FIELDS
+            or doc["schema"] != SCHEMA or doc["repo"] != REPO
+            or doc["source_ref"] != PROVIDER_REF
+            or doc["host"] != os.uname().nodename
+            or doc["suite"] != claims.SUITE
+            or doc["purpose"] != "ordinary-source-validation"
+            or not isinstance(doc["source_sha"], str)
+            or not routing.HEX40.fullmatch(doc["source_sha"])
+            or type(doc["job_intents"]) is not list
+            or doc["job_intents"] != list(JOBS)
+            or type(doc["nonce"]) is not str
+            or not HEX32.fullmatch(doc["nonce"])
+            or type(doc["issued_at"]) is not int
+            or type(doc["expires_at"]) is not int
+            or doc["issued_at"] > now + 30 or now - doc["issued_at"] > 900
+            or doc["expires_at"] < now
+            or not 0 < doc["expires_at"] - doc["issued_at"] <= 900):
+        raise Hold("unapproved_manual_scope_or_freshness")
+    return doc
+
+
+def read_fresh_develop_sha() -> str:
+    """One read-only GitHub ref GET; never Actions admission or status POST."""
+    try:
+        res = subprocess.run(
+            [_trusted_system_binary("gh"), "api", "--hostname", "github.com",
+             "--method", "GET", "repos/AyobamiH/clawsweeper/git/ref/heads/develop"],
+            capture_output=True, timeout=15, check=False,
+            env=_trusted_github_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Hold("manual_source_get_unavailable") from exc
+    if res.returncode or len(res.stdout) > 32768:
+        raise Hold("manual_source_get_unavailable")
+    try:
+        doc = json.loads(res.stdout, object_pairs_hook=unique_object)
+        if (doc["ref"] != "refs/heads/develop"
+                or doc["object"]["type"] != "commit"
+                or not routing.HEX40.fullmatch(doc["object"]["sha"])):
+            raise ValueError("untrusted source")
+    except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+        raise Hold("untrusted_manual_source_get") from exc
+    return doc["object"]["sha"]

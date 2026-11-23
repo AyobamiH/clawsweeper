@@ -75,7 +75,7 @@ concurrency:
 jobs:
   receipt:
     name: Deduplicate command dispatch receipt
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-receipt"]
     outputs:
       proceed: ${{ steps.receipt.outputs.proceed }}
     steps:
@@ -110,7 +110,7 @@ jobs:
   capacity:
     needs: receipt
     if: ${{ needs.receipt.outputs.proceed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-capacity"]
     outputs:
       proceed: ${{ steps.limit.outputs.proceed }}
     timeout-minutes: 20
@@ -176,7 +176,7 @@ jobs:
   assist:
     needs: capacity
     if: ${{ needs.capacity.outputs.proceed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-assist"]
     timeout-minutes: 8
     outputs:
       generation_attempt: ${{ steps.generate.outputs.generation_attempt }}
@@ -272,7 +272,7 @@ jobs:
     name: Publish trusted assist comment
     needs: assist
     if: ${{ needs.assist.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-publish"]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7

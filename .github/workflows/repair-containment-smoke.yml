@@ -62,16 +62,37 @@ jobs:
   provision:
     name: Provision containment smoke compute
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-provision"]
     timeout-minutes: 10
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
       execute: ${{ steps.runners.outputs.execute }}
       attempt: ${{ steps.runners.outputs.attempt }}
     steps:
+      # Privileged lifecycle actions must never execute a same-repo PR's
+      # modified .github/actions/cloudflare-runners code with administrator
+      # and Cloudflare credentials. Check out the exact trusted base instead.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: ${{ github.event_name != 'pull_request' }}
         with:
           persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha != '' && github.event.pull_request.base.ref == 'main' }}
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Verify privileged lifecycle source before credentials
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$EXPECTED_BASE" = main
+          fi
+          test -n "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - name: Mint bounded GitHub App credential
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -94,7 +115,9 @@ jobs:
   containment-smoke:
     name: containment smoke (sample ${{ matrix.sample }})
     needs: provision
-    runs-on: ${{ needs.provision.outputs.attempt == format('{0}', github.run_attempt) && needs.provision.outputs[matrix.lane] || 'ubuntu-latest' }}
+    # A missing/stale ephemeral runner must not silently fall back to a different execution environment.
+    if: ${{ needs.provision.result == 'success' && needs.provision.outputs.plan != '' && needs.provision.outputs.execute != '' && needs.provision.outputs.attempt == format('{0}', github.run_attempt) }}
+    runs-on: ${{ needs.provision.outputs[matrix.lane] }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -126,12 +149,33 @@ jobs:
     name: Destroy containment smoke compute
     needs: [provision, containment-smoke]
     if: ${{ always() && needs.provision.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-cleanup"]
     timeout-minutes: 10
     steps:
+      # Privileged lifecycle actions must never execute a same-repo PR's
+      # modified .github/actions/cloudflare-runners code with administrator
+      # and Cloudflare credentials. Check out the exact trusted base instead.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: ${{ github.event_name != 'pull_request' }}
         with:
           persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha != '' && github.event.pull_request.base.ref == 'main' }}
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Verify privileged lifecycle source before credentials
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = pull_request ]; then
+            test "$EXPECTED_BASE" = main
+          fi
+          test -n "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - name: Mint bounded GitHub App credential
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

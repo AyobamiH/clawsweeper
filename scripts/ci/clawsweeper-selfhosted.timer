@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll admitted ClawSweeper self-hosted Actions jobs; no paid GitHub runner
+
+[Timer]
+OnBootSec=3min
+OnCalendar=*-*-* *:0/2:00
+Persistent=true
+RandomizedDelaySec=10
+Unit=clawsweeper-selfhosted.service
+
+[Install]
+WantedBy=timers.target

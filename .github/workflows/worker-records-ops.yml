@@ -21,7 +21,7 @@ env:
 jobs:
   snapshot:
     name: Trigger canonical records snapshot
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-snapshot"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

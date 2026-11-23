@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   dispatch:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-dispatch"]
     steps:
       - name: Dispatch current repair worker with Workers AI
         env:

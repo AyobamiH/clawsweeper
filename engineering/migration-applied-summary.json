@@ -1,0 +1,478 @@
+{
+  "applied": true,
+  "jobs": [
+    {
+      "class": "privileged",
+      "id": "assist",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-assist",
+      "platform": "Linux",
+      "workflow": ".github/workflows/assist.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "capacity",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-capacity",
+      "platform": "Linux",
+      "workflow": ".github/workflows/assist.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/assist.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "receipt",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-receipt",
+      "platform": "Linux",
+      "workflow": ".github/workflows/assist.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "dispatch-private-auto-fallback",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-dispatch-private-auto-fallback",
+      "platform": "Linux",
+      "workflow": ".github/workflows/chatgpt-private-acceptance-probe.yml"
+    },
+    {
+      "class": "validation",
+      "id": "check",
+      "label": "clawsweeper-ci-validation-${{ github.run_id }}-check",
+      "platform": "Linux",
+      "prior_approved_p1_lane": true,
+      "workflow": ".github/workflows/ci.yml"
+    },
+    {
+      "class": "review",
+      "id": "hosted-review-scan",
+      "label": "clawsweeper-ci-review-${{ github.run_id }}-hosted-review-scan",
+      "platform": "Linux",
+      "workflow": ".github/workflows/ci.yml"
+    },
+    {
+      "class": "validation",
+      "id": "sparse-repair-builds",
+      "label": "clawsweeper-ci-validation-${{ github.run_id }}-sparse",
+      "platform": "Linux",
+      "prior_approved_p1_lane": true,
+      "workflow": ".github/workflows/ci.yml"
+    },
+    {
+      "class": "windows",
+      "id": "windows-codex-launch",
+      "label": "clawsweeper-ci-windows-${{ github.run_id }}-windows-codex-launch",
+      "platform": "Windows",
+      "workflow": ".github/workflows/ci.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "cleanup",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-operator-fixtures.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "launch",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-launch",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-operator-fixtures.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "cleanup",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "deploy",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-deploy",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "provision",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-provision",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "review",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-review",
+      "platform": "Linux",
+      "workflow": ".github/workflows/cloudflare-repair-provision.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "cleanup",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "prepare",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-prepare",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "provision",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-provision",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "report-failure",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-report-failure",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "validate",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-validate",
+      "platform": "Linux",
+      "workflow": ".github/workflows/commercial-fulfilment.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "refresh",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-refresh",
+      "platform": "Linux",
+      "workflow": ".github/workflows/dashboard-ci.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "deploy",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-deploy",
+      "platform": "Linux",
+      "workflow": ".github/workflows/dashboard.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-batch-publish.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "operate",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-operate",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-dead-letter-operator.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "reconcile",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-reconcile",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-dead-letter-reconcile.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "reconcile",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-reconcile",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-queue-maintenance.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "reconcile",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-reconcile",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-reconcile.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "sweep",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-sweep",
+      "platform": "Linux",
+      "workflow": ".github/workflows/exact-review-reconcile.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "fanout",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-fanout",
+      "platform": "Linux",
+      "workflow": ".github/workflows/idea-archive-revival.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "revive",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-revive",
+      "platform": "Linux",
+      "workflow": ".github/workflows/idea-archive-revival.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "retract",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-retract",
+      "platform": "Linux",
+      "workflow": ".github/workflows/live-proof-maintenance.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "deploy",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-deploy",
+      "platform": "Linux",
+      "workflow": ".github/workflows/maintainer-activity-report.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "generate",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-generate",
+      "platform": "Linux",
+      "workflow": ".github/workflows/maintainer-activity-report.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/maintainer-activity-report.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "notify",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-notify",
+      "platform": "Linux",
+      "workflow": ".github/workflows/maintainer-report-discord.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "deploy",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-deploy",
+      "platform": "Linux",
+      "workflow": ".github/workflows/pages.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "intake",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-intake",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-cluster-intake.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "route-comments",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-route-comments",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-comment-router.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "self-heal",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-self-heal",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-conflict-self-heal.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "backfill",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-backfill",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-issue-implementation-backfill.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-publish-results.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "self-heal",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-self-heal",
+      "platform": "Linux",
+      "workflow": ".github/workflows/repair-self-heal.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "audit",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-audit",
+      "platform": "Linux",
+      "workflow": ".github/workflows/report-metadata-audit.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "intake",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-intake",
+      "platform": "Linux",
+      "workflow": ".github/workflows/spam-comment-intake.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "scan",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-scan",
+      "platform": "Linux",
+      "workflow": ".github/workflows/spam-scanner.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "refresh",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-refresh",
+      "platform": "Linux",
+      "workflow": ".github/workflows/subscription-allowance.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "apply-existing",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-apply-existing",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "apply-proof",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-apply-proof",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "audit-dashboard",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-audit-dashboard",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "event-disabled-target",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-event-disabled-target",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "event-review-apply",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-apply",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "event-review-publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "event-review-terminal-finalization",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-event-review-terminal-finalization",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "legacy-event-queue-intake",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-legacy-event-queue-intake",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "plan",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-plan",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish-apply-observability",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish-apply-observability",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "publish-apply-proof-action-ledger",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-publish-apply-proof-action-ledger",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "recover-review-failures",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-recover-review-failures",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "requeue-source-revision-drift",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-requeue-source-revision-drift",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "retry-failed-reviews",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-retry-failed-reviews",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "review",
+      "id": "review",
+      "label": "clawsweeper-ci-review-${{ github.run_id }}-review",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "target-fanout",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-target-fanout",
+      "platform": "Linux",
+      "workflow": ".github/workflows/sweep.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "snapshot",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-snapshot",
+      "platform": "Linux",
+      "workflow": ".github/workflows/worker-records-ops.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "smoke",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-smoke",
+      "platform": "Linux",
+      "workflow": ".github/workflows/workers-ai-fallback-acceptance.yml"
+    },
+    {
+      "class": "privileged",
+      "id": "dispatch",
+      "label": "clawsweeper-ci-privileged-${{ github.run_id }}-dispatch",
+      "platform": "Linux",
+      "workflow": ".github/workflows/workers-ai-repair-current-main-rerun.yml"
+    }
+  ],
+  "jobs_moved": 67,
+  "workflows_changed": 32
+}

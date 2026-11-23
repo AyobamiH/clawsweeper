@@ -39,7 +39,7 @@ env:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-prepare"]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -63,7 +63,7 @@ jobs:
 
   provision:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-provision"]
     timeout-minutes: 15
     outputs:
       plan: ${{ steps.runners.outputs.plan }}
@@ -158,7 +158,7 @@ jobs:
 
   validate:
     needs: [prepare, generate]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-validate"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -240,7 +240,7 @@ jobs:
 
   publish:
     needs: [prepare, semantic-review]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-publish"]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -267,7 +267,7 @@ jobs:
   cleanup:
     needs: [prepare, provision, generate, validate, semantic-review, publish]
     if: ${{ always() && needs.provision.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-cleanup"]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -297,7 +297,8 @@ jobs:
   report-failure:
     needs: [prepare, provision, generate, validate, semantic-review, publish, cleanup]
     if: ${{ always() && (needs.publish.result != 'success' || needs.cleanup.result != 'success') }}
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-report-failure"]
     timeout-minutes: 5
     permissions:
       contents: read

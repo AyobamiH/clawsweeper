@@ -1,5 +1,6 @@
 import { assert, digest } from "./contract.mjs";
 import { validateRoute } from "./inference.mjs";
+import { ReviewFailure, REVIEW_ERROR_CODES } from "./review-errors.mjs";
 
 // Full bounded inputs only. Never truncate context and call it an independent review.
 export const MAX_INPUT_BYTES = 96 * 1024;
@@ -119,35 +120,43 @@ export async function workersAiJson(route, prompt, data, schema, options = {}) {
     });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
-      throw new Error("provider refused");
+      const statusClass = `${Math.floor(response.status / 100)}xx`;
+      throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_HTTP, {
+        statusClass,
+        retryEligible: response.status === 429 || response.status >= 500,
+      });
     }
-    payload = await readResponse(response);
-  } catch {
-    throw new Error("Workers AI request did not complete; no automatic replay");
+    try {
+      payload = await readResponse(response);
+    } catch {
+      throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_RESPONSE);
+    }
+  } catch (error) {
+    if (error instanceof ReviewFailure) throw error;
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_NETWORK, { retryEligible: true });
   }
-  assert(
-    Array.isArray(payload.choices) && payload.choices.length === 1,
-    "invalid Workers AI choices",
-  );
+  if (!Array.isArray(payload?.choices) || payload.choices.length !== 1)
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA);
   const choice = payload.choices[0];
-  assert(
-    choice.finish_reason === "stop" &&
+  if (
+    !(
+      choice.finish_reason === "stop" &&
       choice.message?.role === "assistant" &&
       !choice.message.tool_calls?.length &&
       !choice.message.function_call &&
-      !choice.message.refusal,
-    "Workers AI response is incomplete or requests tools",
-  );
-  assert(
-    typeof choice.message.content === "string" && choice.message.content.length,
-    "Workers AI JSON output missing",
-  );
+      !choice.message.refusal
+    )
+  )
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_INCOMPLETE);
+  if (!(typeof choice.message.content === "string" && choice.message.content.length))
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA);
   let value;
   try {
     value = JSON.parse(choice.message.content);
   } catch {
-    throw new Error("Workers AI output is not a JSON object");
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_JSON);
   }
-  assert(value && typeof value === "object" && !Array.isArray(value), "Workers AI object required");
+  if (!(value && typeof value === "object" && !Array.isArray(value)))
+    throw new ReviewFailure(REVIEW_ERROR_CODES.PROVIDER_SCHEMA);
   return { value, inputDigest: request.inputDigest };
 }

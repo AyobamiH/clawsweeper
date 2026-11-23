@@ -1,0 +1,16 @@
+[Unit]
+Description=ClawSweeper signed-source estate JIT controller (class-scoped)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 %h/.local/share/local-ci/clawsweeper-estate/active/repo/scripts/ci/estate_controller.py cycle
+WorkingDirectory=%h/.local/share/local-ci/clawsweeper-estate/active/repo
+TimeoutStartSec=45min
+TimeoutStopSec=35sec
+KillMode=control-group
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

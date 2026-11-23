@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll accepted ClawSweeper estate jobs (no hosted fallback)
+
+[Timer]
+OnBootSec=3min
+OnCalendar=*-*-* *:0/2:00
+Persistent=true
+RandomizedDelaySec=12
+Unit=clawsweeper-estate.service
+
+[Install]
+WantedBy=timers.target

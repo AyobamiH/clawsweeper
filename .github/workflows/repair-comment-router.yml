@@ -88,7 +88,8 @@ concurrency:
 
 jobs:
   route-comments:
-    runs-on: ubuntu-latest
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-privileged-${{ github.run_id }}-route-comments"]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

@@ -1,0 +1,42 @@
+name: ClawSweeper offline release replay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-ops-${{ github.run_id }}-offline-replay"]
+    timeout-minutes: 15
+    steps:
+      - name: Require owner-approved immutable workflow source before checkout
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "AyobamiH/clawsweeper"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$APPROVED_SHA"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+      - name: Verify checked-out approved tooling before local actions
+        env:
+          APPROVED_SHA: ${{ vars.CLAWSWEEPER_TRUSTED_MAIN_SHA }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
+      - name: Install pinned dependencies
+        run: |
+          export COREPACK_HOME="$RUNNER_TEMP/corepack"
+          mkdir -p "$COREPACK_HOME" "$RUNNER_TEMP/pnpm-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/pnpm-bin"
+          echo "$RUNNER_TEMP/pnpm-bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/pnpm-bin:$PATH"
+          test "$(corepack pnpm --version)" = '11.10.0'
+          pnpm install --frozen-lockfile
+      - name: Replay without model inference
+        run: pnpm run test:release-replay
+      - name: Static checks
+        run: pnpm run check:static

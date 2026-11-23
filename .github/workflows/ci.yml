@@ -12,6 +12,13 @@ on:
       - "results/**"
   pull_request:
   workflow_dispatch:
+    inputs:
+      validation_lane:
+        description: "Explicit ordinary validation only; no inference or Windows job"
+        required: true
+        type: choice
+        default: none
+        options: [none, check, sparse]
 
 permissions:
   contents: read
@@ -28,11 +35,11 @@ jobs:
       CLAWSWEEPER_QUOTA_URL: ${{ vars.CLAWSWEEPER_EXACT_REVIEW_QUEUE_URL }}
       CLAWSWEEPER_QUOTA_SECRET: ${{ secrets.CLAWSWEEPER_WEBHOOK_SECRET }}
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'pull_request' &&
+      ${{ github.event_name == 'pull_request' &&
            github.event.pull_request.head.repo.full_name == github.repository &&
-           github.actor == 'AyobamiH') }}
-    runs-on: ubuntu-24.04
+           github.actor == 'AyobamiH' }}
+    runs-on:
+      [self-hosted, Linux, X64, "clawsweeper-ci-review-${{ github.run_id }}-hosted-review-scan"]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -96,10 +103,17 @@ jobs:
 
   check:
     name: pnpm check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' ||
+          (github.actor == 'AyobamiH' && inputs.validation_lane == 'check') }}
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-validation-${{ github.run_id }}-check"]
+    # Full owner-hosted canonical checks have taken over 26 minutes on 2 CPUs.
+    # Keep a bounded JIT exit/cleanup margin under MAX_SECONDS=42 minutes.
+    timeout-minutes: 38
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Validate workflow semantics
         env:
@@ -112,9 +126,9 @@ jobs:
             --output "$actionlint_archive"
           printf '%s  %s\n' "$ACTIONLINT_LINUX_AMD64_SHA256" "$actionlint_archive" | sha256sum --check -
           tar -xzf "$actionlint_archive" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" \
-            -shellcheck= \
-            -ignore 'unexpected key "queue" for "concurrency" section' \
+          python3 -B scripts/ci/actionlint_queue_compat.py \
+            --actionlint "$RUNNER_TEMP/actionlint" \
+            --disable-shellcheck \
             .github/workflows/*.yml
 
       - uses: ./.github/actions/setup-pnpm
@@ -124,11 +138,16 @@ jobs:
 
   sparse-repair-builds:
     name: sparse repair build smoke
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    if: >-
+      ${{ github.event_name == 'pull_request' ||
+          (github.event_name == 'workflow_dispatch' &&
+           github.actor == 'AyobamiH' && inputs.validation_lane == 'sparse') }}
+    runs-on: [self-hosted, Linux, X64, "clawsweeper-ci-validation-${{ github.run_id }}-sparse"]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-pnpm
 
@@ -137,7 +156,14 @@ jobs:
 
   windows-codex-launch:
     name: Windows Codex launcher
-    runs-on: windows-latest
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on:
+      [
+        self-hosted,
+        Windows,
+        X64,
+        "clawsweeper-ci-windows-${{ github.run_id }}-windows-codex-launch",
+      ]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
