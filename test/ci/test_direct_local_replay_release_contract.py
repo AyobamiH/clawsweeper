@@ -55,7 +55,7 @@ class ThirdReplayReleaseContractTests(unittest.TestCase):
         self.assertEqual(rendered["signature_namespace"],
                          "clawsweeper-third-offline-replay-v1")
         self.assertEqual(rendered["policy"]["repositories"][
-            review.estate.REPO]["enrolled_head"], "9" * 40)
+            review.estate.REPO]["enrolled_head"], self.sha)
         prof = rendered["policy"]["repositories"][review.estate.REPO]["suites"]
         self.assertEqual(len(prof), 3)
         self.assertEqual(prof[suite.SUITE]["memory_mib"], 1536)

@@ -36,6 +36,8 @@ class ReplayAdmissionTests(unittest.TestCase):
         self.policy = p
         for name in ("OWNED_BY_LOCAL_CI", "control.lock"):
             (self.root/name).write_text("existing-fleet")
+        self.anchor_dir = self.root / "state/fleet/repository-evidence-holds"
+        self.anchor_dir.mkdir(parents=True, mode=0o700)
         self.write_policy()
         self.dbpath = self.root / "fleet.sqlite3"
         with sqlite3.connect(self.dbpath) as db:
@@ -53,6 +55,17 @@ class ReplayAdmissionTests(unittest.TestCase):
                 CREATE TABLE observations(
                     key TEXT PRIMARY KEY, value TEXT NOT NULL,
                     updated_at TEXT NOT NULL);
+                CREATE TABLE repository_evidence_holds(
+                    repo TEXT PRIMARY KEY NOT NULL,
+                    job_id TEXT NOT NULL,
+                    source_sha TEXT NOT NULL,
+                    suite TEXT NOT NULL,
+                    policy_sha TEXT NOT NULL,
+                    reason TEXT NOT NULL
+                        CHECK(reason = 'generation_mixed_or_untrusted_sources'),
+                    controller_sha TEXT NOT NULL,
+                    proof_sha TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL);
             """)
         now = int(time.time())
         self.intent = {
@@ -100,6 +113,60 @@ class ReplayAdmissionTests(unittest.TestCase):
                 db.execute("SELECT count(*) FROM jobs").fetchone()[0],
                 db.execute("SELECT count(*) FROM observations").fetchone()[0],
             )
+
+    def test_existing_durable_repository_hold_prevents_any_claim(self):
+        self.mutate_db(
+            "INSERT INTO repository_evidence_holds("
+            "repo,job_id,source_sha,suite,policy_sha,reason,"
+            "controller_sha,proof_sha,recorded_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (a.REPO, "local-fleet-bf40e3b5fe1b", "9" * 40,
+             "linux-node24-claw-check", "a" * 64,
+             "generation_mixed_or_untrusted_sources", "b" * 64,
+             "c" * 64, "2026-11-23T06:00:00+00:00"))
+        with self.assertRaisesRegex(Hold, "replay_repository_evidence_held"):
+            self.call()
+        self.assertEqual(self.counts(), (0, 0))
+        with sqlite3.connect(self.dbpath) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM repository_evidence_holds").fetchone()[0], 1)
+
+    def test_orphaned_hold_anchor_rejects_new_claim(self):
+        marker = self.anchor_dir / (
+            hashlib.sha256(a.REPO.encode()).hexdigest() + ".json")
+        marker.write_text("incomplete-after-crash")
+        with self.assertRaisesRegex(Hold, "replay_repository_evidence_held"):
+            self.call()
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_orphaned_hold_signature_rejects_new_claim(self):
+        marker = self.anchor_dir / (
+            hashlib.sha256(a.REPO.encode()).hexdigest() + ".sig")
+        marker.write_text("partially-recovered-signed-hold")
+        with self.assertRaisesRegex(Hold, "replay_repository_evidence_held"):
+            self.call()
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_existing_claim_cannot_start_after_hold_anchor_arrives(self):
+        job_id = self.call()["jobs"][0]["job_id"]
+        marker = self.anchor_dir / (
+            hashlib.sha256(a.REPO.encode()).hexdigest() + ".json")
+        marker.write_text("signed-hold-recovery-is-still-in-progress")
+        with self.assertRaisesRegex(Hold, "replay_repository_evidence_held"):
+            a.verify_existing_replay(
+                checkout=ROOT, fleet_root=self.root, job_id=job_id)
+        self.assertEqual(self.counts(), (1, 1))
+
+    def test_hold_anchor_directory_permissions_fail_closed(self):
+        self.anchor_dir.chmod(0o755)
+        with self.assertRaisesRegex(Hold, "replay_repository_hold_anchor_untrusted"):
+            self.call()
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_missing_hold_schema_fails_closed_before_admission(self):
+        self.mutate_db("DROP TABLE repository_evidence_holds")
+        with self.assertRaisesRegex(Hold, "replay_repository_hold_schema_unverifiable"):
+            self.call()
+        self.assertEqual(self.counts(), (0, 0))
 
     def test_one_real_sqlite_admission_is_idempotent_not_execution(self):
         first = self.call()

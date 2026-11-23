@@ -148,6 +148,39 @@ def _checked_row(db: sqlite3.Connection, evidence: dict, policy: dict,
     return item
 
 
+def _require_no_repository_evidence_hold(
+    db: sqlite3.Connection, fleet_root: Path,
+) -> None:
+    """Refuse both a durable hold row and an orphaned signed hold witness.
+
+    The fleet signs and verifies holds at every dispatch/execute boundary.
+    The single-job owner adapter must additionally refuse an anchor left
+    behind by a crash or deletion of the SQLite row, before a claim/start.
+    """
+    folder = fleet_root / "state/fleet/repository-evidence-holds"
+    try:
+        folder_stat = folder.lstat()
+    except OSError as exc:
+        raise Hold("replay_repository_hold_anchor_unavailable") from exc
+    if (not stat.S_ISDIR(folder_stat.st_mode)
+            or folder_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(folder_stat.st_mode) != 0o700):
+        raise Hold("replay_repository_hold_anchor_untrusted")
+    marker = folder / (hashlib.sha256(REPO.encode()).hexdigest() + ".json")
+    if (os.path.lexists(marker)
+            or os.path.lexists(marker.with_suffix(".sig"))):
+        raise Hold("replay_repository_evidence_held")
+    try:
+        row = db.execute(
+            "SELECT 1 FROM repository_evidence_holds WHERE repo=?",
+            (REPO,),
+        ).fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise Hold("replay_repository_hold_schema_unverifiable") from exc
+    if row:
+        raise Hold("replay_repository_evidence_held")
+
+
 def claim_owner_signed_replay(*, checkout: Path, fleet_root: Path,
                               request_file: Path, signature_file: Path) -> dict:
     """One ACID insert under the existing control.lock; never execute a job."""
@@ -178,6 +211,7 @@ def claim_owner_signed_replay(*, checkout: Path, fleet_root: Path,
             fleet._queue_schema(db)
             db.execute("BEGIN IMMEDIATE")
             try:
+                _require_no_repository_evidence_hold(db, root)
                 key = PREFIX + _nonce_key(doc)
                 if db.execute("SELECT 1 FROM observations WHERE key=?",
                               (OLD_PREFIX + _nonce_key(doc),)).fetchone():
@@ -258,6 +292,7 @@ def verify_existing_replay(*, checkout: Path, fleet_root: Path,
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
+        _require_no_repository_evidence_hold(db, root)
         matches = []
         rows = db.execute(
             "SELECT key,value FROM observations WHERE key LIKE ? LIMIT 2049",

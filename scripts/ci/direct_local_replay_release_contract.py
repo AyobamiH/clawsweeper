@@ -111,12 +111,13 @@ def proposed_policy(root: Path, installed: dict) -> dict:
     candidate = copy.deepcopy(installed)
     candidate["repositories"][estate.REPO]["suites"][suite.SUITE] = copy.deepcopy(
         proposal["suite"])
-    # The candidate source is not the enrolled/accepted main SHA. That change
-    # is forbidden until the exact head is on protected main and reverified.
-    if candidate["repositories"][estate.REPO]["enrolled_head"] != (
-        installed["repositories"][estate.REPO]["enrolled_head"]
-    ):
-        raise Hold("replay_existing_enrolled_source_changed")
+    # Future successor policy must enrol the same reviewed source that
+    # protected main is required to contain before any signed installation.
+    # This is a proposal only: validate_for_admission re-reads real main.
+    candidate["repositories"][estate.REPO]["enrolled_head"] = proposal["candidate_source_sha"]
+    if (candidate["repositories"][estate.REPO]["enrolled_head"] ==
+            installed["repositories"][estate.REPO]["enrolled_head"]):
+        raise Hold("replay_source_not_new")
     if candidate["repositories"][estate.REPO]["suites"][suite.SUITE] != (
         proposal["suite"]
     ):
