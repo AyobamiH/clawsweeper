@@ -5,6 +5,7 @@ import ast
 import hashlib
 from pathlib import Path
 import sys
+import subprocess
 import types
 import unittest
 from unittest import mock
@@ -25,11 +26,14 @@ class ReplayControllerTests(unittest.TestCase):
         cls.original = hashlib.sha256(cls.installed).hexdigest()
         cls.frozen = {p.name: p.read_bytes()
                       for p in cls.library.iterdir() if p.is_file()}
-        for name in c.REPLAY_LIB:
-            cls.frozen[name] = (ROOT/"scripts/ci"/name).read_bytes()
+        cls.source_sha = subprocess.check_output(
+            ["/usr/bin/git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
 
-    def render(self):
-        return c.render(self.installed, self.original, self.frozen)
+    def render(self, installed=None, digest=None, frozen=None, source_sha=None):
+        return c.render(self.installed if installed is None else installed,
+                        self.original if digest is None else digest,
+                        self.frozen if frozen is None else frozen,
+                        source_root=ROOT, source_sha=source_sha or self.source_sha)
 
     def function(self, tree, name):
         matches = [v for v in tree.body
@@ -79,40 +83,46 @@ class ReplayControllerTests(unittest.TestCase):
         self.assertIn("Unreviewed ClawSweeper historical aggregate", candidate)
 
     def test_same_source_and_policy_renders_deterministically(self):
-        self.assertEqual(self.render()["candidate_sha256"],
-                         self.render()["candidate_sha256"])
-        self.assertEqual(c._old_map(self.installed.decode()),
-                         {k:v for k,v in self.render()["frozen_hashes"].items()
-                          if k not in c.REPLAY_LIB})
+        a, b = self.render(), self.render()
+        self.assertEqual(a["candidate_sha256"], b["candidate_sha256"])
+        self.assertEqual(c._old_map(self.installed.decode()), a["historical_frozen_hashes"])
+        self.assertEqual(a["source_sha"], self.source_sha)
+        for name, raw in a["frozen_sources"].items():
+            expected = subprocess.check_output(
+                ["/usr/bin/git", "-C", str(ROOT), "cat-file", "blob",
+                 self.source_sha + ":scripts/ci/" + name])
+            self.assertEqual(raw, expected)
+            self.assertEqual(a["frozen_hashes"][name], hashlib.sha256(expected).hexdigest())
 
-    def test_wrong_controller_hash_and_module_drift_fail_closed(self):
+    def test_updated_adapter_is_not_silently_replaced_by_installed_bytes(self):
+        report = self.render()
+        self.assertNotEqual(report["frozen_hashes"]["direct_local_workflow.py"],
+                            report["historical_frozen_hashes"]["direct_local_workflow.py"])
+        self.assertIn(b"def split_suite_spec(", report["frozen_sources"]["direct_local_workflow.py"])
+        self.assertIn("repo_integrity.require_unheld(_replay_hold_db, _MANUAL_REPO)",
+                      report["controller"].decode())
+
+    def test_wrong_controller_hash_and_historical_module_drift_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "unverified_installed"):
-            c.render(self.installed, "0"*64, self.frozen)
-        for name in ("direct_local_fleet_claim.py",
-                     "direct_local_offline_replay.py"):
-            with self.subTest(name=name):
-                files = dict(self.frozen)
-                files[name] += b"\n# changed source\n"
-                if name in c.REPLAY_LIB:
-                    self.assertNotEqual(c.render(self.installed,
-                                       self.original,files)["candidate_sha256"],
-                                       self.render()["candidate_sha256"])
-                else:
-                    with self.assertRaisesRegex(ValueError, "historical_v3"):
-                        c.render(self.installed, self.original, files)
+            self.render(digest="0"*64)
+        files = dict(self.frozen)
+        files["direct_local_fleet_claim.py"] += b"\n# changed source\n"
+        with self.assertRaisesRegex(ValueError, "historical_v3"):
+            self.render(frozen=files)
 
     def test_missing_extra_and_already_modified_controller_refused(self):
-        for name in ("direct_local_replay_admission.py",
-                     "direct_local_signed_split_manual.py"):
-            with self.subTest(name=name):
-                f = dict(self.frozen)
-                f.pop(name)
-                with self.assertRaisesRegex(ValueError, "incomplete"):
-                    c.render(self.installed, self.original, f)
-        f = dict(self.frozen)
-        f["unexpected.py"] = b"oops"
+        files = dict(self.frozen)
+        files.pop("direct_local_signed_split_manual.py")
         with self.assertRaisesRegex(ValueError, "incomplete"):
-            c.render(self.installed, self.original, f)
+            self.render(frozen=files)
+        files = dict(self.frozen)
+        files["unexpected.py"] = b"oops"
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            self.render(frozen=files)
+        with self.assertRaisesRegex(ValueError, "successor_source_sha"):
+            self.render(source_sha="HEAD")
+        with self.assertRaisesRegex(ValueError, "successor_git_verification"):
+            self.render(source_sha="0"*40)
         self.assertNotEqual(self.render()["candidate_sha256"], self.original)
 
     def test_source_ref_blocks_fake_main_or_pr_provider_route(self):

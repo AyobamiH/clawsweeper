@@ -366,8 +366,10 @@ def _canonical_owner_directory(value: str) -> str:
     return value
 
 
-def read_split_source_release(file: Path) -> dict:
-    """Read a private, explicit TWO-source release; never upgrade a v1/v2 file."""
+def read_split_source_release(file: Path, *, expected_ref: str | None = None) -> dict:
+    """Read an explicit two-source release, optionally bound to a specific ref."""
+    if expected_ref not in (None, "develop", "main"):
+        raise RuntimeError("unapproved_split_source_reference")
     try:
         doc = json.loads(_owned_file(Path(file)), object_pairs_hook=unique_keys)
     except (ValueError, UnicodeError, TypeError) as exc:
@@ -375,7 +377,8 @@ def read_split_source_release(file: Path) -> dict:
     if (not isinstance(doc, dict) or set(doc) != SPLIT_SOURCE_FIELDS
             or doc["schema"] != SPLIT_SOURCE_SCHEMA
             or doc["repo"] != "AyobamiH/clawsweeper"
-            or doc["execution_ref"] != "develop"
+            or doc["execution_ref"] not in ("develop", "main")
+            or (expected_ref is not None and doc["execution_ref"] != expected_ref)
             or any(not isinstance(doc[k], str) or not SHA40.fullmatch(doc[k])
                    for k in ("implementation_commit", "execution_commit"))
             or not isinstance(doc["sha256"], dict)
@@ -406,7 +409,8 @@ def _trusted_exact_clean_head(directory: Path, expected_sha: str) -> None:
         raise RuntimeError("split_execution_source_not_exact_clean_head")
 
 
-def verify_split_source_release(doc: dict, *, enrolled_sha: str) -> None:
+def verify_split_source_release(doc: dict, *, enrolled_sha: str,
+                                expected_ref: str | None = None) -> None:
     """Bind signed implementation and isolated CI checkout to ONE enrolled SHA.
 
     This read-only gate cannot install a release or admit a job. The caller
@@ -414,6 +418,9 @@ def verify_split_source_release(doc: dict, *, enrolled_sha: str) -> None:
     """
     if (not isinstance(doc, dict) or set(doc) != SPLIT_SOURCE_FIELDS
             or doc.get("schema") != SPLIT_SOURCE_SCHEMA
+            or expected_ref not in (None, "develop", "main")
+            or doc.get("execution_ref") not in ("develop", "main")
+            or (expected_ref is not None and doc.get("execution_ref") != expected_ref)
             or not isinstance(enrolled_sha, str)
             or not SHA40.fullmatch(enrolled_sha)
             or doc.get("execution_commit") != enrolled_sha):
@@ -455,7 +462,10 @@ def verify_split_source_release(doc: dict, *, enrolled_sha: str) -> None:
         if (policy["repositories"]["AyobamiH/clawsweeper"]["enrolled_head"]
                 != enrolled_sha or
                 policy["execution_hosts"]["AyobamiH/clawsweeper"]
-                != os.uname().nodename):
+                != os.uname().nodename
+                or (doc["execution_ref"] == "main"
+                    and policy["repositories"]["AyobamiH/clawsweeper"].get("branch")
+                    != "main")):
             raise RuntimeError("split_source_not_enrolled_in_live_policy")
     except (ValueError, TypeError, KeyError, UnicodeError) as exc:
         raise RuntimeError("unreadable_split_source_fleet_policy") from exc

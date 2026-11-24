@@ -108,10 +108,29 @@ class SplitExecutionReleaseTests(unittest.TestCase):
         hook = release.load_released_ingress(self.file)
         self.doc["execution_ref"] = "main"
         self.save()
-        with self.assertRaisesRegex(RuntimeError, "identity"):
+        with self.assertRaisesRegex(RuntimeError, "revoked_or_changed"):
             hook()
         self.assertEqual(sorted(p.name for p in self.fleet.iterdir()),
                          ["fleet-policy.json"])
+
+    def test_main_bound_replay_does_not_accept_legacy_develop_descriptor(self):
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            release.read_split_source_release(self.file, expected_ref="main")
+        with self.assertRaisesRegex(RuntimeError, "not_enrolled"):
+            release.verify_split_source_release(self.doc, enrolled_sha=self.target_head,
+                                                expected_ref="main")
+        self.doc["execution_ref"] = "main"
+        self.save()
+        doc = release.read_split_source_release(self.file, expected_ref="main")
+        with self.assertRaisesRegex(RuntimeError, "not_enrolled_in_live_policy"):
+            release.verify_split_source_release(doc, enrolled_sha=self.target_head,
+                                                expected_ref="main")
+        self.policy["repositories"]["AyobamiH/clawsweeper"]["branch"] = "main"
+        self.save_policy()
+        release.verify_split_source_release(doc, enrolled_sha=self.target_head,
+                                            expected_ref="main")
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            release.read_split_source_release(self.file, expected_ref="develop")
 
     def test_production_entrypoint_does_not_accept_an_injected_claim(self):
         with self.assertRaises(TypeError):

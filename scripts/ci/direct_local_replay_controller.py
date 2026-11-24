@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
+from pathlib import Path
 import re
+import subprocess
+
+import direct_local_manual_auth as auth
+import direct_local_receiver_integration as source_release
 
 import direct_local_offline_replay_suite as replay_suite
 import direct_local_split_policy_gate as split_gate
@@ -19,6 +25,13 @@ REPLAY_LIB = (
     "direct_local_offline_replay_suite.py",
     "direct_local_offline_replay.py",
 )
+OWNER_FINGERPRINT = "SHA256:h+NSfpBiTBgfCZbTf+lB237kCxYfhdLBE0f8cqXXLNU"
+HISTORICAL_LIB = frozenset({
+    "direct_local_signed_split_manual.py", "direct_local_manual_auth.py",
+    "direct_local_distinct_admission.py", "direct_local_fleet_claim.py",
+    "direct_local_event_admission.py", "direct_local_workflow.py",
+    "direct_local_receiver_integration.py", "estate_policy.py",
+})
 REF = "local-manual-replay"
 SUITE = replay_suite.SUITE
 REPO = "AyobamiH/clawsweeper"
@@ -41,17 +54,63 @@ def _old_map(source: str) -> dict[str, str]:
     if len(hits) != 1:
         raise ValueError("replay_untrusted_existing_module_hashes")
     hashes = ast.literal_eval(hits[0])
-    if (not isinstance(hashes, dict) or len(hashes) != 8
-            or "direct_local_signed_split_manual.py" not in hashes
-            or "direct_local_receiver_integration.py" not in hashes
-            or any(not re.fullmatch("[a-f0-9]{64}", value)
+    if (not isinstance(hashes, dict) or set(hashes) != HISTORICAL_LIB
+            or any(not isinstance(value, str) or not re.fullmatch("[a-f0-9]{64}", value)
                    for value in hashes.values())):
         raise ValueError("replay_untrusted_existing_v3_closure")
     return hashes
 
 
+def _signed_source_closure(root: Path, commit: str) -> dict[str, bytes]:
+    """Read the successor from immutable, owner-signed Git objects."""
+    if not isinstance(commit, str) or not re.fullmatch("[a-f0-9]{40}", commit):
+        raise ValueError("replay_invalid_successor_source_sha")
+    root = Path(root)
+    if (not root.is_absolute() or root.is_symlink() or not root.is_dir()
+            or root.stat().st_uid != os.getuid()
+            or root.stat().st_mode & 0o022):
+        raise ValueError("replay_untrusted_successor_source_root")
+    signers = auth.owner_allowed_signers()
+    auth.owner_bytes(signers, 8192, private=False)
+    env = dict(source_release.trusted_git_env(), GIT_NO_REPLACE_OBJECTS="1")
+    args = [source_release.trusted_git_source(), "-C", str(root),
+            "-c", "core.fsmonitor=false", "-c", "gpg.format=ssh",
+            "-c", "gpg.ssh.program=/usr/bin/ssh-keygen",
+            "-c", "gpg.ssh.allowedSignersFile=" + str(signers),
+            "-c", "gpg.minTrustLevel=fully"]
+
+    def read(*command: str) -> bytes:
+        try:
+            result = subprocess.run(args + list(command), env=env,
+                                    capture_output=True, timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("replay_successor_git_unavailable") from exc
+        if result.returncode:
+            raise ValueError("replay_successor_git_verification_failed")
+        return result.stdout
+
+    identity = read("show", "-s", "--no-show-signature",
+                    "--format=%H%n%G?%n%GF", commit).decode().splitlines()
+    if identity != [commit, "G", OWNER_FINGERPRINT]:
+        raise ValueError("replay_successor_source_signature_untrusted")
+    files = {}
+    for name in sorted(HISTORICAL_LIB | set(REPLAY_LIB)):
+        path = "scripts/ci/" + name
+        meta = read("ls-tree", "-z", commit, "--", path)
+        if not re.fullmatch(rb"100(?:644|755) blob [a-f0-9]{40}\t"
+                            + re.escape(path.encode()) + rb"\x00", meta):
+            raise ValueError("replay_successor_source_not_regular_blob:" + name)
+        raw = read("cat-file", "blob", commit + ":" + path)
+        if not 0 < len(raw) <= 262144:
+            raise ValueError("replay_successor_source_size_invalid:" + name)
+        ast.parse(raw, filename=name)
+        files[name] = raw
+    return files
+
+
 def render(installed: bytes, expected_sha256: str,
-           frozen_sources: dict[str, bytes]) -> dict:
+           installed_sources: dict[str, bytes], *, source_root: Path,
+           source_sha: str) -> dict:
     if (not isinstance(installed, bytes)
             or not re.fullmatch("[a-f0-9]{64}", expected_sha256)
             or _sha(installed) != expected_sha256):
@@ -59,16 +118,17 @@ def render(installed: bytes, expected_sha256: str,
     source = installed.decode("utf-8")
     ast.parse(source)
     former = _old_map(source)
-    if set(frozen_sources) != set(former) | set(REPLAY_LIB):
-        raise ValueError("replay_incomplete_or_unreviewed_source_closure")
-    if any(not isinstance(raw, bytes) or not raw
-           for raw in frozen_sources.values()):
-        raise ValueError("replay_missing_frozen_source")
-    if any(_sha(frozen_sources[name]) != expected
+    if not isinstance(installed_sources, dict) or set(installed_sources) != set(former):
+        raise ValueError("replay_incomplete_or_unreviewed_installed_closure")
+    if any(not isinstance(raw, bytes) or not raw for raw in installed_sources.values()):
+        raise ValueError("replay_missing_installed_source")
+    if any(_sha(installed_sources[name]) != expected
            for name, expected in former.items()):
         raise ValueError("replay_historical_v3_closure_changed")
-    updated = {**former, **{name: _sha(frozen_sources[name])
-                            for name in REPLAY_LIB}}
+    # Preserve old bytes as rollback. Derive all proposed bytes from one
+    # independently verified signed source, never caller-provided hashes.
+    frozen_sources = _signed_source_closure(source_root, source_sha)
+    updated = {name: _sha(frozen_sources[name]) for name in sorted(frozen_sources)}
     source = _once(source, "_MANUAL_HASHES = " + repr(former),
                    "_MANUAL_HASHES = " + repr(updated))
     source = _once(
@@ -175,6 +235,11 @@ def render(installed: bytes, expected_sha256: str,
         "        if (HOST != 'web' or not a.signed_local_request\n"
         "                or not a.signed_local_request_signature):\n"
         "            raise RuntimeError('replay_requires_web_signed_files')\n"
+        "        _replay_hold_db = setup()\n"
+        "        try:\n"
+        "            repo_integrity.require_unheld(_replay_hold_db, _MANUAL_REPO)\n"
+        "        finally:\n"
+        "            _replay_hold_db.close()\n"
         "        result = _signed_replay_claim_entry(\n"
         "            a.signed_local_request, a.signed_local_request_signature)\n"
         "        print(json.dumps({'replay_existing_fleet_claim':result},sort_keys=True))\n"
@@ -207,6 +272,9 @@ def render(installed: bytes, expected_sha256: str,
         "installed_sha256": expected_sha256,
         "candidate_sha256": _sha(source.encode()),
         "frozen_hashes": updated,
+        "source_sha": source_sha,
+        "historical_frozen_hashes": former,
+        "frozen_sources": frozen_sources,
         "controller": source.encode(),
         "extra_frozen_files": list(REPLAY_LIB),
         "worker_uses_existing_queue": True,
@@ -232,8 +300,8 @@ def _verified_replay_proof(job):
         "import direct_local_replay_admission as a;"
         "import direct_local_receiver_integration as v;"
         "r=pathlib.Path(sys.argv[4]);"
-        "d=v.read_split_source_release(r);"
-        "v.verify_split_source_release(d,enrolled_sha=sys.argv[5]);"
+        "d=v.read_split_source_release(r,expected_ref='main');"
+        "v.verify_split_source_release(d,enrolled_sha=sys.argv[5],expected_ref='main');"
         "p=a.verify_existing_replay(checkout=pathlib.Path(d['execution_checkout']),"
         "fleet_root=pathlib.Path(sys.argv[2]),job_id=sys.argv[3]);"
         "print(json.dumps(p,sort_keys=True))"
@@ -280,11 +348,12 @@ def _signed_replay_claim_entry(request_file,signature_file):
         "import direct_local_replay_admission as a;"
         "import direct_local_receiver_integration as v;"
         "r=pathlib.Path(sys.argv[4]);"
-        "d=v.read_split_source_release(r);"
+        "d=v.read_split_source_release(r,expected_ref='main');"
         "p=json.loads(a.auth.owner_bytes(pathlib.Path(sys.argv[5]),"
         "262144,private=False));"
         "v.verify_split_source_release(d,"
-        "enrolled_sha=p['repositories']['AyobamiH/clawsweeper']['enrolled_head']);"
+        "enrolled_sha=p['repositories']['AyobamiH/clawsweeper']['enrolled_head'],"
+        "expected_ref='main');"
         "q=a.claim_owner_signed_replay("
         "checkout=pathlib.Path(d['execution_checkout']),"
         "fleet_root=pathlib.Path(sys.argv[6]),"

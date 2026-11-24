@@ -13,13 +13,6 @@ from estate_policy import Hold
 
 
 def policy():
-    established = {
-        "image": adapter.PINNED_IMAGE, "node": "24", "cpus": 4,
-        "memory_mib": 3072, "writable_mib": 4096,
-        "pids": 512,
-        "execution_environment_revision": adapter.ENV_REVISION,
-        "steps": [],
-    }
     return {
         "execution_hosts": {mapping.REPO: "web"},
         "repositories": {mapping.REPO: {
@@ -27,8 +20,8 @@ def policy():
             "contract": mapping.sha256(ROOT / ".github/workflows/ci.yml"),
             "enrolled_head": "9" * 40,
             "suites": {
-                "linux-node24-claw-check": copy.deepcopy(established),
-                "linux-node24-claw-sparse": copy.deepcopy(established),
+                suite: mapping.split_suite_spec(definition)
+                for definition, (suite, _) in mapping.SPLIT.items()
             },
         }},
     }
@@ -76,6 +69,8 @@ class OfflineReplaySuiteTests(unittest.TestCase):
                 "linux-node24-claw-sparse"].update({"memory_mib": 1024}),
             lambda p: p["repositories"][mapping.REPO]["suites"][
                 "linux-node24-claw-check"].update({"execution_environment_revision": "unknown"}),
+            lambda p: p["repositories"][mapping.REPO]["suites"][
+                "linux-node24-claw-check"]["steps"][0].update({"timeout": 1}),
         ]
         for mutate in modifications:
             with self.subTest(mutate=repr(mutate)):

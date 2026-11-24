@@ -71,17 +71,8 @@ def prepare(root: Path, installed_policy: dict) -> dict:
     existing = repo.get("suites")
     hold(isinstance(existing, dict) and SUITE not in existing,
          "replay_suite_already_installed_or_untrusted")
-    check = existing.get("linux-node24-claw-check")
-    sparse = existing.get("linux-node24-claw-sparse")
-    required = {
-        "image": PINNED_IMAGE, "node": "24", "cpus": 4,
-        "memory_mib": 3072, "writable_mib": 4096,
-        "pids": 512, "execution_environment_revision": ENV_REVISION,
-    }
-    for established in (check, sparse):
-        hold(isinstance(established, dict) and all(
-            established.get(key) == expected for key, expected in required.items()),
-            "replay_existing_signed_sandbox_profile_drift")
+    for definition in estate.SPLIT:
+        estate.validate_split_suite(installed_policy, definition)
     hold(sum(timeout for _, _, timeout in STEPS) <= MAX_WORKFLOW_SECONDS - 120,
          "replay_step_deadlines_exceed_workflow_budget")
     suite = {
