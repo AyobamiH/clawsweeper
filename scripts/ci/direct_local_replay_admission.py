@@ -78,7 +78,7 @@ def _review_runtime(checkout: Path, policy: dict, source_sha: str) -> str:
     proposed = suite.prepare(checkout, staging)
     if proposed["candidate_source_sha"] != source_sha:
         raise Hold("replay_checkout_not_exact_enrolled_main")
-    if installed[SUITE] != proposed["suite"]:
+    if not estate.exact_suite_matches(installed[SUITE], proposed["suite"]):
         raise Hold("replay_installed_suite_differs_from_review")
     return _policy_hash(policy)
 

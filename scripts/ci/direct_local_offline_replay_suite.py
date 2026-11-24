@@ -49,6 +49,19 @@ def source_clean(root: Path) -> None:
     hold(not result.stdout, "replay_source_has_uncommitted_changes")
 
 
+def replay_suite_spec() -> dict:
+    """Single exact reviewed third-job execution profile."""
+    return {
+        "node": "24", "image": PINNED_IMAGE,
+        "execution_environment_revision": ENV_REVISION,
+        "cpus": 1, "memory_mib": 1536, "pids": 256, "writable_mib": 1536,
+        "steps": [
+            {"name": name, "command": command, "timeout": timeout}
+            for name, command, timeout in STEPS
+        ],
+    }
+
+
 def prepare(root: Path, installed_policy: dict) -> dict:
     """Review an additional suite without altering signed installed policy."""
     root = root.resolve(strict=True)
@@ -75,15 +88,7 @@ def prepare(root: Path, installed_policy: dict) -> dict:
         estate.validate_split_suite(installed_policy, definition)
     hold(sum(timeout for _, _, timeout in STEPS) <= MAX_WORKFLOW_SECONDS - 120,
          "replay_step_deadlines_exceed_workflow_budget")
-    suite = {
-        "node": "24", "image": PINNED_IMAGE,
-        "execution_environment_revision": ENV_REVISION,
-        "cpus": 1, "memory_mib": 1536, "pids": 256, "writable_mib": 1536,
-        "steps": [
-            {"name": name, "command": command, "timeout": timeout}
-            for name, command, timeout in STEPS
-        ],
-    }
+    suite = replay_suite_spec()
     payload = json.dumps(suite, sort_keys=True, separators=(",", ":")).encode()
     return {
         "schema": "clawsweeper.offline-replay-suite-staging.v1",

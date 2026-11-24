@@ -147,18 +147,11 @@ def render(installed: bytes, expected_sha256: str,
         "(name in _dl_names or name == 'linux-node24-claw-replay')):")
     needle = "            if suite['node'] not in ('20','22','24'):"
     extra = """            if repo == 'AyobamiH/clawsweeper' and name == 'linux-node24-claw-replay':
-                if (set(suite) != {'node', 'image', 'cpus', 'memory_mib',
-                                   'pids', 'writable_mib', 'execution_environment_revision',
-                                   'steps'}
-                        or suite.get('node') != '24'
-                        or suite.get('image') != 'sha256:dc7e982df33f88146add5c0f00907c355777ca06f0fc56b568c5c9f9a7ce35e2'
-                        or suite.get('execution_environment_revision') != 'web-docker-v7-dual-path-pnpm-jq'
-                        or tuple(suite.get(k) for k in ('cpus','memory_mib','writable_mib','pids'))
-                           != (1,1536,1536,256)
-                        or suite.get('steps') != """ + repr([
-                            {"name": name, "command": cmd, "timeout": timeout}
-                            for name, cmd, timeout in replay_suite.STEPS
-                        ]) + """):
+                _replay_expected = """ + repr(replay_suite.replay_suite_spec()) + """
+                if (not isinstance(suite, dict) or set(suite) != set(_replay_expected)
+                        or any(type(suite[k]) is not type(v) or suite[k] != v
+                               for k, v in _replay_expected.items())
+                        or any(type(step['timeout']) is not int for step in suite['steps'])):
                     raise RuntimeError('unreviewed_clawsweeper_third_replay_policy')
 """
     source = _once(source, needle, extra + needle)

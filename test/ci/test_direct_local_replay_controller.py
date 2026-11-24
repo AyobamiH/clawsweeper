@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 from pathlib import Path
 import sys
@@ -124,6 +125,29 @@ class ReplayControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "successor_git_verification"):
             self.render(source_sha="0"*40)
         self.assertNotEqual(self.render()["candidate_sha256"], self.original)
+
+    def test_candidate_policy_gate_rejects_numeric_aliases(self):
+        tree = ast.parse(self.render()["controller"])
+        fn = self.function(tree, "load_policy")
+        gates = [node for node in ast.walk(fn) if isinstance(node, ast.If)
+                 and "unreviewed_clawsweeper_third_replay_policy" in ast.unparse(node)
+                 and ast.unparse(node.test) ==
+                     "repo == 'AyobamiH/clawsweeper' and name == 'linux-node24-claw-replay'"]
+        self.assertEqual(len(gates), 1)
+        compiled = compile(ast.Module(body=gates, type_ignores=[]), "<candidate-replay-gate>", "exec")
+        expected = c.replay_suite.replay_suite_spec()
+        def check(profile):
+            exec(compiled, {"repo": c.REPO, "name": c.SUITE, "suite": profile})
+        check(expected)
+        for mutate in (
+                lambda p: p.update(cpus=True),
+                lambda p: p.update(memory_mib=1536.0),
+                lambda p: p["steps"][0].update(timeout=120.0),
+                lambda p: p["steps"][0].update(timeout=True)):
+            altered = copy.deepcopy(expected)
+            mutate(altered)
+            with self.assertRaisesRegex(RuntimeError, "third_replay_policy"):
+                check(altered)
 
     def test_source_ref_blocks_fake_main_or_pr_provider_route(self):
         tree = ast.parse(self.render()["controller"])

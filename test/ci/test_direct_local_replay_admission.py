@@ -224,6 +224,10 @@ class ReplayAdmissionTests(unittest.TestCase):
                 ["steps"][2].update({"command": "echo pretend"}),
             lambda p: p["repositories"][a.REPO]["suites"][a.SUITE]
                 .update({"memory_mib": 9999}),
+            lambda p: p["repositories"][a.REPO]["suites"][a.SUITE]
+                .update({"cpus": True}),
+            lambda p: p["repositories"][a.REPO]["suites"][a.SUITE]
+                ["steps"][0].update({"timeout": 120.0}),
         ):
             with self.subTest(mutate=repr(mutate)):
                 current = copy.deepcopy(self.policy)
