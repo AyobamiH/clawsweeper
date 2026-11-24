@@ -27,23 +27,29 @@ class DistinctExistingFleetAdmissionTests(unittest.TestCase):
         self.head = router.git_head(ROOT)
         self.secret = b"bounded-signature-fixture-" * 3
         profile = {
-            "node": "24", "image": "sha256:" + "a" * 64,
+            "node": "24",
+            "image": "sha256:dc7e982df33f88146add5c0f00907c355777ca06f0fc56b568c5c9f9a7ce35e2",
             "cpus": 4, "memory_mib": 3072, "pids": 512,
-            "writable_mib": 4096, "execution_environment_revision": "reviewed-local-test",
+            "writable_mib": 4096,
+            "execution_environment_revision": "web-docker-v7-dual-path-pnpm-jq",
+        }
+        deadlines = {
+            "Workflow semantic validation": 900,
+            "Pinned pnpm dependency install": 900,
+            "Full repository validation": 1500,
+            "Sparse repair checkout smoke": 600,
         }
         base = {**profile, "steps": [
-            {"name": n, "command": c, "timeout": 600}
+            {"name": n, "command": c, "timeout": deadlines[n]}
             for n, c in [*split.SETUP,
                          (split.TERMINAL_NAME[".github/workflows/ci.yml#check"], "pnpm run check"),
                          (split.TERMINAL_NAME[".github/workflows/ci.yml#sparse-repair-builds"],
                           "pnpm run test:workflow-sparse-checkout")]]}
         suites = {"linux-node24": base}
         for name, (suite, final) in split.SPLIT.items():
-            suites[suite] = {
-                **profile, "steps": [
-                    {"name": n, "command": c, "timeout": 600}
-                    for n, c in [*split.SETUP, (split.TERMINAL_NAME[name], final)]
-                ]}
+            suites[suite] = {**profile, "steps": [
+                {"name": n, "command": c, "timeout": deadlines[n]}
+                for n, c in [*split.SETUP, (split.TERMINAL_NAME[name], final)]]}
         self.policy = {
             "version": 4, "image": "sha256:" + "b" * 64,
             "node_versions": {"24": "/ci-tools/node24/bin/node"},
@@ -348,6 +354,26 @@ class DistinctExistingFleetAdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(Hold, "command_contract_drift"):
             self.claim()
         self.assertEqual(self.rows(), [])
+
+    def test_exact_image_revision_timeout_and_resource_drift_rejected(self):
+        original = copy.deepcopy(self.policy)
+        for kind in ("image", "revision", "timeout", "resource"):
+            with self.subTest(kind=kind):
+                self.policy = copy.deepcopy(original)
+                suites = self.policy["repositories"][router.REPO]["suites"]
+                for profile in suites.values():
+                    if kind == "image":
+                        profile["image"] = "sha256:" + "f" * 64
+                    elif kind == "revision":
+                        profile["execution_environment_revision"] = "unreviewed"
+                    elif kind == "timeout":
+                        profile["steps"][0]["timeout"] = 1
+                    else:
+                        profile["cpus"] = 4.0
+                self.write_policy()
+                with self.assertRaises(Hold):
+                    self.claim()
+                self.assertEqual(self.rows(), [])
 
     def test_recycled_delivery_id_changed_signed_payload_holds(self):
         self.claim()

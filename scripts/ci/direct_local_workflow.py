@@ -45,10 +45,45 @@ TERMINAL_NAME = {
     ".github/workflows/ci.yml#check": "Full repository validation",
     ".github/workflows/ci.yml#sparse-repair-builds": "Sparse repair checkout smoke",
 }
-# Maximum reviewed ordinary container profile (not a host RAM/disk gate).
-# The signed fleet release remains the authority for the exact image/profile.
+# Exact reviewed ordinary sandbox profile, independent of host resource limits.
 PROFILE_LIMITS = {"cpus": 4, "memory_mib": 3072, "pids": 512, "writable_mib": 4096}
 PROFILE_FIELDS = ("node", "image", *PROFILE_LIMITS, "execution_environment_revision")
+PROFILE = {
+    "node": "24",
+    "image": "sha256:dc7e982df33f88146add5c0f00907c355777ca06f0fc56b568c5c9f9a7ce35e2",
+    **PROFILE_LIMITS,
+    "execution_environment_revision": "web-docker-v7-dual-path-pnpm-jq",
+}
+STEP_TIMEOUTS = {
+    "Workflow semantic validation": 900,
+    "Pinned pnpm dependency install": 900,
+    "Full repository validation": 1500,
+    "Sparse repair checkout smoke": 600,
+}
+
+
+def split_suite_spec(definition: str) -> dict:
+    """Return the exact reviewed suite, not execution authority."""
+    _, final = SPLIT[definition]
+    steps = (*SETUP, (TERMINAL_NAME[definition], final))
+    return {**PROFILE, "steps": [
+        {"name": name, "command": command, "timeout": STEP_TIMEOUTS[name]}
+        for name, command in steps
+    ]}
+
+
+def aggregate_suite_spec() -> dict:
+    """Historical aggregate profile, never a distinct execution."""
+    check, sparse = (split_suite_spec(key) for key in SPLIT)
+    return {**check, "steps": check["steps"] + sparse["steps"][-1:]}
+
+
+def exact_suite_matches(actual: object, expected: dict) -> bool:
+    return (isinstance(actual, dict) and set(actual) == set(expected)
+            and all(type(actual[k]) is type(v) and actual[k] == v
+                    for k, v in expected.items())
+            and all(type(step["timeout"]) is int for step in actual["steps"]))
+
 
 EXPECTED_CLASS_COUNTS = {
     "ordinary": 2,
@@ -205,37 +240,22 @@ def fleet_contract(policy: dict | None, *, source_digest: str, commit: str,
 
 
 def validate_split_suite(policy: dict, definition: str) -> dict:
-    """Validate one independently enrolled suite, never require an aggregate.
-
-    The caller still needs authenticated exact policy/controller installation;
-    these bounded profiles cannot grant execution authority or expand capacity.
-    """
-    suite, final = SPLIT[definition]
-    spec = policy["repositories"][REPO]["suites"].get(suite)
+    """Validate one independently enrolled suite against its exact contract."""
+    suite, _ = SPLIT[definition]
+    suites = policy["repositories"][REPO]["suites"]
+    spec = suites.get(suite)
     if not isinstance(spec, dict):
         raise Hold("independent_definition_fleet_suite_not_installed")
-    if (set(spec) != {*PROFILE_FIELDS, "steps"}
-            or spec.get("node") != "24"
-            or not isinstance(spec.get("image"), str)
-            or not spec["image"].startswith("sha256:")
-            or not HEX64.fullmatch(spec["image"][7:])
-            or any(type(spec.get(field)) is not int
-                   or not 1 <= spec[field] <= maximum
-                   for field, maximum in PROFILE_LIMITS.items())
-            or not isinstance(spec.get("execution_environment_revision"), str)
-            or not spec["execution_environment_revision"]):
+    expected = split_suite_spec(definition)
+    if (set(spec) != set(expected)
+            or any(type(spec.get(field)) is not type(expected[field])
+                   or spec[field] != expected[field] for field in PROFILE_FIELDS)):
         raise Hold("independent_definition_resource_or_image_drift")
-    expected = (*SETUP, (TERMINAL_NAME[definition], final))
-    steps = spec.get("steps")
-    if (not isinstance(steps, list) or len(steps) != len(expected)
-            or any(not isinstance(step, dict)
-                   or set(step) != {"name", "command", "timeout"}
-                   or step.get("name") != name
-                   or step.get("command") != command
-                   or type(step.get("timeout")) is not int
-                   or not 1 <= step["timeout"] <= 1800
-                   for step, (name, command) in zip(steps, expected))):
+    if not exact_suite_matches(spec, expected):
         raise Hold("independent_definition_command_contract_drift")
+    if "linux-node24" in suites and not exact_suite_matches(
+            suites["linux-node24"], aggregate_suite_spec()):
+        raise Hold("unreviewed_historical_aggregate_profile")
     return spec
 
 

@@ -72,6 +72,12 @@ class ReplayControllerTests(unittest.TestCase):
         ):
             self.assertTrue(expected in candidate, expected)
 
+    def test_successor_replaces_historical_gate_with_exact_source_contract(self):
+        candidate = self.render()["controller"].decode()
+        self.assertIn("Source-bound ClawSweeper split-suite validation v2", candidate)
+        self.assertNotIn("Source-bound ClawSweeper split-suite validation v1", candidate)
+        self.assertIn("Unreviewed ClawSweeper historical aggregate", candidate)
+
     def test_same_source_and_policy_renders_deterministically(self):
         self.assertEqual(self.render()["candidate_sha256"],
                          self.render()["candidate_sha256"])

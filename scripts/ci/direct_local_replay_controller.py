@@ -11,6 +11,7 @@ import hashlib
 import re
 
 import direct_local_offline_replay_suite as replay_suite
+import direct_local_split_policy_gate as split_gate
 
 REPLAY_LIB = (
     "direct_local_replay_admission.py",
@@ -75,7 +76,10 @@ def render(installed: bytes, expected_sha256: str,
         "ALLOWED_WORKFLOW_PATHS = frozenset({",
         "ALLOWED_WORKFLOW_PATHS = frozenset({'.github/workflows/release-offline-replay.yml', "
     )
-    # v3 two-suite rule is untouched. A distinct explicit third rule applies.
+    # Reconcile the old exact gate with the canonical source contract before
+    # adding the third suite. This is a source-only successor, never a hot edit.
+    source = _once(source, split_gate.LEGACY_REPLACEMENT, split_gate.REPLACEMENT)
+    # A distinct explicit third rule applies.
     source = _once(
         source,
         "repo == 'AyobamiH/clawsweeper' and name in _dl_names):",
