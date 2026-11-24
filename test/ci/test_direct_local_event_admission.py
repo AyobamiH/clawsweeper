@@ -34,7 +34,7 @@ class SignedLocalEventTests(unittest.TestCase):
                 }},
             }},
         }
-        cls.plan = router.compile_plan(ROOT, cls.policy, commit=cls.head, hostname="web")
+        cls.plan = router.compile_plan(ROOT, cls.policy, commit=cls.head, hostname="web", legacy_aggregate=True)
 
     def setUp(self):
         self.secret = b"a" * 32
@@ -67,7 +67,8 @@ class SignedLocalEventTests(unittest.TestCase):
             self.plan if plan is None else plan, body=body, event_name=event,
             signature=signature,
             delivery_id=delivery or "01234567-89ab-cdef-0123-456789abcdef",
-            secret=secret, fresh_ref_sha=ref_sha or self.head)
+            secret=secret, fresh_ref_sha=ref_sha or self.head,
+            legacy_aggregate=True)
 
     def test_exact_main_push_routes_check_only_without_execution(self):
         result = self.route()

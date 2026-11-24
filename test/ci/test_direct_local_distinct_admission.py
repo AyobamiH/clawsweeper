@@ -106,6 +106,107 @@ class DistinctExistingFleetAdmissionTests(unittest.TestCase):
             checkout=ROOT, policy=self.policy if policy is None else policy,
             commit=self.head, hostname=os.uname().nodename)
 
+    def test_default_router_distinct_and_no_aggregate_dependency(self):
+        cfg = self.policy["repositories"][router.REPO]["suites"]
+        del cfg["linux-node24"]
+        self.write_policy()
+        plan = router.compile_plan(ROOT, self.policy, commit=self.head,
+                                   hostname=os.uname().nodename)
+        self.assertEqual(plan["summary"]["mapped_to_existing_fleet"], 2)
+        self.assertEqual({j["key"]: j["suite"] for j in plan["jobs"]
+                          if j["route"] == "existing-local-fleet"},
+                         {key: suite for key, (suite, _) in split.SPLIT.items()})
+        self.assertEqual(len(self.claim()["jobs"]), 2)
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_aggregate_only_is_migration_preimage_not_default_route(self):
+        cfg = self.policy["repositories"][router.REPO]["suites"]
+        for name, _ in split.SPLIT.values():
+            del cfg[name]
+        plan = router.compile_plan(ROOT, self.policy, commit=self.head,
+                                   hostname=os.uname().nodename)
+        self.assertEqual(plan["summary"]["mapped_to_existing_fleet"], 0)
+        self.assertEqual(len(self.proposal()["suites"]), 2)
+        self.assertEqual(self.rows(), [])
+
+    def test_one_bad_suite_does_not_poison_sibling_or_allow_atomic_pr(self):
+        cfg = self.policy["repositories"][router.REPO]["suites"]
+        cfg["linux-node24-claw-sparse"]["memory_mib"] = 4096
+        self.write_policy()
+        plan = router.compile_plan(ROOT, self.policy, commit=self.head,
+                                   hostname=os.uname().nodename)
+        self.assertEqual(plan["summary"]["mapped_to_existing_fleet"], 1)
+        self.assertEqual([j["suite"] for j in plan["jobs"]
+                          if j["route"] == "existing-local-fleet"],
+                         ["linux-node24-claw-check"])
+        with self.assertRaisesRegex(Hold, "resource_or_image_drift"):
+            self.claim()
+        self.assertEqual(self.rows(), [])
+
+    def test_main_push_can_claim_valid_check_when_sparse_held(self):
+        cfg = self.policy["repositories"][router.REPO]["suites"]
+        del cfg["linux-node24-claw-sparse"]
+        self.write_policy()
+        event = {
+            "repository": {"full_name": router.REPO},
+            "ref": "refs/heads/main", "after": self.head,
+            "deleted": False, "forced": False,
+            "size": 1, "distinct_size": 1,
+            "commits": [{"id": self.head, "added": [], "removed": [],
+                         "modified": ["src/clawsweeper.ts"]}],
+            "head_commit": {"id": self.head},
+        }
+        result = self.claim(body_payload=event, event_name="push")
+        self.assertEqual([item["suite"] for item in result["jobs"]],
+                         ["linux-node24-claw-check"])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_legacy_claim_cannot_relabel_after_split_policy_rollback(self):
+        self.claim()
+        cfg = self.policy["repositories"][router.REPO]["suites"]
+        for suite, _ in split.SPLIT.values():
+            del cfg[suite]
+        self.write_policy()
+        body = json.dumps(self.payload).encode()
+        signed = "sha256=" + hmac.new(self.secret, body, hashlib.sha256).hexdigest()
+        with self.assertRaisesRegex(Hold, "distinct_execution_must_not_be_relabelled"):
+            fleet.claim_existing_fleet_delivery(
+                checkout=ROOT, fleet_root=self.base, body=body,
+                event_name="pull_request", signature=signed,
+                delivery_id=self.delivery, secret=self.secret,
+                fresh_ref_sha=self.head)
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_split_intent_cannot_substitute_sibling_suite(self):
+        with self.assertRaisesRegex(Hold, "invalid_authenticated_ordinary_split_intents"):
+            split._split_policy(self.policy, [{
+                "job": ".github/workflows/ci.yml#check",
+                "suite": "linux-node24-claw-sparse",
+            }])
+        self.assertEqual(self.rows(), [])
+
+    def test_legacy_claim_is_held_when_split_profiles_present(self):
+        body = json.dumps(self.payload).encode()
+        signed = "sha256=" + hmac.new(self.secret, body, hashlib.sha256).hexdigest()
+        with self.assertRaises(Hold):
+            fleet.claim_existing_fleet_delivery(
+                checkout=ROOT, fleet_root=self.base, body=body,
+                event_name="pull_request", signature=signed,
+                delivery_id=self.delivery, secret=self.secret,
+                fresh_ref_sha=self.head)
+        self.assertEqual(self.rows(), [])
+
+    def test_historical_aggregate_delivery_key_cannot_be_reused(self):
+        legacy = "direct-local:" + hashlib.sha256(
+            (router.REPO + "\\n" + self.delivery.lower()).encode("ascii")
+        ).hexdigest()
+        with sqlite3.connect(self.base / "fleet.sqlite3") as db:
+            db.execute("INSERT INTO observations(key,value,updated_at) VALUES(?,?,?)",
+                       (legacy, "{}", "now"))
+        with self.assertRaisesRegex(Hold, "legacy_aggregate_delivery_identity_collision"):
+            self.claim()
+        self.assertEqual(self.rows(), [])
+
     def test_policy_proposal_adds_only_two_exact_isolated_suites(self):
         baseline = copy.deepcopy(self.policy)
         for name, _ in split.SPLIT.values():

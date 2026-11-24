@@ -97,10 +97,12 @@ def claim_existing_fleet_delivery(
             raise Hold("writable_existing_fleet_policy")
         policy = json.loads(policy_path.read_text())
         plan = routing.compile_plan(checkout, policy, commit=fresh_ref_sha,
-                                    hostname=os.uname().nodename)
+                                    hostname=os.uname().nodename,
+                                    legacy_aggregate=True)
         intent = events.verified_ordinary_intents(
             plan, body=body, event_name=event_name, signature=signature,
-            delivery_id=delivery_id, secret=secret, fresh_ref_sha=fresh_ref_sha)
+            delivery_id=delivery_id, secret=secret, fresh_ref_sha=fresh_ref_sha,
+            legacy_aggregate=True)
         if (not intent["intents"]
                 or {i["suite"] for i in intent["intents"]} != {SUITE}
                 or any(i["job"] not in routing.ORDINARY for i in intent["intents"])):
@@ -112,6 +114,15 @@ def claim_existing_fleet_delivery(
             _queue_schema(db)
             try:
                 db.execute("BEGIN IMMEDIATE")
+                distinct_key = "direct-local-distinct:" + hashlib.sha256(
+                    (REPO + "\n" + delivery_id.lower()).encode("ascii")).hexdigest()
+                if (db.execute("SELECT 1 FROM observations WHERE key=?",
+                               (distinct_key,)).fetchone()
+                        or db.execute(
+                            "SELECT 1 FROM jobs WHERE repo=? AND sha=? AND suite IN (?,?)",
+                            (REPO, fresh_ref_sha, *(name for name, _ in routing.SPLIT.values()))
+                        ).fetchone()):
+                    raise Hold("distinct_execution_must_not_be_relabelled")
                 # One delivery UUID has one immutable authenticated identity.
                 # The event/commit-dependent intent digest is unsuitable as the
                 # dedup key: a recycled signed UUID could otherwise claim a new

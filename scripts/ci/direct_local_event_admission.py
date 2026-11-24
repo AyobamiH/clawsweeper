@@ -10,12 +10,10 @@ import hmac
 import json
 import re
 from estate_policy import Hold
+import direct_local_workflow as router
 
-REPO = "AyobamiH/clawsweeper"
-REQUIRED_STEPS = {
-    ".github/workflows/ci.yml#check": "pnpm run check",
-    ".github/workflows/ci.yml#sparse-repair-builds": "pnpm run test:workflow-sparse-checkout",
-}
+REPO = router.REPO
+REQUIRED_STEPS = router.ORDINARY
 ORDINARY = frozenset(REQUIRED_STEPS)
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\Z")
@@ -76,7 +74,8 @@ def _ordinary_main_push_paths_proven(payload: dict, sha: str) -> None:
 
 
 def verified_ordinary_intents(plan, *, body, event_name, signature,
-                              delivery_id, secret, fresh_ref_sha):
+                              delivery_id, secret, fresh_ref_sha,
+                              legacy_aggregate=False):
     """Return authenticated SOURCE-ONLY intents; never execute or claim success.
 
     fresh_ref_sha MUST be read by the caller from a current GitHub ref/PR API
@@ -99,7 +98,9 @@ def verified_ordinary_intents(plan, *, body, event_name, signature,
     if obj(payload.get("repository")).get("full_name") != REPO:
         raise Hold("foreign_repository_event")
     if (plan.get("schema") != "clawsweeper.direct-local-plan.v1"
-            or plan.get("repo") != REPO or plan.get("source_verified") is not True):
+            or plan.get("repo") != REPO or plan.get("source_verified") is not True
+            or plan.get("routing_mode") != (
+                "legacy_aggregate" if legacy_aggregate else "distinct")):
         raise Hold("untrusted_source_plan")
     sha = plan.get("source_commit")
     if not isinstance(sha, str) or not SHA40.fullmatch(sha):
@@ -147,12 +148,20 @@ def verified_ordinary_intents(plan, *, body, event_name, signature,
     for job in jobs:
         if job.get("key") not in eligible:
             continue
+        expected_suite = ("linux-node24" if legacy_aggregate
+                          else router.SPLIT[job["key"]][0])
         if (job.get("class") != "ordinary"
                 or job.get("route") != "existing-local-fleet"
-                or job.get("suite") != "linux-node24"
+                or job.get("suite") != expected_suite
                 or job.get("execution_observed") is not False
                 or job.get("required_step") != REQUIRED_STEPS[job["key"]]):
-            raise Hold("ordinary_job_not_source_pinned")
+            reason = job.get("reason")
+            if reason not in (
+                    "independent_definition_fleet_suite_not_installed",
+                    "independent_definition_resource_or_image_drift",
+                    "independent_definition_command_contract_drift"):
+                reason = "ordinary_job_not_source_pinned"
+            raise Hold(reason)
         selected.append({"job": job["key"], "suite": job["suite"],
                          "required_step": job["required_step"]})
     if (len(selected) != len(eligible)

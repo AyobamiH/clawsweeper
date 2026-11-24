@@ -2,7 +2,7 @@
 """Read-only migration bridge: all ClawSweeper jobs -> owner-operated local CI.
 
 This is not a GitHub Actions JIT runner or a second queue. It binds the two
-ordinary validation jobs to the EXISTING pinned local-ci fleet suite, which
+ordinary validation jobs to distinct EXISTING pinned local-ci fleet suites, which
 already owns webhook/poll, SQLite admission, container isolation, retry,
 receipts and GitHub commit-status readback. Every other job stays held until
 a separate, effect-aware local adapter and real acceptance exist.
@@ -28,10 +28,28 @@ ROOT = Path(__file__).resolve().parents[2]
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 WORKFLOW_PATH = re.compile(r"\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml\Z")
-ORDINARY = {
-    ".github/workflows/ci.yml#check": "pnpm run check",
-    ".github/workflows/ci.yml#sparse-repair-builds": "pnpm run test:workflow-sparse-checkout",
+# One definition/one suite. The aggregate name is retained only for explicit
+# historical compatibility and policy migration; it is never the default route.
+SPLIT = {
+    ".github/workflows/ci.yml#check": ("linux-node24-claw-check", "pnpm run check"),
+    ".github/workflows/ci.yml#sparse-repair-builds": (
+        "linux-node24-claw-sparse", "pnpm run test:workflow-sparse-checkout"),
 }
+ORDINARY = {definition: command for definition, (_, command) in SPLIT.items()}
+SETUP = (
+    ("Workflow semantic validation",
+     """actionlint -shellcheck= -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml"""),
+    ("Pinned pnpm dependency install", "pnpm install --frozen-lockfile"),
+)
+TERMINAL_NAME = {
+    ".github/workflows/ci.yml#check": "Full repository validation",
+    ".github/workflows/ci.yml#sparse-repair-builds": "Sparse repair checkout smoke",
+}
+# Maximum reviewed ordinary container profile (not a host RAM/disk gate).
+# The signed fleet release remains the authority for the exact image/profile.
+PROFILE_LIMITS = {"cpus": 4, "memory_mib": 3072, "pids": 512, "writable_mib": 4096}
+PROFILE_FIELDS = ("node", "image", *PROFILE_LIMITS, "execution_environment_revision")
+
 EXPECTED_CLASS_COUNTS = {
     "ordinary": 2,
     "review": 5,
@@ -128,14 +146,16 @@ def dag_check(manifest: dict) -> None:
             visit(name)
 
 
-def fleet_contract(policy: dict | None, *, source_digest: str, commit: str,
-                   hostname: str) -> tuple[bool, str]:
-    """Only the existing fleet can run validation, on exact reviewed source."""
+def source_enrolment(policy: dict | None, *, source_digest: str, commit: str,
+                     hostname: str) -> tuple[bool, str]:
+    """Verify the common source and owner binding without requiring any suite."""
     if not isinstance(policy, dict):
         return False, "existing_fleet_policy_not_supplied"
-    if policy.get("execution_hosts", {}).get(REPO) != hostname:
+    hosts = policy.get("execution_hosts")
+    if not isinstance(hosts, dict) or hosts.get(REPO) != hostname:
         return False, "wrong_existing_fleet_owner_host"
-    repo = policy.get("repositories", {}).get(REPO)
+    repositories = policy.get("repositories")
+    repo = repositories.get(REPO) if isinstance(repositories, dict) else None
     if not isinstance(repo, dict):
         return False, "repository_not_enrolled_in_existing_fleet"
     if (repo.get("branch") != "main"
@@ -144,7 +164,20 @@ def fleet_contract(policy: dict | None, *, source_digest: str, commit: str,
     # This is the invariant enforced by the existing fleet's contract_at().
     if repo.get("contract") != source_digest or repo.get("enrolled_head") != commit:
         return False, "source_not_yet_pinned_in_existing_fleet"
-    suite = repo.get("suites", {}).get("linux-node24")
+    if not isinstance(repo.get("suites"), dict):
+        return False, "existing_fleet_suites_not_reviewed"
+    return True, "ready_for_existing_fleet_source_review"
+
+
+def fleet_contract(policy: dict | None, *, source_digest: str, commit: str,
+                   hostname: str) -> tuple[bool, str]:
+    """Legacy aggregate contract, only for explicit compatibility/migration."""
+    pinned, reason = source_enrolment(
+        policy, source_digest=source_digest, commit=commit, hostname=hostname)
+    if not pinned:
+        return False, reason
+    repo = policy["repositories"][REPO]
+    suite = repo["suites"].get("linux-node24")
     if not isinstance(suite, dict) or suite.get("node") != "24":
         return False, "ordinary_fleet_suite_missing_or_unpinned"
     image = suite.get("image")
@@ -171,8 +204,44 @@ def fleet_contract(policy: dict | None, *, source_digest: str, commit: str,
     return True, "ready_for_existing_fleet_admission_not_execution_proof"
 
 
+def validate_split_suite(policy: dict, definition: str) -> dict:
+    """Validate one independently enrolled suite, never require an aggregate.
+
+    The caller still needs authenticated exact policy/controller installation;
+    these bounded profiles cannot grant execution authority or expand capacity.
+    """
+    suite, final = SPLIT[definition]
+    spec = policy["repositories"][REPO]["suites"].get(suite)
+    if not isinstance(spec, dict):
+        raise Hold("independent_definition_fleet_suite_not_installed")
+    if (set(spec) != {*PROFILE_FIELDS, "steps"}
+            or spec.get("node") != "24"
+            or not isinstance(spec.get("image"), str)
+            or not spec["image"].startswith("sha256:")
+            or not HEX64.fullmatch(spec["image"][7:])
+            or any(type(spec.get(field)) is not int
+                   or not 1 <= spec[field] <= maximum
+                   for field, maximum in PROFILE_LIMITS.items())
+            or not isinstance(spec.get("execution_environment_revision"), str)
+            or not spec["execution_environment_revision"]):
+        raise Hold("independent_definition_resource_or_image_drift")
+    expected = (*SETUP, (TERMINAL_NAME[definition], final))
+    steps = spec.get("steps")
+    if (not isinstance(steps, list) or len(steps) != len(expected)
+            or any(not isinstance(step, dict)
+                   or set(step) != {"name", "command", "timeout"}
+                   or step.get("name") != name
+                   or step.get("command") != command
+                   or type(step.get("timeout")) is not int
+                   or not 1 <= step["timeout"] <= 1800
+                   for step, (name, command) in zip(steps, expected))):
+        raise Hold("independent_definition_command_contract_drift")
+    return spec
+
+
 def compile_plan(root: Path = ROOT, policy: dict | None = None,
-                 *, commit: str | None = None, hostname: str | None = None) -> dict:
+                 *, commit: str | None = None, hostname: str | None = None,
+                 legacy_aggregate: bool = False) -> dict:
     """Read-only, complete 88-job plan. 'ready' is NEVER a passing job status."""
     root = root.resolve(strict=True)
     manifest = load_manifest(root / "config/ci-workflow-estate.json")
@@ -188,9 +257,17 @@ def compile_plan(root: Path = ROOT, policy: dict | None = None,
     if not HEX40.fullmatch(head):
         raise Hold("untrusted_commit_identity")
     host = hostname or socket.gethostname()
-    pinned, reason = fleet_contract(
+    pinned, reason = source_enrolment(
         policy, source_digest=sources[".github/workflows/ci.yml"], commit=head, hostname=host
     )
+    if pinned and legacy_aggregate:
+        if set(policy["repositories"][REPO]["suites"]).intersection(
+                name for name, _ in SPLIT.values()):
+            pinned, reason = False, "legacy_aggregate_superseded_by_split_suites"
+        else:
+            pinned, reason = fleet_contract(
+                policy, source_digest=sources[".github/workflows/ci.yml"],
+                commit=head, hostname=host)
     jobs = []
     for item in manifest["jobs"]:
         key = item["workflow"] + "#" + item["id"]
@@ -208,12 +285,17 @@ def compile_plan(root: Path = ROOT, policy: dict | None = None,
             if set(item["events"]) != {"push", "pull_request", "workflow_dispatch"}:
                 raise Hold("ordinary_local_event_contract_changed")
             required_step = ORDINARY[key]
-            if pinned:
-                route = "existing-local-fleet"
-                suite = "linux-node24"
-                why = reason
-            else:
-                why = reason
+            why = reason
+            if pinned and legacy_aggregate:
+                route, suite = "existing-local-fleet", "linux-node24"
+            elif pinned:
+                try:
+                    validate_split_suite(policy, key)
+                except Hold as exc:
+                    why = str(exc)
+                else:
+                    route, suite = "existing-local-fleet", SPLIT[key][0]
+                    why = "ready_for_existing_fleet_admission_not_execution_proof"
         elif cls == "ordinary":
             raise Hold("unmapped_ordinary_job_requires_explicit_adapter")
         jobs.append({
@@ -229,6 +311,7 @@ def compile_plan(root: Path = ROOT, policy: dict | None = None,
     return {
         "schema": "clawsweeper.direct-local-plan.v1",
         "repo": REPO, "source_commit": head, "hostname": host,
+        "routing_mode": "legacy_aggregate" if legacy_aggregate else "distinct",
         "owner": "existing local-ci fleet; no second executor",
         "source_verified": True,
         "provider_actions_dispatched": False,

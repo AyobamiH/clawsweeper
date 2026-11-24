@@ -44,7 +44,7 @@ class DirectLocalWorkflowTests(unittest.TestCase):
         }
 
     def test_entire_88_job_inventory_is_covered_by_one_owner(self):
-        result = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web")
+        result = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web", legacy_aggregate=True)
         self.assertEqual(result["summary"]["workflows"], 41)
         self.assertEqual(result["summary"]["jobs"], 88)
         self.assertEqual(result["summary"]["classes"], direct.EXPECTED_CLASS_COUNTS)
@@ -56,7 +56,7 @@ class DirectLocalWorkflowTests(unittest.TestCase):
         self.assertEqual(len({j["key"] for j in result["jobs"]}), 88)
 
     def test_existing_fleet_runs_both_ordinary_jobs_as_one_pinned_suite(self):
-        result = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web")
+        result = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web", legacy_aggregate=True)
         ready = [j for j in result["jobs"] if j["route"] == "existing-local-fleet"]
         self.assertEqual({j["key"] for j in ready}, set(direct.ORDINARY))
         self.assertEqual({j["suite"] for j in ready}, {"linux-node24"})
@@ -65,20 +65,20 @@ class DirectLocalWorkflowTests(unittest.TestCase):
 
     def test_source_sha_cannot_be_substituted_for_local_tree_head(self):
         with self.assertRaises(Hold):
-            direct.compile_plan(ROOT, self.safe_policy(), commit="d" * 40, hostname="web")
+            direct.compile_plan(ROOT, self.safe_policy(), commit="d" * 40, hostname="web", legacy_aggregate=True)
 
     def test_extra_execution_command_cannot_be_smuggled_into_existing_fleet(self):
         p = self.safe_policy()
         p["repositories"][direct.REPO]["suites"]["linux-node24"]["steps"].append(
             {"name": "unreviewed", "command": "curl https://example.com", "timeout": 10}
         )
-        result = direct.compile_plan(ROOT, p, commit=self.head, hostname="web")
+        result = direct.compile_plan(ROOT, p, commit=self.head, hostname="web", legacy_aggregate=True)
         self.assertEqual(result["summary"]["mapped_to_existing_fleet"], 0)
 
     def test_stale_live_fleet_source_pin_holds_ordinary_jobs(self):
         p = self.safe_policy()
         p["repositories"][direct.REPO]["contract"] = "0" * 64
-        result = direct.compile_plan(ROOT, p, commit=self.head, hostname="web")
+        result = direct.compile_plan(ROOT, p, commit=self.head, hostname="web", legacy_aggregate=True)
         self.assertEqual(result["summary"]["mapped_to_existing_fleet"], 0)
         self.assertEqual(result["summary"]["held_for_existing_fleet_source_pin"], 2)
         self.assertEqual(len([j for j in result["jobs"] if j["route"] == "held"]), 88)
@@ -90,7 +90,7 @@ class DirectLocalWorkflowTests(unittest.TestCase):
         ):
             p = self.safe_policy()
             p["repositories"][direct.REPO].update(mutation)
-            d = direct.compile_plan(ROOT, p, commit=self.head, hostname=hostname)
+            d = direct.compile_plan(ROOT, p, commit=self.head, hostname=hostname, legacy_aggregate=True)
             self.assertEqual(d["summary"]["mapped_to_existing_fleet"], 0)
 
     def test_source_only_manifest_never_grants_execution(self):
@@ -101,15 +101,15 @@ class DirectLocalWorkflowTests(unittest.TestCase):
     def test_missing_sparse_command_and_unpinned_image_hold(self):
         p = self.safe_policy()
         p["repositories"][direct.REPO]["suites"]["linux-node24"]["steps"].pop()
-        d = direct.compile_plan(ROOT, p, commit=self.head, hostname="web")
+        d = direct.compile_plan(ROOT, p, commit=self.head, hostname="web", legacy_aggregate=True)
         self.assertEqual(d["summary"]["mapped_to_existing_fleet"], 0)
         p = self.safe_policy()
         p["repositories"][direct.REPO]["suites"]["linux-node24"]["image"] = "latest"
-        d = direct.compile_plan(ROOT, p, commit=self.head, hostname="web")
+        d = direct.compile_plan(ROOT, p, commit=self.head, hostname="web", legacy_aggregate=True)
         self.assertEqual(d["summary"]["mapped_to_existing_fleet"], 0)
 
     def test_secrets_review_codeql_e2e_windows_never_become_generic_validation(self):
-        d = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web")
+        d = direct.compile_plan(ROOT, self.safe_policy(), commit=self.head, hostname="web", legacy_aggregate=True)
         for job in d["jobs"]:
             if job["class"] != "ordinary":
                 self.assertEqual(job["route"], "held", job["key"])

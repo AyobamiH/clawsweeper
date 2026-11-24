@@ -24,61 +24,26 @@ import direct_local_event_admission as events
 import direct_local_workflow as router
 from estate_policy import Hold
 
-SPLIT = {
-    ".github/workflows/ci.yml#check": ("linux-node24-claw-check", "pnpm run check"),
-    ".github/workflows/ci.yml#sparse-repair-builds": (
-        "linux-node24-claw-sparse", "pnpm run test:workflow-sparse-checkout"),
-}
-SETUP = (
-    ("Workflow semantic validation",
-     """actionlint -shellcheck= -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml"""),
-    ("Pinned pnpm dependency install", "pnpm install --frozen-lockfile"),
-)
-TERMINAL_NAME = {
-    ".github/workflows/ci.yml#check": "Full repository validation",
-    ".github/workflows/ci.yml#sparse-repair-builds": "Sparse repair checkout smoke",
-}
+SPLIT = router.SPLIT
+SETUP = router.SETUP
+TERMINAL_NAME = router.TERMINAL_NAME
 
 
 def _split_policy(policy: dict, intents: list[dict]) -> list[dict]:
-    """Review both definition-specific policy suites, even for a main push."""
+    """Revalidate each authenticated definition against its own exact suite."""
     cfg = policy["repositories"][router.REPO]
-    base = cfg["suites"]["linux-node24"]
-    if (not isinstance(base, dict) or base.get("node") != "24"
-            or not isinstance(base.get("image"), str)
-            or not router.HEX64.fullmatch(base["image"].removeprefix("sha256:"))
-            or not base["image"].startswith("sha256:")
-            or any(type(base.get(field)) is not int or base[field] < 1
-                   for field in ("cpus", "memory_mib", "pids", "writable_mib"))
-            or not isinstance(base.get("execution_environment_revision"), str)
-            or not base["execution_environment_revision"]):
-        raise Hold("base_ordinary_sandbox_profile_untrusted")
-    if set(SPLIT) != set(router.ORDINARY):
-        raise Hold("ordinary_split_source_mapping_changed")
-    profiles = {}
-    for definition, (suite_name, final_cmd) in SPLIT.items():
-        spec = cfg["suites"].get(suite_name)
-        if not isinstance(spec, dict):
-            raise Hold("independent_definition_fleet_suite_not_installed")
-        # Require the same immutable image and resource boundaries as the
-        # existing tested aggregate profile. No mutable commands/credentials.
-        fields = ("node", "image", "cpus", "memory_mib", "pids",
-                  "writable_mib", "execution_environment_revision")
-        if (set(spec) != {*fields, "steps"}
-                or any(spec.get(field) != base.get(field) for field in fields)):
-            raise Hold("independent_definition_resource_or_image_drift")
-        expected_steps = (*SETUP, (TERMINAL_NAME[definition], final_cmd))
-        steps = spec.get("steps")
-        if (not isinstance(steps, list) or len(steps) != 3
-                or any(not isinstance(step, dict)
-                       or set(step) != {"name", "command", "timeout"}
-                       or step.get("name") != name
-                       or step.get("command") != command
-                       or type(step.get("timeout")) is not int
-                       or not 1 <= step["timeout"] <= 1800
-                       for step, (name, command) in zip(steps, expected_steps))):
-            raise Hold("independent_definition_command_contract_drift")
-        profiles[definition] = {
+    keys = [item["job"] for item in intents]
+    if not keys or len(keys) != len(set(keys)) or not set(keys) <= set(SPLIT):
+        raise Hold("invalid_authenticated_ordinary_split_intents")
+    profiles = []
+    for item in intents:
+        definition = item["job"]
+        suite_name, final = SPLIT[definition]
+        if ("suite" in item and item["suite"] != suite_name
+                or "required_step" in item and item["required_step"] != final):
+            raise Hold("invalid_authenticated_ordinary_split_intents")
+        spec = router.validate_split_suite(policy, definition)
+        profiles.append({
             "workflow_job": definition,
             "suite": suite_name,
             "policy": hashlib.sha256(json.dumps({
@@ -86,11 +51,8 @@ def _split_policy(policy: dict, intents: list[dict]) -> list[dict]:
                 "contract": cfg["contract"], "image": policy["image"],
                 "node_versions": policy["node_versions"],
             }, sort_keys=True).encode()).hexdigest(),
-        }
-    keys = [item["job"] for item in intents]
-    if not keys or len(keys) != len(set(keys)) or not set(keys) <= set(SPLIT):
-        raise Hold("invalid_authenticated_ordinary_split_intents")
-    return [profiles[name] for name in keys]
+        })
+    return profiles
 
 
 def propose_split_fleet_policy(*, checkout: Path, policy: dict,
@@ -104,7 +66,12 @@ def propose_split_fleet_policy(*, checkout: Path, policy: dict,
     if not isinstance(policy, dict) or not isinstance(policy.get("repositories"), dict):
         raise Hold("invalid_existing_fleet_policy")
     plan = router.compile_plan(checkout, policy, commit=commit, hostname=hostname)
-    if plan["summary"]["mapped_to_existing_fleet"] != 2:
+    # Migration validates the old aggregate preimage, not the new default
+    # split routing result (an aggregate-only policy intentionally maps zero).
+    enrolled, _ = router.fleet_contract(
+        policy, source_digest=router.sha256(checkout / ".github/workflows/ci.yml"),
+        commit=plan["source_commit"], hostname=hostname)
+    if not enrolled:
         raise Hold("source_is_not_enrolled_for_existing_fleet")
     cfg = policy["repositories"][router.REPO]
     suites = cfg["suites"]
@@ -188,15 +155,20 @@ def claim_distinct_existing_fleet_jobs(
         key_digest = hashlib.sha256(
             (router.REPO + "\n" + delivery_id.lower()).encode("ascii")).hexdigest()
         key = "direct-local-distinct:" + key_digest
-        legacy_key = "direct-local:" + key_digest
+        # Historical aggregate claims used a literal backslash-n delimiter.
+        # Check both encodings so a legacy delivery can never become two jobs.
+        legacy_keys = ("direct-local:" + key_digest,
+                       "direct-local:" + hashlib.sha256(
+                           (router.REPO + "\\n" + delivery_id.lower()).encode("ascii")
+                       ).hexdigest())
         uri = (root / "fleet.sqlite3").as_uri() + "?mode=rw"
         with sqlite3.connect(uri, uri=True, timeout=5, isolation_level=None) as db:
             db.row_factory = sqlite3.Row
             fleet._queue_schema(db)
             try:
                 db.execute("BEGIN IMMEDIATE")
-                if db.execute("SELECT 1 FROM observations WHERE key=?",
-                              (legacy_key,)).fetchone():
+                if db.execute("SELECT 1 FROM observations WHERE key IN (?,?)",
+                              legacy_keys).fetchone():
                     raise Hold("legacy_aggregate_delivery_identity_collision")
                 if db.execute(
                     "SELECT 1 FROM jobs WHERE repo=? AND sha=? AND suite=?",
